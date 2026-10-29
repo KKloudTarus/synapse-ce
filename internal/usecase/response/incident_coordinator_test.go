@@ -78,11 +78,11 @@ func seededIncidentService(t *testing.T, now time.Time) *incidentuc.Service {
 func TestIncidentCoordinatorPersistsRequestBeforeApplyAndVerifiedProvenance(t *testing.T) {
 	now := time.Unix(2_000_000, 0).UTC()
 	incidents := seededIncidentService(t, now)
-	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()}
+	target := engagement.Target{Kind: engagement.TargetProcess, Value: action.Target.String()}
 	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: action.Target}
 	provenance := VerificationProvenance{
 		ActionID: action.ID, EngagementID: "eng-1", ActionDigest: responseActionDigest(action), Target: fingerprint,
@@ -139,11 +139,11 @@ func TestIncidentCoordinatorPersistsRequestBeforeApplyAndVerifiedProvenance(t *t
 func TestIncidentCoordinatorDoesNotAppendRequestWhenActionPreparationFails(t *testing.T) {
 	now := time.Unix(2_000_000, 0).UTC()
 	incidents := seededIncidentService(t, now)
-	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()}
+	target := engagement.Target{Kind: engagement.TargetProcess, Value: action.Target.String()}
 	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: action.Target}
 	prepareErr := errors.New("action store unavailable")
 	fake := &fakeIncidentResponseApplier{
@@ -179,8 +179,8 @@ func TestIncidentCoordinatorRejectsIncidentBindingViolationsWithoutSideEffects(t
 		target      shared.ID
 		fingerprint responsesaga.TargetFingerprint
 	}{
-		{"process wrong asset", rdom.KindStopProcess, "process-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-2", ProcessEntityID: "process-1"}},
-		{"process wrong entity", rdom.KindStopProcess, "process-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-2"}},
+		{"process wrong asset", rdom.KindStopProcess, "pe_11111111111111111111111111111111", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-2", ProcessEntityID: "pe_11111111111111111111111111111111"}},
+		{"process wrong entity", rdom.KindStopProcess, "pe_11111111111111111111111111111111", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_22222222222222222222222222222222"}},
 		{"host wrong asset", rdom.KindIsolateHost, "asset-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintHost, HostID: "asset-2", NetpolGeneration: 1}},
 		{"file unsupported", rdom.KindQuarantineFile, "file-1", responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintFile, FilePath: "/tmp/file", FileHash: "hash"}},
 	}
@@ -200,7 +200,11 @@ func TestIncidentCoordinatorRejectsIncidentBindingViolationsWithoutSideEffects(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = coordinator.Apply(tctx(), "inc-1", action, engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()}, tc.fingerprint, "alice")
+			kind := engagement.TargetDomain
+			if action.Kind == rdom.KindStopProcess {
+				kind = engagement.TargetProcess
+			}
+			_, err = coordinator.Apply(tctx(), "inc-1", action, engagement.Target{Kind: kind, Value: action.Target.String()}, tc.fingerprint, "alice")
 			if !errors.Is(err, shared.ErrForbidden) {
 				t.Fatalf("Apply error = %v, want ErrForbidden", err)
 			}
@@ -215,11 +219,11 @@ func TestIncidentCoordinatorRejectsIncidentBindingViolationsWithoutSideEffects(t
 func TestIncidentCoordinatorReconcilesOnlyPersistedVerifiedResponse(t *testing.T) {
 	now := time.Unix(2_000_000, 0).UTC()
 	incidents := seededIncidentService(t, now)
-	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()}
+	target := engagement.Target{Kind: engagement.TargetProcess, Value: action.Target.String()}
 	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: action.Target}
 	fake := &fakeIncidentResponseApplier{
 		apply: func(context.Context, shared.ID, rdom.Action, engagement.Target, responsesaga.TargetFingerprint, string) (Record, error) {
@@ -264,11 +268,11 @@ func TestIncidentCoordinatorReconcilesOnlyPersistedVerifiedResponse(t *testing.T
 func TestIncidentCoordinatorRejectsMachineVerificationProvenance(t *testing.T) {
 	now := time.Unix(2_000_000, 0).UTC()
 	incidents := seededIncidentService(t, now)
-	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()}
+	target := engagement.Target{Kind: engagement.TargetProcess, Value: action.Target.String()}
 	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: action.Target}
 	fake := &fakeIncidentResponseApplier{
 		apply: func(context.Context, shared.ID, rdom.Action, engagement.Target, responsesaga.TargetFingerprint, string) (Record, error) {
@@ -295,11 +299,11 @@ func TestIncidentCoordinatorRejectsMachineVerificationProvenance(t *testing.T) {
 func TestIncidentCoordinatorDoesNotVerifyUnknownResponse(t *testing.T) {
 	now := time.Unix(2_000_000, 0).UTC()
 	incidents := seededIncidentService(t, now)
-	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("response-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()}
+	target := engagement.Target{Kind: engagement.TargetProcess, Value: action.Target.String()}
 	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: action.Target}
 	applyErr := errors.New("verification unavailable")
 	fake := &fakeIncidentResponseApplier{apply: func(context.Context, shared.ID, rdom.Action, engagement.Target, responsesaga.TargetFingerprint, string) (Record, error) {

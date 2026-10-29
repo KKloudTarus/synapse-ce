@@ -30,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
@@ -93,6 +94,79 @@ func fleetCall(h http.Handler, method, path, token string, body any, proto bool)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	return w
+}
+
+func TestFleetObserverRefusalOverHTTP(t *testing.T) {
+	h, agents, work := setupFleet(t)
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	client := fleetclient.New(server.URL, time.Second)
+	ctx := context.Background()
+	enrol := func() fleetclient.EnrolResponse {
+		t.Helper()
+		token, err := agents.MintEnrolToken(ctx, "operator", "default", time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		credential, err := client.Enrol(ctx, token, fleetclient.EnrolRequest{Name: "observer", Platform: "linux"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return credential
+	}
+	observer, other := enrol(), enrol()
+	now := time.Now().UTC()
+	request := fleetagent.ResponseObservationRequest{
+		ProtocolVersion: fleetagent.ResponseObservationProtocolVersion,
+		RequestID:       "observation", TenantID: "default", ObserverAgentID: shared.ID(observer.AgentID),
+		AssetID: "asset", EngagementID: "engagement", ActionID: "action",
+		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt", VerificationChallenge: strings.Repeat("b", 64),
+		ReceiptID: "receipt", ReceiptDigest: strings.Repeat("c", 64),
+		Target:      responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset", ProcessEntityID: "pe_11111111111111111111111111111111"},
+		AttemptedAt: now.Add(-time.Second), IssuedAt: now, NotAfter: now.Add(time.Minute),
+	}
+	order, err := work.Issue(ctx, "operator", fleetwork.IssueInput{
+		TenantID: request.TenantID, AssetID: request.AssetID, AgentID: request.ObserverAgentID,
+		Capability: workorder.CapabilityResponseObserve, AuthorizationID: request.EngagementID,
+		IdempotencyKey: "observe", NotAfter: request.NotAfter, TimeBucket: 1, ResponseObserve: &request,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := client.ClaimWork(ctx, observer.Token, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v, %v", claimed, err)
+	}
+	lease := claimed[0].LeaseID
+	assertStatus := func(token, leaseID string, want int) {
+		t.Helper()
+		err := client.SubmitResult(ctx, token, order.ID.String(), leaseID, "refused", "observer unavailable")
+		status, _, ok := fleetclient.HTTPStatus(err)
+		if !ok || status != want {
+			t.Fatalf("expected HTTP %d, got %v", want, err)
+		}
+	}
+	assertStatus(other.Token, lease, http.StatusNotFound)
+	assertStatus(observer.Token, "stale", http.StatusConflict)
+	for range 2 {
+		if err := client.SubmitResult(ctx, observer.Token, order.ID.String(), lease, "refused", "observer unavailable"); err != nil {
+			t.Fatalf("refusal/replay: %v", err)
+		}
+	}
+	stored, err := work.GetByID(ctx, "default", order.ID)
+	if err != nil || stored.State != workorder.StateRefused || stored.RefuseReason != "observer unavailable" || stored.ResponseResult != nil {
+		t.Fatalf("refusal must settle without execution proof: %+v, %v", stored, err)
+	}
+	ordinary, err := work.Issue(ctx, "operator", fleetwork.IssueInput{
+		TenantID: "default", AssetID: "asset", AgentID: request.ObserverAgentID, Capability: "scan.source",
+		AuthorizationID: "engagement", IdempotencyKey: "scan", NotAfter: request.NotAfter, TimeBucket: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SubmitResult(ctx, observer.Token, ordinary.ID.String(), lease, "refused", ""); err == nil {
+		t.Fatal("observer refusal must not broaden ordinary result handling")
+	}
 }
 
 func TestFleetAPIEndToEnd(t *testing.T) {
@@ -194,7 +268,7 @@ func TestFleetAPIEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	action, err := rdom.NewAction("response-action", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("response-action", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,9 +281,9 @@ func TestFleetAPIEndToEnd(t *testing.T) {
 		ProtocolVersion: fleetagent.ResponseCommandProtocolVersion, CommandID: "response-order", TenantID: "default",
 		AgentID: agentID, AssetID: "as1", EngagementID: "eng1", Action: action, ActionDigest: actionDigest,
 		AttemptKey: "response-attempt", VerificationChallenge: strings.Repeat("a", 64),
-		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "process-1"},
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: "pe_11111111111111111111111111111111"},
 		Target: responsesaga.TargetFingerprint{
-			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "as1", ProcessEntityID: "process-1",
+			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "as1", ProcessEntityID: "pe_11111111111111111111111111111111",
 		},
 		IssuedAt: time.Now().Add(-time.Minute), NotAfter: responseExpiry, SigningKeyID: evidence.KeyFingerprint(public),
 	}

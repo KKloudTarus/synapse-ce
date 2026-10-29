@@ -5,10 +5,10 @@ import { useRequestIdempotency } from '../../../hooks/useRequestIdempotency'
 import { useRetestSource } from '../../../hooks/useRetestSource'
 import { RetestSourceChoice } from '../../../components/synapse/RetestSourceChoice'
 import { kindLabel } from '../../../lib/format'
+import { CREATE_SCOPE_KINDS, PROCESS_SCOPE_HINT } from '../../../lib/scopeTargets'
 import type { AssessmentCycleSummary, BusinessAsset, Engagement, Project, ScopeTarget } from '../../../lib/types'
 import { Select } from '../../../components/ui'
 
-const KINDS = ['repo', 'domain', 'host', 'url', 'image', 'cidr']
 const MAX_SOURCE_BYTES = 512 * 1024 * 1024
 type SourceMode = 'linked' | 'upload'
 type CreationKind = SourceMode | 'retest'
@@ -125,7 +125,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
     })),
   ], [assets])
 
-  const kindOptions = useMemo(() => KINDS.map((kind) => ({
+  const kindOptions = useMemo(() => CREATE_SCOPE_KINDS.map((kind) => ({
     value: kind,
     label: kindLabel(kind),
   })), [])
@@ -421,37 +421,41 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
             {sourceMode === 'linked' ? (
               <div className="space-y-2.5">
                 {scope.map((row, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <Select
-                      disabled={submitting}
-                      value={row.kind}
-                      onValueChange={(val) => setRow(index, { kind: val })}
-                      ariaLabel={`Target kind for row ${index + 1}`}
-                      options={kindOptions}
-                      className="h-10 w-32 shrink-0 border-primary bg-primary shadow-xs"
-                    />
-
-                    <input
-                      type="text"
-                      disabled={submitting}
-                      value={row.value}
-                      onChange={(e) => setRow(index, { value: e.target.value })}
-                      placeholder="/path/to/repo or app.acme.io"
-                      aria-label={`Target value for row ${index + 1}`}
-                      className="h-10 flex-1 font-mono rounded-lg border border-primary bg-primary px-3.5 py-2 text-sm text-primary shadow-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-
-                    {scope.length > 1 && (
-                      <button
-                        type="button"
+                  <div key={index}>
+                    <div className="flex items-center gap-2">
+                      <Select
                         disabled={submitting}
-                        onClick={() => setScope((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}
-                        aria-label={`Remove target row ${index + 1}`}
-                        className="flex size-10 items-center justify-center rounded-lg text-tertiary transition hover:bg-secondary hover:text-utility-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Trash01 className="size-4" />
-                      </button>
-                    )}
+                        value={row.kind}
+                        onValueChange={(val) => setRow(index, { kind: val })}
+                        ariaLabel={`Target kind for row ${index + 1}`}
+                        options={kindOptions}
+                        className="h-10 w-32 shrink-0 border-primary bg-primary shadow-xs"
+                      />
+
+                      <input
+                        type="text"
+                        disabled={submitting}
+                        value={row.value}
+                        onChange={(e) => setRow(index, { value: e.target.value })}
+                        placeholder={row.kind === 'process' ? 'pe_ followed by 32 lowercase hex characters' : '/path/to/repo or app.acme.io'}
+                        aria-label={`Target value for row ${index + 1}`}
+                        aria-describedby={row.kind === 'process' ? `process-scope-hint-${index}` : undefined}
+                        className="h-10 flex-1 font-mono rounded-lg border border-primary bg-primary px-3.5 py-2 text-sm text-primary shadow-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+
+                      {scope.length > 1 && (
+                        <button
+                          type="button"
+                          disabled={submitting}
+                          onClick={() => setScope((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}
+                          aria-label={`Remove target row ${index + 1}`}
+                          className="flex size-10 items-center justify-center rounded-lg text-tertiary transition hover:bg-secondary hover:text-utility-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash01 className="size-4" />
+                        </button>
+                      )}
+                    </div>
+                    {row.kind === 'process' && <p id={`process-scope-hint-${index}`} className="mt-1 text-xs text-tertiary">{PROCESS_SCOPE_HINT}</p>}
                   </div>
                 ))}
 

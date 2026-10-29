@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
@@ -17,20 +18,25 @@ import (
 )
 
 type fakeResponseSvc struct {
-	applied     rdom.Action
-	appTarget   engagement.Target
-	fingerprint responsesaga.TargetFingerprint
-	approver    string
-	rec         rdom.Record
-	applyErr    error
-	decideErr   error
-	revertErr   error
-	decided     shared.ID
-	reviewer    string
-	approved    bool
-	reason      string
-	reverted    shared.ID
-	listState   rdom.State
+	approvalState agent.ApprovalState
+	applied       rdom.Action
+	appTarget     engagement.Target
+	fingerprint   responsesaga.TargetFingerprint
+	approver      string
+	rec           rdom.Record
+	applyErr      error
+	decideErr     error
+	revertErr     error
+	decided       shared.ID
+	reviewer      string
+	approved      bool
+	reason        string
+	reverted      shared.ID
+	listState     rdom.State
+}
+
+func (f *fakeResponseSvc) ApprovalState(context.Context, responseuc.Record) (agent.ApprovalState, error) {
+	return f.approvalState, nil
 }
 
 func (f *fakeResponseSvc) DryRun(action rdom.Action) ([]responseuc.PlanStep, error) {
@@ -157,7 +163,7 @@ func TestPlanResponseRejectsUnknownKind(t *testing.T) {
 
 func TestApplyResponsePassesTheServerMintedActionThroughTheGate(t *testing.T) {
 	rt, fake := responseRouter(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/blueteam/engagements/eng-1/response/apply", strings.NewReader(`{"kind":"stop_process","target":"asset-9","target_kind":"ip","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blueteam/engagements/eng-1/response/apply", strings.NewReader(`{"kind":"stop_process","target":"pe_11111111111111111111111111111111","target_kind":"process","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"pe_11111111111111111111111111111111"}}`))
 	req.SetPathValue("id", "eng-1")
 	rec := httptest.NewRecorder()
 	rt.applyResponse(rec, req)
@@ -165,13 +171,13 @@ func TestApplyResponsePassesTheServerMintedActionThroughTheGate(t *testing.T) {
 		t.Fatalf("apply: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 	// The action id is server-minted, never taken from the client.
-	if fake.applied.ID != "act-1" || fake.applied.Kind != rdom.KindStopProcess || fake.applied.Target != "asset-9" {
+	if fake.applied.ID != "act-1" || fake.applied.Kind != rdom.KindStopProcess || fake.applied.Target != "pe_11111111111111111111111111111111" {
 		t.Fatalf("applied action = %+v", fake.applied)
 	}
-	if fake.appTarget.Value != "asset-9" || fake.appTarget.Kind != engagement.TargetIP {
+	if fake.appTarget.Value != "pe_11111111111111111111111111111111" || fake.appTarget.Kind != engagement.TargetProcess {
 		t.Fatalf("apply target = %+v", fake.appTarget)
 	}
-	if fake.fingerprint.Kind != responsesaga.FingerprintProcess || fake.fingerprint.ProcessAssetID != "asset-9" || fake.fingerprint.ProcessEntityID != "asset-9" {
+	if fake.fingerprint.Kind != responsesaga.FingerprintProcess || fake.fingerprint.ProcessAssetID != "asset-9" || fake.fingerprint.ProcessEntityID != "pe_11111111111111111111111111111111" {
 		t.Fatalf("apply fingerprint = %+v", fake.fingerprint)
 	}
 	var body responseRecordDTO
@@ -208,7 +214,7 @@ func TestApplyResponsePendingApprovalIs202(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.ID != "act-1" || body.State != "pending" {
+	if body.ID != "act-1" || body.State != "pending" || body.ApprovalState != "pending" {
 		t.Fatalf("202 body must carry the server-minted pending id: %+v", body)
 	}
 }
@@ -217,7 +223,7 @@ func TestApplyResponsePendingVerificationIs202(t *testing.T) {
 	rt, fake := responseRouter(t)
 	fake.rec.Verification = rdom.VerificationPending
 	fake.applyErr = responseuc.ErrVerificationPending
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/blueteam/engagements/eng-1/response/apply", strings.NewReader(`{"kind":"stop_process","target":"asset-9","target_kind":"ip","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"asset-9"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blueteam/engagements/eng-1/response/apply", strings.NewReader(`{"kind":"stop_process","target":"pe_11111111111111111111111111111111","target_kind":"process","fingerprint":{"kind":"process","process_asset_id":"asset-9","process_entity_id":"pe_11111111111111111111111111111111"}}`))
 	req.SetPathValue("id", "eng-1")
 	rec := httptest.NewRecorder()
 	rt.applyResponse(rec, req)
@@ -358,5 +364,47 @@ func TestRevertResponsePendingApprovalIs202(t *testing.T) {
 	}
 	if body.ID != "act-1" {
 		t.Fatalf("202 body must carry the original response id: %+v", body)
+	}
+}
+
+func TestResponseRecordExposesDurableAuthorizationBinding(t *testing.T) {
+	const entity = "pe_11111111111111111111111111111111"
+	action, err := rdom.NewAction("process-action", rdom.KindStopProcess, entity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-9", ProcessEntityID: entity}
+	record := responseuc.Record{Action: action, AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: entity}, TargetFingerprint: fingerprint, SubmittedBy: "submitter", ReversalRequestedBy: "reversal-requester", State: rdom.StateApplied}
+	data, err := json.Marshal(toResponseRecordDTO(record))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dto responseRecordDTO
+	if err := json.Unmarshal(data, &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.Target != entity || dto.TargetKind != "process" || dto.Fingerprint.targetFingerprint() != fingerprint || dto.SubmittedBy != "submitter" || dto.ReversalRequestedBy != "reversal-requester" {
+		t.Fatalf("lost durable binding: %+v", dto)
+	}
+}
+
+func TestListResponseUsesAuthoritativeApprovalState(t *testing.T) {
+	rt, fake := responseRouter(t)
+	fake.rec.State = rdom.StateApplied
+	fake.rec.ReversalRequestedBy = "alice"
+	for _, state := range []agent.ApprovalState{agent.ApprovalDenied, agent.ApprovalApproved, agent.ApprovalPending} {
+		fake.approvalState = state
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/blueteam/response?state=applied", nil)
+		rec := httptest.NewRecorder()
+		rt.listResponses(rec, req)
+		var body struct {
+			Responses []responseRecordDTO `json:"responses"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 || len(body.Responses) != 1 || body.Responses[0].ApprovalState != string(state) {
+			t.Fatalf("approval projection %s: %s", state, rec.Body.String())
+		}
 	}
 }

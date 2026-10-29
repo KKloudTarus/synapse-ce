@@ -1,0 +1,752 @@
+{
+  "captured_at": "2026-10-29T12:04:27.015620+00:00",
+  "scope": "Actual local governed process stop and best-effort restart; real Slack source/outbox/worker/native link",
+  "base_head": "4974bf36df8aa13d9bafaf0127e578b7d6012e07",
+  "source_file_hashes": {
+    ".github/workflows/ebpf-compat.yml": "329843ec212e263ff48ebf85893ee0072ae76afb8c047a5c3fffe9985d736c80",
+    "api/openapi.yaml": "85ab5f5db305dc8e800ebc0821f527a7798f9157468c7a04f5a5908a97a1d8ce",
+    "cmd/synapse-agent/main.go": "1b40ed1ad54dbe0d96c127f53a5f3611584dce60c319a86f80341934808c955d",
+    "cmd/synapse-agent/response_observer.go": "bcbdb87ec08da1a07140bc81a79c9b3234045ee34ad7d0e02d99d795bfaa4594",
+    "cmd/synapse-api/main.go": "bde42381805034ce27c67c463fd69d1a6737ff4cb22e6573e08cd6c1e2e893d9",
+    "internal/adapter/httpapi/engagement_handler_test.go": "4f0b752fd04fe6cb97cd785f917dcf405980d82726e6d8122783bcc4b3657f14",
+    "internal/adapter/httpapi/fleet_handler.go": "fab99f8b5412d6a7b9b3abb5247213e3ce6f25e08f0afcbfeb8690916cee194a",
+    "internal/adapter/httpapi/fleet_handler_test.go": "326663e86d0936e9afd308eac4f94372d48303ddd5a4df1c3b0c8e92fb5bb04a",
+    "internal/adapter/httpapi/fleet_response_verification_handler_test.go": "bec3c462a05a845cf77c75db41916a6e777737ba7dbe860ce11d02c9281bb864",
+    "internal/adapter/httpapi/response_handler.go": "d5747e3f807fa96a024aa1423d7b2d5dedf7941318d31e4978c81353836655bd",
+    "internal/adapter/httpapi/response_handler_test.go": "3261a56d907dbedbeeb11d03f91d484e783fa1d332abbec1a22ea23ce243467c",
+    "internal/composition/responseobserver/responseobserver_test.go": "2c37f99d9969448b39370adc1029a39113df15607f2436e070bee10229824a68",
+    "internal/domain/engagement/normalize.go": "54bff33807c917133b5e77ac68a849374f1c530d02c42b57fcfeba9a537402e5",
+    "internal/domain/engagement/process_scope_test.go": "8f5238760167ea40cac85516fbc9d20cdadca44ec86ec43cfc8b733f82d1ca05",
+    "internal/domain/engagement/scope.go": "95cf4fac25fa5a7163deffd93f3e072c39a1e3bf76a22f995362b4464fa9db81",
+    "internal/domain/fleetagent/response_command.go": "0fcff84aaaade732db337085317d3deb8e184e77e42aead64534e520616c2889",
+    "internal/domain/fleetagent/response_command_test.go": "1725beb0793f84959b53c5ce76cdb9d3831842fb5d2981134bf5ab47dd6f205a",
+    "internal/domain/fleetagent/response_observation_test.go": "7e0da97e992d8d59a64621fb070c81f77758069e2656160d5ab7a0a4155089ac",
+    "internal/domain/fleetagent/response_target_evidence_receipt.go": "b4176d700cae3c7d452faa9bb65893f0b606bd8317c4862a0bbb7fa4994f6213",
+    "internal/domain/fleetagent/response_target_evidence_receipt_test.go": "c4ba72e6db3959741af47008f6bb80a20db2fb18be199c9cb7fcdf076783d285",
+    "internal/domain/fleetagent/response_verification_test.go": "c37aff3b40cf5b47594f8c0838b3ac2376a86d6bdbf0bbcf84f5c1ed4a340d7d",
+    "internal/domain/incident/incident_test.go": "41d45552b00487c9b4b36bea038d483cac5f1e0faa4aef3dce5772ccac085671",
+    "internal/domain/response/target.go": "8445eacafa57020dc0dca49e4d4c00d9fe2deea0411862612b75ba86ee07fa1e",
+    "internal/domain/response/target_test.go": "cbd3790a78d67e7434ee5ed1a3f9dca76cf7050a4e8c03c89a0cbf45861fe9df",
+    "internal/domain/responsesaga/saga_test.go": "562495ce2f4b989f128f0774a9e10b4f558d64d175d9d29bc7344ef78e6963fe",
+    "internal/domain/responsesaga/target.go": "913ef1c26ec03845225eaae967f000429a21bd27069f1f39f4610a37bdd9d132",
+    "internal/domain/telemetry/entityid.go": "39a08d5ed5bb5bae7610313b67a1a2078bc4bbc93b84c536c3fd94f46c0da5c8",
+    "internal/domain/workorder/workorder.go": "0bd1445f6f4d02f3dd0fc7c0d6e5236f6f2323ee411fa7b9444fc40a43da3b9c",
+    "internal/infrastructure/ebpf/c/core_types.bpf.h": "628851f821a328f7288d603b160c630c1e7e107d77220170e28d6174bd6d3190",
+    "internal/infrastructure/ebpf/c/detect.bpf.h": "97b9b5f5387711f6b72b797914f5d4307807e29a89b4df1ce01a000b5a864431",
+    "internal/infrastructure/ebpf/c/exec.arm64.bpf.o": "a7c21e72811a482856e0c5acf2746f46e12eb31d1703d1702ae15d4076d011f6",
+    "internal/infrastructure/ebpf/c/exec.bpf.c": "59355fb4e8c33e88b507ec21ed8fe73664b490de6a2b3eaad3297c48a8539ca9",
+    "internal/infrastructure/ebpf/c/exec.bpf.o": "a7c21e72811a482856e0c5acf2746f46e12eb31d1703d1702ae15d4076d011f6",
+    "internal/infrastructure/ebpf/capabilities_linux.go": "d2f880cd29d2f89b2233efc32f1471881dbdc0832aba8b6d936362e231dbaedb",
+    "internal/infrastructure/ebpf/capabilities_linux_test.go": "3d9c59c7d15cb3358562ea8abc671f7def98e88e79160ae7314f632527a678ee",
+    "internal/infrastructure/ebpf/detect_decode_linux_test.go": "5efa03d3f5ffe185e949aa567c034448e2d263f5aef1b442423e43516ab19e0e",
+    "internal/infrastructure/ebpf/detect_linux.go": "a2946c88ac62c1cd31e6eb5845e3d5e78273a9e600dea44ee3ac9dffdffc26a6",
+    "internal/infrastructure/ebpf/detect_linux_test.go": "24f9c04fa45a569210d19293b50c71dced33c3fc2e0e164ac4042f1b3c90275c",
+    "internal/infrastructure/ebpf/objects_linux_test.go": "696d8dbd3dedc4fe42df87c7f088a066134bf6b979dc854510f34dece154df10",
+    "internal/infrastructure/fleetclient/client.go": "134b81557c5a9c8a07348276cf426a18de8eb0f4bed71e9aede278cb96b5ee87",
+    "internal/infrastructure/fleetclient/response_observer_state_test.go": "4ed204a666be4562bf1f4b23931bda78971954249c718147b84c0e8bd2ec9f70",
+    "internal/infrastructure/fleetclient/response_verification_test.go": "e9d2c50ffbbc3f6d17fe22165ef8443b349a764249de7a274d28785598ec6bbe",
+    "internal/infrastructure/persistence/memory/response_verification_store_test.go": "f97c6c99941488cec45e67fd1e5826c7d8158d22e85a8e831444b8d63b641ac6",
+    "internal/infrastructure/persistence/postgres/incident_event_repo_test.go": "1d1330bb35be9af531f81c69c107c85da9fac6748b75bcd32284461c37ed0449",
+    "internal/infrastructure/persistence/postgres/response_halt_lock.go": "35351d683105dd75e23f8086bd68c9d1d6269f8bcf8dada9f7a0b51d21520abd",
+    "internal/infrastructure/persistence/postgres/response_halt_lock_test.go": "ce2b0dadc4263e9668f54d12e710b42f4be3936d1b49e86c21922a8dcc19d6ec",
+    "internal/infrastructure/persistence/postgres/response_halt_writer.go": "bebf85515915aa67c6f357573796eed5fd9e90423c44e231c82ae6570ace00a4",
+    "internal/infrastructure/persistence/postgres/response_halt_writer_role_test.go": "5d89048216e9e636d7041957ae37e4b07ab86fa2e694389432e029cc3f6e6389",
+    "internal/infrastructure/persistence/postgres/response_repo.go": "9bb44b5d77331223ad0a4cd2381807b12dbdadac9c37c57c2c46873f4727aaf4",
+    "internal/infrastructure/persistence/postgres/response_verification_repo_test.go": "86c528f313bd46dc10fbc7197c76ce098706c0b2284e5c75c584fafb9657b606",
+    "internal/infrastructure/persistence/postgres/workorder_repo.go": "0f3ab8cc9ae065236ab291d583934595972d8d92664169b0e1c03afe0d94817c",
+    "internal/infrastructure/persistence/postgres/workorder_repo_test.go": "3cef796da62b8ca35f376a322d944a91e576a9d6ec732962b71e36c4cd8cadf8",
+    "internal/infrastructure/responseactuator/actuator.go": "8efe1e4c5ef95c276eb525310c1d24d05364fe31b9cab6b461b6f592cd3fc0e4",
+    "internal/infrastructure/responseactuator/actuator_test.go": "18a6c4597953e37e2e25edb699f0a772ce51b69aa5d45813ac31d2841db9fbbb",
+    "internal/infrastructure/responseactuator/registry_linux.go": "4803c3c816015e02debcc567c596d923d5441ed655f255a3555a1a0ab205f4c9",
+    "internal/infrastructure/responseactuator/registry_linux_test.go": "d3feee41e628de7a8b626e7caeaf4b2a89fb781f18d6692c8de3b0978153b95f",
+    "internal/infrastructure/responseactuator/registry_other.go": "fc634f2a639f4cb9528620ccd3657377cca9c48cede5b690f99f6d0bee436bfa",
+    "internal/infrastructure/responsefleet/executor.go": "5c83f0bd59a4ae0706698ac5ae40f851a492a47debcf1c36daeb260584ca91a5",
+    "internal/infrastructure/responsefleet/executor_test.go": "3b1046b287c9d711ea8e7af0e51c6edac75ed77462862c7379b90ea5b0dda239",
+    "internal/infrastructure/responsefleet/native_saga_linux_test.go": "81605a79e3188bca08749edaff952de99adbff43370f3a52b5588458833fbee1",
+    "internal/infrastructure/responsefleet/observer.go": "c90bae2eb29596d5d375a5f6f55f154580bbedcb41d804c21a7e0dee6b970a16",
+    "internal/infrastructure/responsefleet/observer_test.go": "89b362ed37de2232741031168616cdf576780dcafed2e29aa5dd70ef9928012f",
+    "internal/infrastructure/responsefleet/target_evidence_receipt.go": "a2eb11c3b53acd275a359059f8c212990f4d0630c302a45153af2e04c778ca17",
+    "internal/infrastructure/responsefleet/target_evidence_receipt_test.go": "e0d7a38d90973ba350d08c3df99ffb78a5013a54311194a73fca5cc3cbf9fa4f",
+    "internal/infrastructure/responsejournal/store_test.go": "9dee96fc9893e4fcd53a8912f4477294922d6cbaaa72bc76941fbd50dea30fcb",
+    "internal/infrastructure/responsekey/signer_test.go": "e4dff01f93ffceac9e34754d601db2a31348eab3719a5ff0e93d87194530db4a",
+    "internal/usecase/fleet/detect/engine.go": "b45e2a604df2b8a125db5b98b561fb0e3d6744005525a78e011d91309d81c51c",
+    "internal/usecase/fleet/detect/engine_test.go": "1f66b4ede03794dfcc1cbff62acc0d1f05a34f37e382d625d74451393bf20398",
+    "internal/usecase/fleet/responseexecute/service.go": "4e33fc3047669488fd4eae79150f102c5233cdc01cf94f691e1b3a9747739518",
+    "internal/usecase/fleet/responseexecute/service_test.go": "b9414434f922e4cd163b9340755a1c806f28ad1aab517bb3120f4bccc7063ba7",
+    "internal/usecase/fleet/responseobservation/service.go": "c7f54c039f9da2df1d3c31600ec0cefbdb18a16791258ca32afa33f0cf4a1017",
+    "internal/usecase/fleet/responseobservation/service_test.go": "c7131adc11b3819140f1f4435a39593c438a711c70a5746131d3823bf2b604d5",
+    "internal/usecase/fleet/responseverificationingest/service_test.go": "dd3cb0ba03e3029dba53b6863e6198e8cbd5eb4d2c1640560323a4268e004f89",
+    "internal/usecase/fleetwork/service_test.go": "61b604cb9fcf652e6cea3e40b73363c4e97ff7da71e9170b240a59ea289d101f",
+    "internal/usecase/ports/response_contracts.go": "0a0472ac793f6f10a9bc8c4ab86a6a9de4dc7ed97f9c6e713aa40733d4802e55",
+    "internal/usecase/response/approval_state.go": "a636c70546ed1813c80861ec67427318b2891d344baa6f96fb4a7f664d74ba3f",
+    "internal/usecase/response/approval_state_test.go": "617b35444761e68fb36ad3dbc561c85e20b4e924572068bfdc3f6750ed0533e1",
+    "internal/usecase/response/e2e_test.go": "27e8815852fc3c4438df8b4c8407112e0602ada3a0663804d5fe79582c8be6ca",
+    "internal/usecase/response/helpers.go": "4420056d86aa925018ce25d6ef21999c916ed23798420c661c20a4c586ec6e56",
+    "internal/usecase/response/incident_coordinator.go": "9fb4500155ad2859eded46a6557776edcef8bfccca8a388f688170f9aa7637d0",
+    "internal/usecase/response/incident_coordinator_test.go": "9eeb5b023f6ea0a32aca6464e7f1382524e959acba3f8c47fff91ec3517ffa56",
+    "internal/usecase/response/process_binding_test.go": "ec5f713cb8e8e365db3e8f3fab26f3b62c874c420306b7bc15cb5de2f0b7a089",
+    "internal/usecase/response/rollback.go": "221bd1db6ebaa7e17d7f647a4f2f317a0e411be609261feac845eed9dc7556a1",
+    "internal/usecase/response/service.go": "9bd73b1173742f02c1eb48ab0e5412d6e9183c46f0a84cb4656e9e25f25048e5",
+    "internal/usecase/response/service_test.go": "850f1f1f80100a30cd4e54050bfb944fe84be268478dc84435334dcbe27e7c4c",
+    "internal/usecase/response/telemetry_verifier.go": "18524a0ea47b6ea57eb985ac6e1c02933677cc2d748f441dfb421104695e46f3",
+    "internal/usecase/response/telemetry_verifier_test.go": "e7db63bb23cdc36570f6fa44e278f0590d13ebcd9fc1eb560fe7083e38e4c257",
+    "web/src/lib/api/blueteam.test.ts": "dab4360723268d94a86abb2d5815b73f07922374fa3e851a21f916cca8e4e702",
+    "web/src/lib/api/blueteam.ts": "9da39d3b4af9519d14b1b6d77071301c58609c406bf57f79241e332801b8b169",
+    "web/src/lib/api/index.ts": "78463ed1b207dc1472f2a8fec71318a4d80c6a7bb7cff790aa788f1c755f8d26",
+    "web/src/lib/scopeTargets.ts": "84727300d84f8f1015accdc08956776bb0c2b03c1d422d5faf9fa7a87e3a5ef9",
+    "web/src/pages/BlueTeam/ResponseOps.test.tsx": "a5f932883be5e52db21932fbdea3c8f2a4037817efddc693b6c3af24f74265a2",
+    "web/src/pages/BlueTeam/ResponseOps.tsx": "28f58a76dff6dc5f2b0cd1048ccc1eccbe9e26081ba40a6416f6df1b4eacfbc9",
+    "web/src/pages/EngagementDetail/SettingsTab.test.tsx": "3d0a21b351aadc512f771b89d50bdbc8eed34c029fb16df25e3e066fc01fc4f2",
+    "web/src/pages/EngagementDetail/SettingsTab.tsx": "b5729529303e813361ec4077f9da6e53cec12de6d7b33c0d6ab6850709eb29cf",
+    "web/src/pages/Engagements/components/CreateEngagementForm.test.tsx": "8d012363983e4ebf766c4607d1ca7a41da5cae12c8478f016db71ae54a28a4db",
+    "web/src/pages/Engagements/components/CreateEngagementForm.tsx": "3aaa00ec6bb2f7de856a6ef92e29e085e3a15a8db98c4e80a5cb436834c83a34",
+    "web/src/pages/Engagements/components/EngagementFilterBar.tsx": "95ecacc70a6dfd7bc10faa7bdd6236529b29cae91de1e33d46b9824e3b3bc5f0",
+    "web/src/pages/Engagements/types.ts": "85ff8a3cbd60dcf34bb67434dedf04d0ac54ecc86d9e518cc987873258f502b8"
+  },
+  "source_fingerprint": "cbbbe38e01104c81e2e69e1f9b262da9c856b29ca85738a1415ab2c080f12403",
+  "runtime_components": {
+    "api": {
+      "at": "2026-10-29T11:46:34.349177+00:00",
+      "binary_sha256": "e393623e6881394c280a4ebce1a1978f987cefaf79b9cf8f4c97d8a3a30b5b1e",
+      "api_instances": 1,
+      "agent_upgrade": false,
+      "role_grants_changed": false,
+      "cloud_operations": false
+    },
+    "initial_agents": {
+      "at": "2026-10-29T11:31:23.590695+00:00",
+      "binary_sha256": "05514a86c7b61f0f65517689c2ae3280b1d169ec4a0eb53df35b347f0d8e627e",
+      "agents": {
+        "executor": {
+          "same_credentials": true,
+          "active": true,
+          "binary_sha256": "05514a86c7b61f0f65517689c2ae3280b1d169ec4a0eb53df35b347f0d8e627e"
+        },
+        "observer": {
+          "same_credentials": true,
+          "active": true,
+          "binary_sha256": "05514a86c7b61f0f65517689c2ae3280b1d169ec4a0eb53df35b347f0d8e627e"
+        }
+      }
+    },
+    "upgraded_observer": {
+      "at": "2026-10-29T12:02:48.797054+00:00",
+      "observer_binary_sha256": "98e792018d8077d6b0b522a75fcb0013265fa9d6f141a82c6ec999c664b6898f",
+      "same_credentials_and_telemetry_key": true,
+      "observer_active": true,
+      "executor_restarted": false,
+      "cloud_operations": false
+    }
+  },
+  "ledger": {
+    "receipts": [
+      {
+        "attempt_key": "response-attempt:v1:5f1b8142643b92636aa5dae2c3cc639c5d1135bd01fbc4d2275ab7fbc05cc375",
+        "reversal": false,
+        "attempted_at": "2026-10-29T11:55:03.925878Z",
+        "window_until": "2026-10-29T11:55:22.120697Z",
+        "coverage_complete": true,
+        "timeline_complete": true,
+        "reasons": [
+          "complete"
+        ],
+        "timeline_entries": 1,
+        "coverage_windows": 6
+      },
+      {
+        "attempt_key": "response-attempt:v1:db65fd5bf7d80866ae949fe64e8c7b9f892a8890ac327502c55532eee7400913",
+        "reversal": true,
+        "attempted_at": "2026-10-29T12:00:48.28917Z",
+        "window_until": "2026-10-29T12:00:54.430927Z",
+        "coverage_complete": true,
+        "timeline_complete": true,
+        "reasons": [
+          "complete"
+        ],
+        "timeline_entries": 1,
+        "coverage_windows": 7
+      }
+    ],
+    "accepted_reports": [
+      {
+        "agent_id": "1e8669f5031a49173fb7d2bd263ebe84",
+        "attempt_key": "response-attempt:v1:5f1b8142643b92636aa5dae2c3cc639c5d1135bd01fbc4d2275ab7fbc05cc375",
+        "observed_at": "2026-10-29T11:58:29.339111+00:00",
+        "recorded_at": "2026-10-29T11:58:29.345268+00:00"
+      },
+      {
+        "agent_id": "1e8669f5031a49173fb7d2bd263ebe84",
+        "attempt_key": "response-attempt:v1:db65fd5bf7d80866ae949fe64e8c7b9f892a8890ac327502c55532eee7400913",
+        "observed_at": "2026-10-29T12:03:53.582431+00:00",
+        "recorded_at": "2026-10-29T12:03:53.588684+00:00"
+      }
+    ],
+    "rejections": null,
+    "actions": [
+      {
+        "id": "397d7d0bb2573f7e870e7e7e8a1be188",
+        "state": "reverted",
+        "verification": "succeeded",
+        "approved_by": "operator",
+        "updated_at": "2026-10-29T12:04:04.747471+00:00"
+      }
+    ],
+    "attempts": [
+      {
+        "idempotency_key": "response-attempt:v1:5f1b8142643b92636aa5dae2c3cc639c5d1135bd01fbc4d2275ab7fbc05cc375",
+        "is_reversal": false,
+        "state": "verified_succeeded",
+        "command_outcome": "applied",
+        "verification_outcome": "succeeded",
+        "affected_count": 1,
+        "already_applied": false,
+        "decided_by": "operator",
+        "executor_id": "control-plane:fleet-response-dispatcher",
+        "executor_agent_id": "a7eff692a91b3908a40aa167af99b05a",
+        "verifier_id": "control-plane:response-verifier",
+        "verification_evidence_id": "f0ff653c641924c32d73f00b142d08934286f9289c6ae8e822744732a943ba48",
+        "deadline_at": "2026-10-29T12:00:03.925878+00:00",
+        "terminal_reason": ""
+      },
+      {
+        "idempotency_key": "response-attempt:v1:db65fd5bf7d80866ae949fe64e8c7b9f892a8890ac327502c55532eee7400913",
+        "is_reversal": true,
+        "state": "rolled_back",
+        "command_outcome": "reversal_applied",
+        "verification_outcome": "succeeded",
+        "affected_count": 1,
+        "already_applied": false,
+        "decided_by": "operator",
+        "executor_id": "control-plane:fleet-response-dispatcher",
+        "executor_agent_id": "a7eff692a91b3908a40aa167af99b05a",
+        "verifier_id": "control-plane:response-verifier",
+        "verification_evidence_id": "df7c2774144e18608cc62a4931f0b4b3d22fd626c49126e34d48a11192805f52",
+        "deadline_at": "2026-10-29T12:05:48.28917+00:00",
+        "terminal_reason": ""
+      }
+    ],
+    "at": "2026-10-29T12:04:27.015620+00:00"
+  },
+  "provenance": [
+    {
+      "source_agent_id": "a7eff692a91b3908a40aa167af99b05a",
+      "source_host_id": "a7eff692a91b3908a40aa167af99b05a",
+      "replacement_process_entity_id": "pe_e74899b94aba41de79d31a2d5d62d872",
+      "original_attempted_at": "2026-10-29T11:55:03.925878Z",
+      "original_exit_occurred_at": "2026-10-29T11:55:22.120696Z",
+      "original_exit_entity_id": "pe_8e55f77379432538750c6c5c4ae90872",
+      "reversal_attempted_at": "2026-10-29T12:00:48.28917Z",
+      "replacement_timeline": [
+        {
+          "Kind": "process_exec",
+          "AssetID": "bac1141dbac0d604ad862ff3f34d14e4",
+          "EventID": "te_e84639a9207713afceae75af57af289d",
+          "Summary": "pid=6467 3",
+          "EntityID": "pe_e74899b94aba41de79d31a2d5d62d872",
+          "TenantID": "default",
+          "EntityKind": "process",
+          "OccurredAt": "2026-10-29T12:00:54.430926Z",
+          "SourceAgentID": "a7eff692a91b3908a40aa167af99b05a",
+          "SourceAgentSessionID": "as_da12bfe4c7d0d1173862c2c07bd6390b"
+        }
+      ]
+    }
+  ],
+  "guest": {
+    "at": "2026-10-29T12:04:00.460679+00:00",
+    "processes": [
+      {
+        "pid": 6395,
+        "exists": false
+      },
+      {
+        "pid": 6467,
+        "exists": true,
+        "exe": "/var/lib/synapse-synthetic-target/synthetic-target",
+        "cwd": "/var/lib/synapse-synthetic-target",
+        "uid_line": "Uid:\t65534\t65534\t65534\t65534"
+      }
+    ]
+  },
+  "notifications": {
+    "at": "2026-10-29T12:11:54.146176+00:00",
+    "action_id": "397d7d0bb2573f7e870e7e7e8a1be188",
+    "deliveries": [
+      {
+        "source_id": "397d7d0bb2573f7e870e7e7e8a1be188:applied",
+        "capture_version": 3,
+        "processed_at": "2026-10-29T11:55:53.568112+00:00",
+        "event_id": "a1be500a8159af38e8aa692c93a734be",
+        "event_type": "response.finished",
+        "outcome": "applied",
+        "target": "pe_8e55f77379432538750c6c5c4ae90872",
+        "source_event_data_equal": true,
+        "delivery_id": "9a4a5365c352ae5c640c6489403c8fba",
+        "channel_type": "slack",
+        "state": "delivered",
+        "attempts": 1,
+        "delivered_at": "2026-10-29T11:55:54.120548+00:00",
+        "response_code": 200,
+        "attempt_outcome": "delivered"
+      },
+      {
+        "source_id": "397d7d0bb2573f7e870e7e7e8a1be188:verified",
+        "capture_version": 3,
+        "processed_at": "2026-10-29T11:59:53.568355+00:00",
+        "event_id": "d81126be39d26685f7305f5e5d79816a",
+        "event_type": "response.finished",
+        "outcome": "verified",
+        "target": "pe_8e55f77379432538750c6c5c4ae90872",
+        "source_event_data_equal": true,
+        "delivery_id": "193b189c6323cbb4e5fa832b5a946caa",
+        "channel_type": "slack",
+        "state": "delivered",
+        "attempts": 1,
+        "delivered_at": "2026-10-29T11:59:54.926938+00:00",
+        "response_code": 200,
+        "attempt_outcome": "delivered"
+      },
+      {
+        "source_id": "397d7d0bb2573f7e870e7e7e8a1be188:reverted",
+        "capture_version": 3,
+        "processed_at": "2026-10-29T12:04:53.568381+00:00",
+        "event_id": "757994683ee46f73ce14d8e60468a324",
+        "event_type": "response.finished",
+        "outcome": "reverted",
+        "target": "pe_8e55f77379432538750c6c5c4ae90872",
+        "source_event_data_equal": true,
+        "delivery_id": "28e847961b78d37a0e7aa5af2bb14b68",
+        "channel_type": "slack",
+        "state": "delivered",
+        "attempts": 1,
+        "delivered_at": "2026-10-29T12:04:58.512559+00:00",
+        "response_code": 200,
+        "attempt_outcome": "delivered"
+      }
+    ],
+    "native_reverted_permalink": "https://jj-4qu2855.slack.com/archives/C0BJE2CPPQE/p1793275498366099",
+    "native_verified_permalink": "https://jj-4qu2855.slack.com/archives/C0BJE2CPPQE/p1793275194765919",
+    "native_reverted_link_clicked": true,
+    "console_after_login": "https://127.0.0.1:18449/blueteam/response",
+    "diagnostic_failed_message": "Separate rejected wrong-asset request 8eeaf043653c253190259d868625d5c9; not this verified operation"
+  },
+  "denials": {
+    "at": "2026-10-29T12:06:13.582572+00:00",
+    "cases": [
+      {
+        "case": "out_of_scope",
+        "status": 403,
+        "body": {
+          "error": "forbidden: target is not in the engagement scope",
+          "code": "permission_denied",
+          "request_id": "2927a26c-c156-4d64-a761-4f4b00f4136e",
+          "retryable": false
+        }
+      },
+      {
+        "case": "wrong_asset",
+        "status": 202,
+        "body": {
+          "approval_state": "pending",
+          "target_kind": "process",
+          "fingerprint": {
+            "kind": "process",
+            "process_asset_id": "c5d9a2985cea56f20761f0c6e1dc26a0",
+            "process_entity_id": "pe_8e55f77379432538750c6c5c4ae90872"
+          },
+          "submitted_by": "0ba4478096eb0e9ed2f1e424383b2c76",
+          "id": "8eeaf043653c253190259d868625d5c9",
+          "kind": "stop_process",
+          "target": "pe_8e55f77379432538750c6c5c4ae90872",
+          "state": "pending",
+          "approver": "0ba4478096eb0e9ed2f1e424383b2c76"
+        }
+      },
+      {
+        "case": "wildcard",
+        "status": 400,
+        "body": {
+          "error": "validation error: response action 74af1f3ce6248a960804027f00255e38 must be argv-only with no shell",
+          "code": "validation_failed",
+          "request_id": "8ea4c028-11b5-4fbd-9efb-1ce5028f30fe",
+          "retryable": false
+        }
+      },
+      {
+        "case": "consultant_cannot_approve",
+        "status": 403,
+        "body": {
+          "error": "insufficient permissions: this action requires the review capability",
+          "code": "permission_denied",
+          "request_id": "4a3d2c38-3f47-417f-9b9e-56f706929851",
+          "retryable": false
+        }
+      }
+    ],
+    "scope": "actual admission endpoint; dry-run planning is not authorization",
+    "wrong_asset_diagnostic_disposition": {
+      "status": 200,
+      "state": "cancelled",
+      "approved": false
+    },
+    "notes": "Wrong-asset submission is pending human approval; it was explicitly rejected. This does not claim that source-asset binding is checked before approval; execution binding has separate automated coverage."
+  },
+  "screenshots": {
+    "process-confirmed-console.png": "3692d896b6fd624ae7bb6aa4a54b183899d2a92444d97c96edeb3a8b402b3895",
+    "process-confirmed-slack-native.png": "4443c9a10f93a3209b49dd70c3a112dfb1d995917c39849c7edf8d567517104d",
+    "process-confirmed-native-link-console.png": "c0b99aebad3b7b071e4259dbc516bb188fb1557fd0acf8348bf0804a9fe0f51e"
+  },
+  "limits": [
+    "Loopback development API and two isolated local KVM guests; no production capacity or other OS/kernel proof",
+    "The local command/verification TTL is5m; claim lease remains2m",
+    "Original unsuccessful attempts are retained; no timed-out attempt was upgraded",
+    "Observer upgraded during reversal; executor kept running to retain restart descriptors",
+    "Native saga uses real kernel sensor/WAL with transport/coverage fixtures; deployed proof above uses real fleet transport/database",
+    "Wrong-asset diagnostic was pending then rejected; not a before-approval execution-binding denial claim",
+    "Only Slack native delivery for this source operation is newly claimed; prior provider matrices retain their scope"
+  ],
+  "follow_up_verification": {
+    "scope": "Corrections made after the deployed successful journey; does not reattribute historical runtime evidence",
+    "source_file_hashes": {
+      "internal/adapter/httpapi/fleet_handler.go": "1fc636210426bb865ade58cfc1c36afd7f52ae4aa4786e0bb99cdb7632dc3435",
+      "internal/adapter/httpapi/fleet_handler_test.go": "7fd560880f7c925566b98e93de2f75eb77ee1897e629c9d580060ed888c5d683",
+      "internal/infrastructure/persistence/postgres/workorder_repo.go": "0770856e4384cb414369d39eaca8b830bfd88e841789528aa2493abe6d1dd220",
+      "internal/infrastructure/persistence/postgres/workorder_repo_test.go": "7a5a61b0862c34f837caf5774833f54f9de3a11092014097ed916c5bb25a1b4f",
+      "internal/infrastructure/persistence/memory/workorder_store.go": "e4ae82b2fbe79f00825b28bcac4abc258f859c8d457c4f1349308867a58c1e5f",
+      "internal/infrastructure/persistence/memory/workorder_recovery_test.go": "478f3a73b93affe99f88cfa087848045f91253e2cc0821c2413a8d9c6d500806",
+      "internal/infrastructure/ebpf/c/exec.bpf.c": "6be30234e2fd5f71a073f5522e0a7b17eb0990c8b7d551f4e7523dd38e4ad6f1",
+      "internal/infrastructure/ebpf/c/exec.bpf.o": "f1bea1791915b84fcf6b673404d3c999fb6f87eac5fa4fee0a8e7370d2265117",
+      "internal/infrastructure/ebpf/c/exec.arm64.bpf.o": "f1bea1791915b84fcf6b673404d3c999fb6f87eac5fa4fee0a8e7370d2265117",
+      "internal/infrastructure/ebpf/detect_linux.go": "50787b9c714238c545d00ba27b349d377759ff8b09107f29226034f74448fb56",
+      "internal/infrastructure/ebpf/detect_linux_test.go": "8e7411187708671d5857a697e155fc1de3731ce1cb5693624262bd721da28f08",
+      "web/src/pages/BlueTeam/ResponseOps.tsx": "2deea0a32b66a9a7673e1431a1d1893f11aa10fc717ff9a1b26dcd81aa1cb9ba",
+      "web/src/pages/BlueTeam/ResponseOps.test.tsx": "a1ac06ef84a8e936a3ad88048905efd6617f219da31510da99462bbb36e1a102",
+      "web/src/lib/api/blueteam.ts": "a3deeeaaf0bd599ba014a230c79abe92004f5c74dabe19c5d35b1131c46d86a3",
+      "web/src/lib/api/blueteam.test.ts": "31848a6a3a4a080f171c5e8906aa27f1967811efb3688a8234447c8b22436501"
+    },
+    "postgres": {
+      "started_at": "2026-10-29T12:45:09.327341+00:00",
+      "completed_at": "2026-10-29T12:45:35.831867+00:00",
+      "pass": true,
+      "exit_code": 0,
+      "events": [
+        {
+          "Action": "pass",
+          "Test": "TestWorkOrderReclaimWithAuditPostgres",
+          "Elapsed": 1.87
+        },
+        {
+          "Action": "pass",
+          "Test": "TestWorkOrderFenceAuditRetryPostgres",
+          "Elapsed": 0.06
+        },
+        {
+          "Action": "pass",
+          "Elapsed": 1.9569999999999999
+        }
+      ],
+      "cleanup": {
+        "containers": 0,
+        "networks": 0
+      },
+      "source_unchanged": true,
+      "log_sha256": "efb5d2f6672f18daeee2b350d0a531e04ffe1094c2d166b4e2a0ec5ec47d7e32"
+    },
+    "postgres_receipt_sha256": "d42c8a21c646eb05ad367b8b518341026cc60b4050cbf28d8482131cad71d40e",
+    "native_kernel": {
+      "at": "2026-10-29T12:42:27.709390+00:00",
+      "binary_sha256": "486cc36eec53ef866b44f3deb0fbeb2a7c9397c55c76e4dc4bb9f2f0b248c924",
+      "returncode": 0,
+      "pass": true,
+      "log_sha256": "8a63fcf7ce161f8154479f3d16283c54dda56e1ff4edcccad9ecf4327362f530"
+    },
+    "native_receipt_sha256": "dcc88732a2f661e267c1f2cb4367e3763b6603ab58672842f48879dd5363c9b5",
+    "integration_verification": {
+      "verdict": "pass scoped corrections",
+      "qa_report_sha256": "be7febfe42926e48e4c4db233b6ccec2cad3c53fea5a133dcc703dc324379ef8"
+    },
+    "browser": {
+      "checked_at": "2026-10-29T13:01:54.424913+00:00",
+      "url": "https://127.0.0.1:18449/blueteam/response",
+      "observed": [
+        "current production web build loaded in retained authenticated Edge session",
+        "Refresh responses clicked; existing records retained",
+        "Reverted filter selected; exact verified action shown as Reverted/succeeded",
+        "terminal row has no approve/revert controls; unavailable approval is shown explicitly"
+      ],
+      "screenshot": "process-confirmation-console.png",
+      "screenshot_sha256": "b2d3e53cf26b0d841d05ee9d9c6f3620f5a1a27c417caed3041ffbb5f93fa720",
+      "web_index_sha256": "17ee35d83019a4dc6afc9a7992186bf346a1536bea2642e9e274272e2127e86b",
+      "bundle_hashes": {
+        "/assets/index-CY81xEaP.js": "827bf44fedc75dc0df6c52d472a2830f8e3e9f84636955276d5c90b75f843aa1",
+        "/assets/rolldown-runtime-COiEfhsA.js": "174e7e98105b02138bee9b4c62dfc8a01980db395f9e6c916db999c091115562",
+        "/assets/jsx-runtime-CldxteV5.js": "682380853f764cdbb721fda2975ff655b2b9daa79037cf7920bfb19cc85985cc",
+        "/assets/ui-Box8w_ec.js": "9fadbfd146e1957b4f9becb44d80500e01e5fba82b0036a1860a91641ce9d5e8",
+        "/assets/api-CNcuvTt3.js": "1f1da4429df5176bb3e6699d04b61fa9b23d8cbda2309e9c9a3a47bcb111ff44",
+        "/assets/index-yxz2cnG2.css": "5052cd04ab39691430d9faa44d93c7d96ffb510ad272d8c3c1fa62abb68bbbda"
+      },
+      "limits": [
+        "delayed worker polling and stale/unmount/error races are covered by component tests, not a new host action",
+        "terminal records intentionally do not expose a pending approval; no claim of a consumed state on this terminal row"
+      ]
+    },
+    "baseline": {
+      "steps": [
+        {
+          "name": "lint",
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T12:47:04.053188+00:00"
+        },
+        {
+          "name": "build",
+          "argv": [
+            "make",
+            "build"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T12:47:44.800072+00:00"
+        },
+        {
+          "name": "vet",
+          "argv": [
+            "make",
+            "vet"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T12:48:00.887963+00:00"
+        },
+        {
+          "name": "tests",
+          "argv": [
+            "make",
+            "test"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T12:53:25.751583+00:00"
+        },
+        {
+          "name": "typecheck",
+          "argv": [
+            "make",
+            "typecheck"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T12:53:36.136254+00:00"
+        },
+        {
+          "name": "web-tests",
+          "argv": [
+            "pnpm",
+            "exec",
+            "vitest",
+            "run",
+            "--maxWorkers=2"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T12:56:45.691188+00:00"
+        },
+        {
+          "name": "web-build",
+          "argv": [
+            "pnpm",
+            "build"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T12:59:03.100007+00:00"
+        },
+        {
+          "name": "response-race",
+          "argv": [
+            "go",
+            "test",
+            "-race",
+            "./internal/adapter/httpapi",
+            "./internal/domain/engagement",
+            "./internal/domain/response",
+            "./internal/domain/fleetagent",
+            "./internal/usecase/response",
+            "./internal/usecase/fleetwork",
+            "./internal/infrastructure/responsefleet",
+            "./internal/infrastructure/ebpf",
+            "./internal/usecase/fleet/detect",
+            "./internal/infrastructure/persistence/postgres",
+            "./internal/infrastructure/persistence/memory",
+            "./internal/infrastructure/responseactuator",
+            "./internal/usecase/fleet/responseexecute",
+            "./internal/usecase/fleet/responseobservation",
+            "./internal/infrastructure/fleetclient"
+          ],
+          "exit_code": 0,
+          "finished_at": "2026-10-29T13:00:47.624789+00:00"
+        }
+      ],
+      "web_tests": {
+        "files_passed": 217,
+        "tests_passed": 1573
+      },
+      "interrupted_web_build_preserved": true,
+      "resumed_only_unfinished_steps": true
+    }
+  },
+  "shutdown_verification": {
+    "scope": "Later shutdown loss-accounting correction; earlier deployed journey and follow-up snapshots retain original source hashes",
+    "source_file_hashes": {
+      "cmd/synapse-agent/detect.go": "ffa33ba4065bc4a67fc9111c823b93bff6705825e119cc6e91843baf49eb1d1d",
+      "internal/infrastructure/ebpf/detect_linux.go": "6870bd641142fb05319bd364333d89cdbbac23c5ea5813004e5b85528841d9d0",
+      "internal/infrastructure/ebpf/detect_linux_test.go": "b756d1b5ab0d412b8eba4722006720f8d2f6b8532db5d7d562983e34fb5a2043",
+      ".github/workflows/ebpf-compat.yml": "08b0f579e9708cfc6fd9436dd8028b2bccb4165597a3e5ad3a847a9ba248621a",
+      "api/openapi.yaml": "17be70f3751c6c2278d478d82214555a971463dc1bb95d9bc86c836d0c190a59",
+      "docs/guide/fleet-blue-team.md": "211f61c80be765c6ee184d3f096ab2e6331659a728a8ae72b35e2d7c13bebf59"
+    },
+    "checks": [
+      {
+        "name": "lint",
+        "argv": [
+          "make",
+          "lint"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:14:10.249611+00:00"
+      },
+      {
+        "name": "build",
+        "argv": [
+          "make",
+          "build"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:14:24.566697+00:00"
+      },
+      {
+        "name": "vet",
+        "argv": [
+          "make",
+          "vet"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:14:48.458114+00:00"
+      },
+      {
+        "name": "tests",
+        "argv": [
+          "make",
+          "test"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:19:16.600318+00:00"
+      },
+      {
+        "name": "response-race",
+        "argv": [
+          "go",
+          "test",
+          "-race",
+          "./cmd/synapse-agent",
+          "./internal/adapter/agentspool",
+          "./internal/adapter/httpapi",
+          "./internal/domain/engagement",
+          "./internal/domain/response",
+          "./internal/domain/fleetagent",
+          "./internal/usecase/response",
+          "./internal/usecase/fleetwork",
+          "./internal/infrastructure/responsefleet",
+          "./internal/infrastructure/ebpf",
+          "./internal/usecase/fleet/detect",
+          "./internal/infrastructure/persistence/postgres",
+          "./internal/infrastructure/persistence/memory",
+          "./internal/infrastructure/responseactuator",
+          "./internal/usecase/fleet/responseexecute",
+          "./internal/usecase/fleet/responseobservation",
+          "./internal/infrastructure/fleetclient"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:19:28.564244+00:00"
+      }
+    ],
+    "native": {
+      "at": "2026-10-29T13:14:30.379706+00:00",
+      "binary_sha256": "e6ff232395f7df5072395fee48a07693de4fc849fb0fc137ad403ad903e1db4e",
+      "source_file_hashes": {
+        "internal/infrastructure/ebpf/detect_linux.go": "6870bd641142fb05319bd364333d89cdbbac23c5ea5813004e5b85528841d9d0",
+        "internal/infrastructure/ebpf/detect_linux_test.go": "b756d1b5ab0d412b8eba4722006720f8d2f6b8532db5d7d562983e34fb5a2043",
+        "internal/infrastructure/ebpf/c/exec.bpf.c": "6be30234e2fd5f71a073f5522e0a7b17eb0990c8b7d551f4e7523dd38e4ad6f1",
+        "internal/infrastructure/ebpf/c/exec.bpf.o": "f1bea1791915b84fcf6b673404d3c999fb6f87eac5fa4fee0a8e7370d2265117",
+        "internal/infrastructure/ebpf/c/exec.arm64.bpf.o": "f1bea1791915b84fcf6b673404d3c999fb6f87eac5fa4fee0a8e7370d2265117"
+      },
+      "returncode": 0,
+      "pass": true,
+      "log_sha256": "000f03ea5134cc8e039092cdf5a4a4c796a7ce26f41444602102c3e814976c90"
+    },
+    "regression": [
+      "unpolled userspace/kernel loss remains available after Close, without reading closed maps",
+      "stopped sensor coverage is a gap",
+      "Engine.Run cancellation preserves final sensor coverage",
+      "real reduced-capacity native overflow remains visible after Close"
+    ],
+    "unchanged_frontend_proof": "follow_up_verification.baseline and browser; no frontend source changed after those checks"
+  },
+  "ui_handoff_verification": {
+    "scope": "Subsequent approved/consumed handoff polling correction; historical screenshots/source bindings retained",
+    "source_file_hashes": {
+      "web/src/pages/BlueTeam/ResponseOps.tsx": "a5952907819b309c5f601507d76ace54bad4fdfc48ba4fd20540a2847be6ba04",
+      "web/src/pages/BlueTeam/ResponseOps.test.tsx": "a89d4751fc5056e9e599c06e722ac352efb3487587b7eb6d13e31fe2202816e0"
+    },
+    "regression": "Apply and reversal pass through approved, consumed, execution/verification and terminal state; polling continues across each nonterminal handoff and stops after terminal success",
+    "checks": [
+      {
+        "name": "typecheck",
+        "argv": [
+          "pnpm",
+          "typecheck"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:35:57.395725+00:00"
+      },
+      {
+        "name": "tests",
+        "argv": [
+          "pnpm",
+          "exec",
+          "vitest",
+          "run",
+          "--maxWorkers=2"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:38:56.442004+00:00"
+      },
+      {
+        "name": "build",
+        "argv": [
+          "pnpm",
+          "build"
+        ],
+        "exit_code": 0,
+        "finished_at": "2026-10-29T13:38:58.291897+00:00"
+      }
+    ],
+    "web_test_files": 217,
+    "web_tests": 1575,
+    "browser_checked_at": "2026-10-29T13:42:21.743659+00:00",
+    "browser_observed": [
+      "latest built UI reloaded in retained authenticated HTTPS Edge",
+      "Refresh responses and Reverted filter clicked successfully",
+      "exact verified target remains Reverted/succeeded with no terminal decision controls"
+    ],
+    "screenshot": "process-release-console.png",
+    "screenshot_sha256": "b2d3e53cf26b0d841d05ee9d9c6f3620f5a1a27c417caed3041ffbb5f93fa720",
+    "index_sha256": "d81794ecee1019f145f1eac4d1a6d3d550220e2809bf019a51180fc6b29b9ecb",
+    "bundle_hashes": {
+      "/assets/index-ZZDSzUr-.js": "a94e077d8087798133c34196238a4e45208257f1ec9c2236f8a996901891c7e1",
+      "/assets/rolldown-runtime-COiEfhsA.js": "174e7e98105b02138bee9b4c62dfc8a01980db395f9e6c916db999c091115562",
+      "/assets/jsx-runtime-CldxteV5.js": "682380853f764cdbb721fda2975ff655b2b9daa79037cf7920bfb19cc85985cc",
+      "/assets/ui-Box8w_ec.js": "9fadbfd146e1957b4f9becb44d80500e01e5fba82b0036a1860a91641ce9d5e8",
+      "/assets/api-CNcuvTt3.js": "1f1da4429df5176bb3e6699d04b61fa9b23d8cbda2309e9c9a3a47bcb111ff44",
+      "/assets/index-yxz2cnG2.css": "5052cd04ab39691430d9faa44d93c7d96ffb510ad272d8c3c1fa62abb68bbbda"
+    },
+    "limits": "Handoff timing and races use component regression tests; browser check proves actual rendered/navigation controls rather than a new host response action"
+  }
+}

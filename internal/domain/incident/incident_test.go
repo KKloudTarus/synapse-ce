@@ -30,7 +30,7 @@ func responseEvent(kind EventKind, timestamp time.Time, actionID shared.ID) Inci
 	e := IncidentEvent{
 		IncidentID: incID, Kind: kind, At: timestamp, Actor: "analyst", ResponseActionID: actionID,
 		ResponseEngagementID: "eng-1", ResponseActionDigest: strings.Repeat("a", 64),
-		ResponseTarget: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		ResponseTarget: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 	}
 	if kind == EventResponseVerified {
 		e.Actor = "control-plane:response-verifier"

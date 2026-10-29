@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -38,17 +39,25 @@ const (
 )
 
 type trackedProcess struct {
-	entityID      shared.ID
-	pid           int
-	pidfd         int
-	startTick     uint64
-	sequence      uint64
-	launch        launchSpec
-	executable    *pinnedDescriptor
-	workingDir    *pinnedDescriptor
-	stopRequested bool
-	restart       restartState
-	exited        bool
+	entityID             shared.ID
+	assetID              shared.ID
+	bootID               shared.ID
+	pid                  int
+	pidfd                int
+	startTick            uint64
+	sequence             uint64
+	launch               launchSpec
+	executable           *pinnedDescriptor
+	workingDir           *pinnedDescriptor
+	stopRequested        bool
+	restart              restartState
+	replacementPID       int
+	replacementPIDFD     int
+	replacementStartTick uint64
+	replacementStarted   uint64
+	replacementID        shared.ID
+	replacementReady     chan struct{}
+	exited               bool
 }
 
 // launchSpec intentionally contains only the non-secret identity needed to start an eligible process.
@@ -78,6 +87,7 @@ type pinnedDescriptor struct {
 type Registry struct {
 	mu      sync.Mutex
 	entries map[shared.ID]*trackedProcess
+	pending map[int]*trackedProcess
 	order   uint64
 }
 
@@ -94,6 +104,19 @@ func (r *Registry) ObserveProcess(assetID, bootID shared.ID, event detection.Pro
 		return
 	}
 	entityID := telemetry.ProcessEntityID(assetID, bootID, event.PID, event.StartTimeNanos)
+	if event.Kind == "exec" {
+		r.mu.Lock()
+		original := r.pending[event.PID]
+		if original != nil && original.assetID == assetID && original.bootID == bootID && original.replacementStarted > 0 && event.StartTimeNanos >= original.replacementStarted && original.replacementID.IsZero() && replacementStillPinned(original, event.StartTimeNanos) {
+			original.replacementID = entityID
+			delete(r.pending, event.PID)
+			if original.replacementReady != nil {
+				close(original.replacementReady)
+				original.replacementReady = nil
+			}
+		}
+		r.mu.Unlock()
+	}
 	if event.Kind == "exit" {
 		r.markExited(entityID)
 		return
@@ -105,11 +128,13 @@ func (r *Registry) ObserveProcess(assetID, bootID shared.ID, event detection.Pro
 	if err != nil {
 		return
 	}
+	process.assetID, process.bootID = assetID, bootID
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.order++
 	process.sequence = r.order
 	if prior := r.entries[entityID]; prior != nil {
+		delete(r.pending, prior.replacementPID)
 		_ = prior.close()
 	}
 	r.entries[entityID] = process
@@ -235,11 +260,32 @@ func (r *Registry) RestartProcess(ctx context.Context, entityID shared.ID) (alre
 	} else if uint32(os.Geteuid()) != process.launch.uid || uint32(os.Getegid()) != process.launch.gid {
 		return false, fmt.Errorf("%w: restart cannot preserve the observed process identity", shared.ErrForbidden)
 	}
+	var launchClock unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &launchClock); err != nil {
+		return false, fmt.Errorf("read boot clock before process restart: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return false, fmt.Errorf("start descriptor-pinned process: %w", err)
 	}
 	// Wait reaps the child and releases os/exec resources after the restarted process exits. It intentionally
 	// does not manufacture a telemetry event or infer that the process remained healthy.
+	process.replacementPID = cmd.Process.Pid
+	process.replacementPIDFD = -1
+	childFD, childErr := unix.PidfdOpen(cmd.Process.Pid, 0)
+	if childErr == nil {
+		childTick, tickErr := readProcessStartTick(cmd.Process.Pid)
+		if tickErr == nil {
+			process.replacementPIDFD, process.replacementStartTick = childFD, childTick
+		} else {
+			_ = unix.Close(childFD)
+		}
+	}
+	process.replacementStarted = uint64(launchClock.Nano())
+	process.replacementReady = make(chan struct{})
+	if r.pending == nil {
+		r.pending = make(map[int]*trackedProcess)
+	}
+	r.pending[process.replacementPID] = process
 	go func() { _ = cmd.Wait() }()
 	if err := ctx.Err(); err != nil {
 		process.restart = restartOutcomeUnknown
@@ -249,11 +295,75 @@ func (r *Registry) RestartProcess(ctx context.Context, entityID shared.ID) (alre
 	return false, nil
 }
 
+// RestartProcessCorrelated waits for the WAL-durable exec observation for exactly the launched child.
+// A timeout leaves the launch outcome unknown and never launches a second child.
+func (r *Registry) RestartProcessCorrelated(ctx context.Context, entityID shared.ID) (bool, shared.ID, error) {
+	already, err := r.RestartProcess(ctx, entityID)
+	if err != nil {
+		return false, "", err
+	}
+	r.mu.Lock()
+	process := r.entries[entityID]
+	if process == nil {
+		r.mu.Unlock()
+		return false, "", shared.ErrNotFound
+	}
+	if !process.replacementID.IsZero() {
+		id := process.replacementID
+		r.mu.Unlock()
+		return already, id, nil
+	}
+	ready := process.replacementReady
+	r.mu.Unlock()
+	if ready == nil {
+		return false, "", fmt.Errorf("%w: replacement observation unavailable", shared.ErrConflict)
+	}
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ready:
+		r.mu.Lock()
+		id := process.replacementID
+		r.mu.Unlock()
+		if id.IsZero() {
+			return false, "", fmt.Errorf("%w: replacement observation has no entity", shared.ErrConflict)
+		}
+		return already, id, nil
+	case <-ctx.Done():
+		err = ctx.Err()
+	case <-timer.C:
+		err = fmt.Errorf("%w: replacement observation timed out", shared.ErrConflict)
+	}
+	r.mu.Lock()
+	if process.replacementID.IsZero() {
+		process.restart = restartOutcomeUnknown
+		delete(r.pending, process.replacementPID)
+	}
+	r.mu.Unlock()
+	return false, "", err
+}
+
+// replacementStillPinned rejects a PID reused after the launched child exited.
+// Holding the registry lock prevents concurrent descriptor closure while checking the pidfd.
+func replacementStillPinned(process *trackedProcess, startNanos uint64) bool {
+	if process.replacementPIDFD < 0 || process.replacementStartTick == 0 || startNanos/linuxUserTickNanos != process.replacementStartTick {
+		return false
+	}
+	fds := []unix.PollFd{{Fd: int32(process.replacementPIDFD), Events: unix.POLLIN}}
+	n, err := unix.Poll(fds, 0)
+	if err != nil || n != 0 {
+		return false
+	}
+	current, err := readProcessStartTick(process.replacementPID)
+	return err == nil && current == process.replacementStartTick
+}
+
 func (r *Registry) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var errs []error
 	for id, process := range r.entries {
+		delete(r.pending, process.replacementPID)
 		if err := process.close(); err != nil {
 			errs = append(errs, fmt.Errorf("close process descriptors %s: %w", id, err))
 		}
@@ -279,6 +389,7 @@ func (r *Registry) evictLocked() {
 			}
 		}
 		if process := r.entries[oldestID]; process != nil {
+			delete(r.pending, process.replacementPID)
 			_ = process.close()
 		}
 		delete(r.entries, oldestID)
@@ -713,6 +824,12 @@ func (p *trackedProcess) close() error {
 		return nil
 	}
 	var errs []error
+	if p.replacementPID > 0 && p.replacementPIDFD >= 0 {
+		if err := unix.Close(p.replacementPIDFD); err != nil {
+			errs = append(errs, err)
+		}
+		p.replacementPIDFD = -1
+	}
 	if p.pidfd >= 0 {
 		if err := unix.Close(p.pidfd); err != nil {
 			errs = append(errs, err)

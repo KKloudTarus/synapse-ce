@@ -15,7 +15,7 @@ func validResponseObservationRequest() ResponseObservationRequest {
 		ObserverAgentID: "observer-1", AssetID: "asset-1", EngagementID: "eng-1", ActionID: "action-1",
 		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1", ReceiptID: "receipt", ReceiptDigest: "0000000000000000000000000000000000000000000000000000000000000000", VerificationChallenge: strings.Repeat("b", 64),
 		Target: responsesaga.TargetFingerprint{
-			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1",
+			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111",
 		},
 		AttemptedAt: attemptedAt, IssuedAt: attemptedAt.Add(time.Second), NotAfter: attemptedAt.Add(time.Minute),
 	}

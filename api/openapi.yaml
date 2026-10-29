@@ -11772,9 +11772,9 @@ components:
       required: [kind, target]
       properties:
         kind: {type: string, enum: [isolate_host, quarantine_file, stop_process], description: The response action kind; each has a mandatory typed reversal.}
-        target: {type: string, description: The asset id the action affects; must be in the engagement scope.}
+        target: {type: string, description: 'Exact target in the engagement scope; stop_process uses a canonical ProcessEntityID bound to its reporting asset in fingerprint.'}
         fingerprint: {$ref: '#/components/schemas/ResponseTargetFingerprint'}
-        target_kind: {type: string, description: 'The scope-entry kind the target is authorized as (default: ip).'}
+        target_kind: {type: string, description: 'The scope-entry kind the target is authorized as (default: ip). stop_process requires process and a canonical ProcessEntityID.'}
     ResponseDecisionRequest:
       type: object
       required: [approve]
@@ -11808,6 +11808,11 @@ components:
         id: {type: string}
         kind: {type: string}
         target: {type: string}
+        target_kind: {type: string, description: Immutable scope kind used to authorize this action.}
+        fingerprint: {$ref: '#/components/schemas/ResponseTargetFingerprint'}
+        submitted_by: {type: string}
+        approval_state: {type: string, enum: [pending, approved, denied, timeout, consumed], description: Current bound approval state on ledger reads; absent when unavailable.}
+        reversal_requested_by: {type: string, description: 'Identity that requested reversal; presence alone does not imply approval or verification status.'}
         state: {type: string, enum: [pending, applied, reverted, cancelled, violation]}
         approver: {type: string}
         verification: {type: string, enum: [pending, succeeded, failed, unknown], description: 'Telemetry-verified post-condition: was the effect confirmed?'}
@@ -12209,7 +12214,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [repo, domain, host, url, image, cidr, cloud_account]
+          enum: [repo, domain, host, url, image, cidr, cloud_account, process]
         value: {type: string}
 
     CreateEngagementRequest:
@@ -12339,7 +12344,7 @@ components:
       type: object
       required: [kind, value]
       properties:
-        kind: {type: string, enum: [domain, ip, cidr, url, repo, image, cloud_account]}
+        kind: {type: string, enum: [domain, ip, cidr, url, repo, image, cloud_account, process]}
         value: {type: string}
 
     CreateManualFindingRequest:

@@ -54,6 +54,20 @@ func ProcessEntityID(assetID, bootID shared.ID, pid int, startTimeNanos uint64) 
 	return shared.ID("pe_" + sum[:32])
 }
 
+// ValidProcessEntityID reports whether value has the canonical format produced by
+// ProcessEntityID. It does not prove that the entity belongs to an asset or is live.
+func ValidProcessEntityID(value string) bool {
+	if len(value) != 35 || value[:3] != "pe_" {
+		return false
+	}
+	for _, c := range value[3:] {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // FileTargetID derives the identity of a file target from (path, device, inode, contentHash). Path alone
 // is not identity — it is rebindable (rename/symlink/bind-mount) — so device+inode pin the concrete
 // object and the optional contentHash pins its contents at observation time.

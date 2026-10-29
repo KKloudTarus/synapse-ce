@@ -484,3 +484,29 @@ func TestListEngagementsCarriesFindingCountsAndLastScan(t *testing.T) {
 		t.Fatalf("last_scan_date = %v, want the job's finish time", row["last_scan_date"])
 	}
 }
+
+func TestProcessScopeHTTPRoundTripAndInvalidEdit(t *testing.T) {
+	rt, repo, audit := newEngRouter(t)
+	const entity = "pe_11111111111111111111111111111111"
+	body := `{"in_scope":[{"kind":"process","value":"` + entity + `"}],"out_of_scope":[]}`
+	rec := engCall(rt.updateScope, http.MethodPut, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", rec.Code, rec.Body.String())
+	}
+	got, err := repo.GetByID(context.Background(), "eng-1")
+	want := engdom.Target{Kind: engdom.TargetProcess, Value: entity}
+	if err != nil || len(got.Scope.InScope) != 1 || got.Scope.InScope[0] != want || !auditHas(audit, "engagement.scope.update") {
+		t.Fatalf("scope not persisted/audited: %+v err=%v", got, err)
+	}
+	for _, bad := range []string{"1234", "pe_*", strings.ToUpper(entity), entity + " "} {
+		raw, _ := json.Marshal(map[string]any{"in_scope": []map[string]string{{"kind": "process", "value": bad}}})
+		rec = engCall(rt.updateScope, http.MethodPut, string(raw))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("accepted %q: %d", bad, rec.Code)
+		}
+		got, _ = repo.GetByID(context.Background(), "eng-1")
+		if len(got.Scope.InScope) != 1 || got.Scope.InScope[0] != want {
+			t.Fatal("invalid edit changed durable scope")
+		}
+	}
+}

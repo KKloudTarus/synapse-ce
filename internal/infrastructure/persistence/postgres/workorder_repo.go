@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -71,7 +72,14 @@ func (r *WorkOrderRepository) ClaimWithAudit(ctx context.Context, tenantID, agen
 			if e != nil {
 				return e
 			}
-			key := "work_order.claimed:v1:" + tenantID.String() + ":" + wo.ID.String()
+			out = append(out, wo)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		for _, wo := range out {
+			key := "work_order.claimed:v1:" + tenantID.String() + ":" + wo.ID.String() + ":" + leaseID
 			intent, meta, e := postgresWorkOrderAudit(key, actor, "work_order.claimed", wo.ID.String(), now, map[string]string{"tenant_id": tenantID.String(), "agent_id": agentID.String()})
 			if e != nil {
 				return e
@@ -79,16 +87,18 @@ func (r *WorkOrderRepository) ClaimWithAudit(ctx context.Context, tenantID, agen
 			if e = insertFleetAuditTx(ctx, tx, tenantID, intent, meta); e != nil {
 				return e
 			}
-			out = append(out, wo)
 			intents = append(intents, intent)
 		}
-		return rows.Err()
+		return nil
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 	return out, intents, err
 }
 
 func (r *WorkOrderRepository) TransitionLeasedWithAudit(ctx context.Context, tenantID, id shared.ID, leaseID string, to workorder.State, reason string, expected workorder.State, now time.Time, actor string) (ports.FleetAuditIntent, error) {
-	key := "work_order.transitioned:v1:" + tenantID.String() + ":" + id.String() + ":" + string(to)
+	key := "work_order.transitioned:v1:" + tenantID.String() + ":" + id.String() + ":" + string(to) + ":" + leaseID
 	intent, meta, err := postgresWorkOrderAudit(key, actor, "work_order.transitioned", id.String(), now, map[string]string{"tenant_id": tenantID.String(), "from": string(expected), "to": string(to), "reason": reason})
 	if err != nil {
 		return ports.FleetAuditIntent{}, err
@@ -142,6 +152,35 @@ func (r *WorkOrderRepository) CancelResponsesBelowGenerationWithAudit(ctx contex
 	cancelled := 0
 	var intent ports.FleetAuditIntent
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if e := lockResponseHalt(ctx, tx, true); e != nil {
+			return e
+		}
+		var existing ports.FleetAuditIntent
+		var metadata []byte
+		e := tx.QueryRow(ctx, `SELECT actor,action,target,metadata,occurred_at FROM fleet_audit_intents WHERE tenant_id=$1 AND intent_id=$2`, tenantID.String(), key).Scan(&existing.Entry.Actor, &existing.Entry.Action, &existing.Entry.Target, &metadata, &existing.Entry.At)
+		if e == nil {
+			existing.ID = key
+			existing.Entry.At = existing.Entry.At.UTC()
+			if e = json.Unmarshal(metadata, &existing.Entry.Metadata); e != nil {
+				return fmt.Errorf("decode response fence audit: %w", e)
+			}
+			cancelled, e = strconv.Atoi(existing.Entry.Metadata["cancelled"])
+			if e != nil || cancelled < 0 {
+				return fmt.Errorf("%w: invalid response fence audit count", shared.ErrConflict)
+			}
+			candidate, _, e := postgresWorkOrderAudit(key, actor, "work_order.responses_fenced", tenantID.String(), existing.Entry.At, map[string]string{"tenant_id": tenantID.String(), "generation": fmt.Sprint(generation), "cancelled": fmt.Sprint(cancelled), "reason": reason})
+			if e != nil {
+				return e
+			}
+			if !ports.SameFleetAuditIntent(existing, candidate) {
+				return fmt.Errorf("%w: response fence audit differs from committed intent", shared.ErrConflict)
+			}
+			intent = existing
+			return nil
+		}
+		if !errors.Is(e, pgx.ErrNoRows) {
+			return e
+		}
 		tag, e := tx.Exec(ctx, `UPDATE work_orders SET state='cancelled',refuse_reason=$3,updated_at=$4 WHERE tenant_id=$1 AND capability='response.process' AND state IN ('issued','claimed','running') AND (response_command->>'HaltGeneration')::BIGINT < $2`, tenantID.String(), generation, reason, now)
 		if e != nil {
 			return e
@@ -162,7 +201,16 @@ func (r *WorkOrderRepository) IssueWithAudit(ctx context.Context, wo *workorder.
 	if err != nil {
 		return nil, ports.FleetAuditIntent{}, err
 	}
-	stored, err := r.issue(ctx, wo, func(tx pgx.Tx) error {
+	stored, err := r.issue(ctx, wo, func(tx pgx.Tx, duplicate bool) error {
+		if duplicate {
+			var originalAt time.Time
+			err := tx.QueryRow(ctx, `SELECT occurred_at FROM fleet_audit_intents WHERE tenant_id=$1 AND intent_id=$2`, wo.TenantID.String(), intent.ID).Scan(&originalAt)
+			if err == nil {
+				intent.Entry.At = originalAt.UTC()
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		return insertFleetAuditTx(ctx, tx, wo.TenantID, intent, metadata)
 	})
 	if err != nil {
@@ -171,13 +219,14 @@ func (r *WorkOrderRepository) IssueWithAudit(ctx context.Context, wo *workorder.
 	return stored, intent, nil
 }
 
-func (r *WorkOrderRepository) issue(ctx context.Context, wo *workorder.WorkOrder, afterInsert func(pgx.Tx) error) (*workorder.WorkOrder, error) {
+func (r *WorkOrderRepository) issue(ctx context.Context, wo *workorder.WorkOrder, afterInsert func(pgx.Tx, bool) error) (*workorder.WorkOrder, error) {
 	if wo == nil || wo.TenantID.IsZero() {
 		return nil, shared.ErrValidation
 	}
 	var stored *workorder.WorkOrder
 	err := WithTenant(ctx, r.pool, wo.TenantID.String(), func(tx pgx.Tx) error {
 		existing, err := scanWorkOrder(tx.QueryRow(ctx, `SELECT `+workOrderCols+` FROM work_orders WHERE tenant_id=$1 AND idempotency_key=$2`, wo.TenantID.String(), wo.IdempotencyKey))
+		duplicate := err == nil
 		if err == nil {
 			if !workorder.SameRequest(existing, wo) {
 				return shared.ErrConflict
@@ -201,7 +250,7 @@ func (r *WorkOrderRepository) issue(ctx context.Context, wo *workorder.WorkOrder
 			stored = &copy
 		}
 		if afterInsert != nil {
-			return afterInsert(tx)
+			return afterInsert(tx, duplicate)
 		}
 		return nil
 	})

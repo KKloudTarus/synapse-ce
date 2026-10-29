@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
@@ -21,6 +22,7 @@ import (
 // list by state. *responseuc.Service satisfies it. The service is wired with the SAME admission gate a
 // DAST probe and an exploitation step use, so a response action is not a privileged side path.
 type responseService interface {
+	ApprovalState(ctx context.Context, rec responseuc.Record) (agent.ApprovalState, error)
 	DryRun(action rdom.Action) ([]responseuc.PlanStep, error)
 	Apply(ctx context.Context, engagementID shared.ID, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint, approver string) (responseuc.Record, error)
 	Decide(ctx context.Context, actionID shared.ID, reviewer string, approve bool, reason string) (responseuc.Record, error)
@@ -99,13 +101,18 @@ type responsePlanDTO struct {
 }
 
 type responseRecordDTO struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"`
-	Target       string `json:"target"`
-	State        string `json:"state"`
-	Approver     string `json:"approver,omitempty"`
-	Verification string `json:"verification,omitempty"`
-	EvidenceID   string `json:"evidence_id,omitempty"`
+	ApprovalState       string                           `json:"approval_state,omitempty"`
+	TargetKind          string                           `json:"target_kind"`
+	Fingerprint         responseTargetFingerprintRequest `json:"fingerprint"`
+	SubmittedBy         string                           `json:"submitted_by,omitempty"`
+	ReversalRequestedBy string                           `json:"reversal_requested_by,omitempty"`
+	ID                  string                           `json:"id"`
+	Kind                string                           `json:"kind"`
+	Target              string                           `json:"target"`
+	State               string                           `json:"state"`
+	Approver            string                           `json:"approver,omitempty"`
+	Verification        string                           `json:"verification,omitempty"`
+	EvidenceID          string                           `json:"evidence_id,omitempty"`
 }
 
 func targetKindOrDefault(raw string) engagement.TargetKind {
@@ -116,7 +123,16 @@ func targetKindOrDefault(raw string) engagement.TargetKind {
 }
 
 func toResponseRecordDTO(rec responseuc.Record) responseRecordDTO {
+	f := rec.TargetFingerprint
 	return responseRecordDTO{
+		TargetKind:          string(rec.AuthorizationTarget.Kind),
+		SubmittedBy:         rec.SubmittedBy,
+		ReversalRequestedBy: rec.ReversalRequestedBy,
+		Fingerprint: responseTargetFingerprintRequest{
+			Kind: string(f.Kind), ProcessAssetID: f.ProcessAssetID.String(), ProcessEntityID: f.ProcessEntityID.String(),
+			FilePath: f.FilePath, FileDevice: f.FileDevice, FileInode: f.FileInode, FileHash: f.FileHash,
+			HostID: f.HostID.String(), NetpolGeneration: f.NetpolGeneration,
+		},
 		ID:           rec.Action.ID.String(),
 		Kind:         string(rec.Action.Kind),
 		Target:       rec.Action.Target.String(),
@@ -189,6 +205,9 @@ func (rt *Router) applyResponse(w http.ResponseWriter, r *http.Request) {
 		// can find it in the list. A command awaiting independent verification is also durable and must
 		// not be reported as a server failure.
 		dto := toResponseRecordDTO(rec)
+		if errors.Is(err, safety.ErrPendingApproval) {
+			dto.ApprovalState = string(agent.ApprovalPending)
+		}
 		if errors.Is(err, responseuc.ErrVerificationPending) {
 			dto.Verification = "pending"
 		}
@@ -242,6 +261,9 @@ func (rt *Router) revertResponse(w http.ResponseWriter, r *http.Request) {
 	rec, err := rt.responses.Revert(ctx, actionID, target, req.Fingerprint.targetFingerprint(), PrincipalFrom(r.Context()))
 	if errors.Is(err, safety.ErrPendingApproval) || errors.Is(err, responseuc.ErrVerificationPending) {
 		dto := toResponseRecordDTO(rec)
+		if errors.Is(err, safety.ErrPendingApproval) {
+			dto.ApprovalState = string(agent.ApprovalPending)
+		}
 		if errors.Is(err, responseuc.ErrVerificationPending) {
 			dto.Verification = "pending"
 		}
@@ -274,7 +296,14 @@ func (rt *Router) listResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]responseRecordDTO, 0, len(recs))
 	for _, rec := range recs {
-		out = append(out, toResponseRecordDTO(rec))
+		dto := toResponseRecordDTO(rec)
+		approvalState, err := rt.responses.ApprovalState(ctx, rec)
+		if err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+		dto.ApprovalState = string(approvalState)
+		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"responses": out})
 }

@@ -182,4 +182,23 @@ describe('CreateEngagementForm Re-test purpose', () => {
     expect(firstKey).toBeTruthy()
     expect(secondKey).toBe(firstKey)
   })
+
+  it('creates an engagement scoped to an exact process identity', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+    const processId = `pe_${'a'.repeat(32)}`
+    vi.mocked(api.createEngagement).mockResolvedValue({ id: 'eng-process' } as never)
+    render(<CreateEngagementForm onCreated={vi.fn()} />)
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Name/ }), { target: { value: 'Process response' } })
+    fireEvent.click(screen.getByRole('combobox', { name: 'Target kind for row 1' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Process' }))
+    const input = screen.getByRole('textbox', { name: 'Target value for row 1' })
+    expect(input).toHaveAccessibleDescription(/32 lowercase hexadecimal/)
+    fireEvent.change(input, { target: { value: processId } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Engagement' }))
+
+    await waitFor(() => expect(api.createEngagement).toHaveBeenCalledWith(expect.objectContaining({
+      inScope: [{ kind: 'process', value: processId }],
+    }), expect.anything()))
+  })
 })

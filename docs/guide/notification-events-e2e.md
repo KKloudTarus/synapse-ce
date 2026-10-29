@@ -248,6 +248,21 @@ external environments and execution paths listed below.
 | Local SMTP relay | Admin UI configure-465, replace-with-587 and unset-only fallback produced four actual SMTP messages. Certificate verification, rejected host/port, stale revision and safe settings/audit were checked; a Mailpit link opened the finding. This proves local relay behavior, not Gmail/Outlook, XOAUTH2 or mobile-client acceptance. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6488527239). |
 | JSM lifecycle | Finding transitions created and closed real alerts; reopening created a distinct episode. Restart and same-version channel restoration resumed the original asynchronous request. The paired closure implementation shipped in [#1625](https://github.com/KKloudTarus/synapse-ce/pull/1625); live PagerDuty remains excluded. |
 
+The [tenant relay rollout receipt](assets/ui/notification-events/live/tenant-relay-rollout.json)
+adds an actual migrate-first rehearsal from schema 231 to 234: old API/worker, feature runtime with
+configured relay, verified TLS/AUTH SMTP delivery and history, feature restart, old-binary rollback
+on the expanded schema, feature restoration and a second delivery. Legacy mappings and relay data
+remained intact; the runtime role had neither superuser nor RLS bypass. This uses the exact historical
+old and feature commits recorded in the receipt, rather than attributing that run to later code.
+
+Synthetic DDL runs measured 28.560 ms at 10,000 contacts, 107.583 ms at 100,000 and 19,214.846 ms
+at 1,000,000. A conflicting lock caused atomic rollback with a 500 ms per-lock timeout; total abort
+time reached 2,611.443 ms at 1,000,000 because the timeout is not a total migration deadline.
+These local measurements inform a maintenance window, not a production capacity or zero-downtime
+claim. The largest run had only two successful writer samples. Rollback keeps the expanded schema;
+running Down would delete relay/domain data. Both disposable rehearsals cleaned up their containers
+and networks.
+
 The dead-letter and promotion runtime used source
 `e77c95e3ac7dd5d8167b3d789d04edda1ab0e92d`, merged by #1625. Their
 [correlated receipt](assets/ui/notification-events/live/functional-followup.json)
@@ -293,6 +308,34 @@ with distinct runtime and halt-writer roles. The other skips were two opt-in sca
 benchmarks and the interactive assessment UI worker. The earlier timeout stays
 failed evidence; no hosted Actions result is claimed.
 
+### Governed process response
+
+The governed host-response environment was subsequently completed on 2026-10-29.
+Two retained, isolated Linux KVM guests supplied a real executor and a distinct
+observer. A consultant submitted the exact process fingerprint and an operator
+recorded the authorized decisions. Stop reached `verified_succeeded`; the separately
+approved best-effort restart reached `rolled_back` with verification `succeeded`.
+The replacement used the pinned executable, cwd and UID, with a different process
+entity ID. The reversal receipt keeps the original exit timestamp before the
+reversal window and binds the exact child's successful exec event.
+
+The [correlated receipt](assets/ui/notification-events/live/governed-process-response.json)
+records component binary hashes, changed-source hashes, both sealed verification
+records and three immutable source/event pairs. `applied`, `verified` and `reverted`
+each reached Slack through the durable worker once with HTTP 200. The Vietnamese
+[native receipt](assets/ui/notification-events/live/process-confirmed-slack-native.png)
+was inspected; its Open response link opened the HTTPS console and, after sign-in,
+showed [Reverted / succeeded](assets/ui/notification-events/live/process-confirmed-native-link-console.png).
+The later failed message belongs to a separate wrong-asset diagnostic request that
+was rejected at human approval, not the verified operation. Out-of-scope admission,
+wildcards and a consultant's approval attempt returned 403, 400 and 403 respectively.
+
+This rehearsal used a five-minute command/verification budget and the normal
+two-minute work lease. Earlier failed and timed-out attempts remain unchanged.
+The observer was upgraded during reversal; the executor stayed running to preserve
+its pinned restart descriptors. This proves the governed local operation and Slack
+journey, not production capacity, other operating systems or deferred clients.
+
 ### Remaining environments
 
 Five service setups were not ready at the last direct environment audit on
@@ -312,11 +355,10 @@ Okta, Google Workspace identity, PingOne and PagerDuty are intentionally exclude
 by the maintainer and are not counted in those five. Google Workspace identity
 and Gmail SMTP are separate integrations.
 
-Three execution environments also remain unproved: governed DAST/recon needs an
+Two execution environment groups remain unproved: governed DAST/recon needs an
 authorized target and egress/grant authority; CSPM needs authorized test-cloud
-credentials; host response needs an enrolled executor, independent observer and
-host scope. Strict local sandbox conformance passed, but that does not establish
-these execution prerequisites. Custody failure was exercised in a disposable
+credentials. Strict local sandbox conformance passed, but that does not establish
+these remaining execution prerequisites. Custody failure was exercised in a disposable
 chain and reporting failed closed; retained audit/evidence history was untouched.
 The [custody receipt](assets/ui/notification-events/live/functional-followup.json)
 records the verifier transition, HTTP 400 report denial and one delivered event.

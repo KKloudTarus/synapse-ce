@@ -2,12 +2,24 @@ import { req } from './client'
 
 /**
  * Blue-team governed response (#425) + the offensive kill switch. The response loop is admission-gated,
- * human-approved, audited, and reversible. NOTE: the shipped executor is a SIMULATION (no host effect); the
- * governance workflow — plan, approve, apply, verify, revert — is real. Routes register only when the fleet
+ * human-approved, audited, and reversible. Routes register only when the fleet
  * subsystem is enabled, so the client treats a 404 as "not enabled".
  */
 export type ResponseKind = 'isolate_host' | 'quarantine_file' | 'stop_process'
-export type ResponseState = 'pending' | 'applied' | 'reverted' | 'failed' | 'expired'
+export type ResponseState = 'pending' | 'applied' | 'reverted' | 'cancelled' | 'violation'
+export type ResponseApprovalState = 'pending' | 'approved' | 'denied' | 'timeout' | 'consumed'
+
+export interface ResponseFingerprint {
+  kind: string
+  process_asset_id?: string
+  process_entity_id?: string
+  file_path?: string
+  file_device?: number
+  file_inode?: number
+  file_hash?: string
+  host_id?: string
+  netpol_generation?: number
+}
 
 export interface ResponseRecord {
   id: string
@@ -17,6 +29,11 @@ export interface ResponseRecord {
   approver?: string
   verification?: string
   evidenceId?: string
+  targetKind?: string
+  fingerprint?: ResponseFingerprint
+  submittedBy?: string
+  reversalRequestedBy?: string
+  approvalState?: ResponseApprovalState
 }
 
 export interface ResponsePlanStep {
@@ -48,6 +65,11 @@ function mapRecord(r: any): ResponseRecord {
     approver: r?.approver || undefined,
     verification: r?.verification || undefined,
     evidenceId: r?.evidence_id || undefined,
+    targetKind: typeof r?.target_kind === 'string' ? r.target_kind : undefined,
+    fingerprint: r?.fingerprint && typeof r.fingerprint === 'object' ? r.fingerprint : undefined,
+    submittedBy: r?.submitted_by || undefined,
+    reversalRequestedBy: r?.reversal_requested_by || undefined,
+    approvalState: ['pending', 'approved', 'denied', 'timeout', 'consumed'].includes(r?.approval_state) ? r.approval_state : undefined,
   }
 }
 
@@ -63,7 +85,7 @@ function mapPlan(r: any): ResponsePlan {
 
 export interface ApplyOutcome {
   record: ResponseRecord
-  pending: boolean // 202: recorded, awaiting a second human approval
+  pending: boolean // The record is awaiting approval; verification has its own status.
 }
 
 // Purple-team coverage (#426): for each executed attack technique, whether the expected detection fired.
@@ -123,15 +145,17 @@ export const blueteamApi = {
       throw e
     }
   },
-  planResponse: async (engagementId: string, body: { kind: ResponseKind; target: string; target_kind?: string }): Promise<ResponsePlan> =>
+  planResponse: async (engagementId: string, body: { kind: ResponseKind; target: string; target_kind?: string; fingerprint?: ResponseFingerprint }): Promise<ResponsePlan> =>
     mapPlan(await req(`/blueteam/engagements/${encodeURIComponent(engagementId)}/response/plan`, { method: 'POST', body: JSON.stringify(body) })),
-  applyResponse: async (engagementId: string, body: { kind: ResponseKind; target: string; target_kind?: string }): Promise<ApplyOutcome> => {
+  applyResponse: async (engagementId: string, body: { kind: ResponseKind; target: string; target_kind?: string; fingerprint?: ResponseFingerprint }): Promise<ApplyOutcome> => {
     // The apply route returns the record for both 202 (recorded, awaiting a second human) and 200 (applied);
     // the record's state distinguishes them.
     const record = mapRecord(await req(`/blueteam/engagements/${encodeURIComponent(engagementId)}/response/apply`, { method: 'POST', body: JSON.stringify(body) }))
-    return { record, pending: record.state === 'pending' }
+    return { record, pending: record.approvalState === 'pending' }
   },
-  revertResponse: async (id: string, body: { target: string; target_kind?: string }): Promise<ResponseRecord> =>
+  decideResponse: async (id: string, body: { approve: boolean; reason: string }): Promise<ResponseRecord> =>
+    mapRecord(await req(`/blueteam/response/${encodeURIComponent(id)}/decide`, { method: 'POST', body: JSON.stringify(body) })),
+  revertResponse: async (id: string, body: { target: string; target_kind: string; fingerprint: ResponseFingerprint }): Promise<ResponseRecord> =>
     mapRecord(await req(`/blueteam/response/${encodeURIComponent(id)}/revert`, { method: 'POST', body: JSON.stringify(body) })),
   // Purple-team coverage trend for an engagement (all coverage records across runs). Returns [] when the
   // feature is not enabled (the route answers an empty set rather than 404).

@@ -67,13 +67,29 @@ func NewService(signers SignerStore, outbox ReportOutbox, keys KeyRegistrar, rep
 // Observe completes one server-addressed observation. A command result is never
 // sufficient: no actual, bounded process evidence means an unknown/failed work item.
 func (s *Service) Observe(ctx context.Context, observerAgentID, primaryAssetID, assignedTargetAssetID shared.ID, order WorkOrder) error {
+	now := s.clock.Now()
+	if order.LeaseUntil.IsZero() || !now.Before(order.LeaseUntil) {
+		return fmt.Errorf("%w: response observation lease elapsed", shared.ErrForbidden)
+	}
 	request := order.Request
 	if request == nil || order.ID.IsZero() || strings.TrimSpace(order.LeaseID) == "" || observerAgentID.IsZero() || primaryAssetID.IsZero() || assignedTargetAssetID.IsZero() || primaryAssetID == assignedTargetAssetID ||
 		request.RequestID != order.ID || request.ObserverAgentID != observerAgentID || request.AssetID != assignedTargetAssetID || order.AssetID != assignedTargetAssetID {
-		return s.fail(ctx, order, "response observation identity binding mismatch")
+		return s.refuse(ctx, order, "response observation identity binding mismatch")
 	}
-	if err := request.Validate(); err != nil || request.NotAfter.After(order.LeaseUntil) {
-		return s.fail(ctx, order, "invalid response observation request")
+	if err := request.Validate(); err != nil {
+		return s.refuse(ctx, order, "invalid response observation request")
+	}
+	if now.Before(request.IssuedAt) || !now.Before(request.NotAfter) {
+		return fmt.Errorf("%w: response observation is outside its authorization window", shared.ErrForbidden)
+	}
+	deadline := request.NotAfter
+	if order.LeaseUntil.Before(deadline) {
+		deadline = order.LeaseUntil
+	}
+	ctx, cancel := context.WithTimeout(ctx, deadline.Sub(now))
+	defer cancel()
+	if err := s.checkWindow(ctx, deadline); err != nil {
+		return err
 	}
 	if err := s.work.Progress(ctx, order.ID, order.LeaseID); err != nil {
 		return fmt.Errorf("progress response observation work: %w", err)
@@ -82,9 +98,15 @@ func (s *Service) Observe(ctx context.Context, observerAgentID, primaryAssetID, 
 	if err != nil {
 		return fmt.Errorf("load response observation outbox: %w", err)
 	}
+	if err := s.checkWindow(ctx, deadline); err != nil {
+		return err
+	}
 	if !found {
 		if !s.wait(ctx, request.NotAfter, order.LeaseUntil) {
 			return fmt.Errorf("%w: response observation window elapsed", shared.ErrForbidden)
+		}
+		if err := s.checkWindow(ctx, deadline); err != nil {
+			return err
 		}
 		observedAt := s.clock.Now().UTC().Truncate(time.Microsecond)
 		if !observedAt.After(request.AttemptedAt) || observedAt.After(request.NotAfter) {
@@ -94,9 +116,15 @@ func (s *Service) Observe(ctx context.Context, observerAgentID, primaryAssetID, 
 		if err != nil {
 			return fmt.Errorf("prepare response observer signer: %w", err)
 		}
+		if err := s.checkWindow(ctx, deadline); err != nil {
+			return err
+		}
 		proof := fleetagent.ProveKeyPossession(signer.PrivateKey, signer.Key)
 		if err := s.keys.RegisterSigningKey(ctx, signer.Key, proof); err != nil {
 			return fmt.Errorf("register response observer key: %w", err)
+		}
+		if err := s.checkWindow(ctx, deadline); err != nil {
+			return err
 		}
 		report = fleetagent.ResponseVerificationReport{
 			ProtocolVersion: fleetagent.TelemetryProtocolVersion, ReportID: request.RequestID, AgentID: observerAgentID, HostID: observerAgentID,
@@ -111,6 +139,9 @@ func (s *Service) Observe(ctx context.Context, observerAgentID, primaryAssetID, 
 	} else if !MatchesRequest(report, *request) {
 		return fmt.Errorf("%w: response observation outbox does not match addressed request", shared.ErrForbidden)
 	}
+	if err := s.checkWindow(ctx, deadline); err != nil {
+		return err
+	}
 	if err := s.reports.ShipResponseVerification(ctx, report); err != nil {
 		if permanentlyRefused(err) {
 			if deleteErr := s.outbox.AcknowledgeResponseVerificationReport(request.AttemptKey); deleteErr != nil {
@@ -118,6 +149,9 @@ func (s *Service) Observe(ctx context.Context, observerAgentID, primaryAssetID, 
 			}
 		}
 		return fmt.Errorf("ship response observation: %w", err)
+	}
+	if err := s.checkWindow(ctx, deadline); err != nil {
+		return err
 	}
 	if err := s.work.SubmitResult(ctx, order.ID, order.LeaseID, workorder.StateSucceeded, "signed response observation accepted"); err != nil {
 		return fmt.Errorf("submit response observation result: %w", err)
@@ -128,9 +162,23 @@ func (s *Service) Observe(ctx context.Context, observerAgentID, primaryAssetID, 
 	return nil
 }
 
-func (s *Service) fail(ctx context.Context, order WorkOrder, reason string) error {
-	if err := s.work.SubmitResult(ctx, order.ID, order.LeaseID, workorder.StateFailed, reason); err != nil {
-		return fmt.Errorf("submit failed response observation result: %w", err)
+func (s *Service) refuse(ctx context.Context, order WorkOrder, reason string) error {
+	if err := s.checkWindow(ctx, order.LeaseUntil); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, order.LeaseUntil.Sub(s.clock.Now()))
+	defer cancel()
+	if err := s.work.SubmitResult(ctx, order.ID, order.LeaseID, workorder.StateRefused, reason); err != nil {
+		return fmt.Errorf("submit refused response observation result: %w", err)
+	}
+	return nil
+}
+func (s *Service) checkWindow(ctx context.Context, deadline time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !s.clock.Now().Before(deadline) {
+		return fmt.Errorf("%w: response observation window elapsed", shared.ErrForbidden)
 	}
 	return nil
 }

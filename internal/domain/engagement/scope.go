@@ -26,6 +26,7 @@ const (
 	TargetRepo         TargetKind = "repo"
 	TargetImage        TargetKind = "image"
 	TargetCloudAccount TargetKind = "cloud_account"
+	TargetProcess      TargetKind = "process"
 )
 
 // Target is a single in-scope or out-of-scope asset.
@@ -77,6 +78,9 @@ func matchesDenyTarget(scopeT, req Target) bool {
 	normalized, err := NormalizeTarget(scopeT, true)
 	if err != nil {
 		return true
+	}
+	if normalized.Kind == TargetProcess || req.Kind == TargetProcess {
+		return matchScopeTarget(normalized, req)
 	}
 	if normalized.Kind == TargetURL {
 		if req.Kind == TargetURL {
@@ -151,6 +155,10 @@ func matchesAllowTarget(scopeT, req Target) bool {
 func matchScopeTarget(scopeT, req Target) bool {
 	if strings.TrimSpace(req.Value) == "" {
 		return false
+	}
+	if scopeT.Kind == TargetProcess || req.Kind == TargetProcess {
+		return scopeT.Kind == TargetProcess && req.Kind == TargetProcess &&
+			req.Validate() == nil && scopeT.Value == req.Value
 	}
 	if scopeT.Kind == TargetRepo && req.Kind == TargetRepo && localPathContains(scopeT.Value, req.Value) {
 		return true

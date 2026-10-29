@@ -697,7 +697,7 @@ func (r *runner) submitResponseResult(ctx context.Context, cred fleetclient.Cred
 	request := fleetclient.ResponseResultRequest{
 		Status: status, Reason: reason, AttemptKey: result.AttemptKey,
 		CommandDigest: result.CommandDigest, ExecutionState: result.State, ObservedRadius: result.ObservedRadius,
-		AffectedCount: result.AffectedCount, AlreadyApplied: result.AlreadyApplied, CompletedAt: result.CompletedAt,
+		AffectedCount: result.AffectedCount, AlreadyApplied: result.AlreadyApplied, CompletedAt: result.CompletedAt, ReplacementProcessEntityID: result.ReplacementProcessEntityID,
 		LeaseID: result.LeaseID,
 	}
 	if err := r.api.SubmitResponseResult(ctx, cred.Token, orderID, request); err != nil {

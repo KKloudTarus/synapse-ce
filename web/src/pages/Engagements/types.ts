@@ -13,7 +13,7 @@ export interface EngagementItem extends Engagement {
 }
 
 export type EngagementStatusFilter = 'All' | 'Draft' | 'Active' | 'Completed' | 'Archived'
-export type EngagementScopeFilter = 'All' | 'repo' | 'domain' | 'host' | 'url' | 'image' | 'cidr'
+export type EngagementScopeFilter = 'All' | 'repo' | 'domain' | 'host' | 'url' | 'image' | 'cidr' | 'process'
 
 export type SortField = 'name' | 'repository' | 'status' | 'findings' | 'lastScanDate'
 export type SortDirection = 'asc' | 'desc'

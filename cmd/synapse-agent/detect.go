@@ -190,13 +190,13 @@ func (r *runner) startDetectionProducer(
 	go func() {
 		defer close(done)
 		<-ctx.Done()
+		<-coverageDone
+		<-engineDone
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), coverageReportFinalTimeout)
 		if recordErr := agentspool.RecordCoverage(shutdownCtx, transport.durable, eng.Coverage(), time.Now().UTC()); recordErr != nil {
 			log.Printf("detection: persist final coverage/sensor state: %v", recordErr)
 		}
 		cancel()
-		<-coverageDone
-		<-engineDone
 	}()
 	return done, nil
 }

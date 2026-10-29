@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
@@ -53,22 +54,30 @@ type ResponseExecOutcome struct {
 	EnforcedHaltGeneration int64
 }
 
+// ErrResponseTargetEvidencePending indicates the bounded target evidence has not arrived yet.
+var ErrResponseTargetEvidencePending = errors.New("target evidence pending")
+
 type ResponseObservationDispatcher interface {
 	EnsureObservation(context.Context, ResponseVerificationRequest) error
 }
 
 type ResponseVerificationRequest struct {
-	TenantID              shared.ID
-	EngagementID          shared.ID
-	Action                rdom.Action
-	Target                responsesaga.TargetFingerprint
-	ExecutorID            string
-	ExecutorAgentID       shared.ID
-	Reversal              bool
-	AttemptKey            string
-	VerificationChallenge string
-	AttemptedAt           time.Time
-	DeadlineAt            time.Time
+	TenantID                   shared.ID
+	EngagementID               shared.ID
+	Action                     rdom.Action
+	Target                     responsesaga.TargetFingerprint
+	ExecutorID                 string
+	ExecutorAgentID            shared.ID
+	Reversal                   bool
+	AttemptKey                 string
+	VerificationChallenge      string
+	AttemptedAt                time.Time
+	DeadlineAt                 time.Time
+	OriginalAttemptKey         string
+	OriginalAttemptedAt        time.Time
+	OriginalDeadlineAt         time.Time
+	OriginalChallenge          string
+	ReplacementProcessEntityID shared.ID
 }
 
 // ResponseActuator is the narrow endpoint side-effect boundary.
@@ -77,9 +86,10 @@ type ResponseActuator interface {
 }
 
 type ResponseActuatorOutcome struct {
-	ObservedRadius offensivepolicy.Radius
-	AffectedCount  int
-	AlreadyApplied bool
+	ReplacementProcessEntityID shared.ID
+	ObservedRadius             offensivepolicy.Radius
+	AffectedCount              int
+	AlreadyApplied             bool
 }
 
 // FleetWorkIssueInput is the transport-neutral work-order issuance DTO.

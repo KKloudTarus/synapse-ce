@@ -174,9 +174,14 @@ func (s *Service) Execute(ctx context.Context, command fleetagent.ResponseComman
 	s.active = nil
 	executionErr := execCtx.Err()
 	cancel()
-	if execErr != nil || executionErr != nil || !outcome.ObservedRadius.Valid() || outcome.AffectedCount < 0 {
+	if execErr != nil || executionErr != nil || !outcome.ObservedRadius.Valid() || outcome.AffectedCount < 0 ||
+		(command.Reversal && (outcome.ReplacementProcessEntityID.IsZero() || outcome.ReplacementProcessEntityID == command.Target.ProcessEntityID)) ||
+		(!command.Reversal && !outcome.ReplacementProcessEntityID.IsZero()) {
 		s.stateMu.Unlock()
 		result, journalErr := s.markUnknown(command, digest, leaseID, leaseUntil)
+		if execErr == nil && executionErr == nil {
+			execErr = fmt.Errorf("%w: response actuator returned an incomplete or inconsistent outcome", shared.ErrValidation)
+		}
 		return result, errors.Join(execErr, executionErr, journalErr)
 	}
 	if err := s.checkFence(context.WithoutCancel(ctx), command.HaltGeneration); err != nil {
@@ -192,7 +197,7 @@ func (s *Service) Execute(ctx context.Context, command fleetagent.ResponseComman
 	}
 	result := fleetagent.ResponseExecutionResult{
 		AttemptKey: command.AttemptKey, CommandDigest: digest, LeaseID: leaseID, State: fleetagent.ResponseExecutionApplied,
-		ObservedRadius: outcome.ObservedRadius, AffectedCount: outcome.AffectedCount,
+		ObservedRadius: outcome.ObservedRadius, AffectedCount: outcome.AffectedCount, ReplacementProcessEntityID: outcome.ReplacementProcessEntityID,
 		AlreadyApplied: outcome.AlreadyApplied, CompletedAt: completedAt,
 	}
 	entry.State = result.State

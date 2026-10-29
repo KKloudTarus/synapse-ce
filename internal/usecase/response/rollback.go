@@ -10,6 +10,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -65,10 +66,7 @@ func (s *Service) Revert(ctx context.Context, actionID shared.ID, target engagem
 	if fingerprint != rec.TargetFingerprint {
 		return Record{}, fmt.Errorf("%w: reversal target fingerprint does not match the durable response binding", shared.ErrConflict)
 	}
-	if target.Value != rec.Action.Target.String() {
-		return Record{}, fmt.Errorf("%w: reversal target %q does not match the action target %q", shared.ErrForbidden, target.Value, rec.Action.Target)
-	}
-	if err := bindFingerprint(rec.Action, fingerprint); err != nil {
+	if err := rdom.ValidateTargetBinding(rec.Action, target, fingerprint); err != nil {
 		return Record{}, err
 	}
 	if rec.State == StateReverted {

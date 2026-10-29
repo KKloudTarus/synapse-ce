@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/agentspool"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
@@ -35,6 +36,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/responseactuator"
@@ -42,6 +44,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/responsekey"
 	responseobserverinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/responseobserver"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/spool"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
@@ -69,7 +72,8 @@ const nativeSagaTenantID shared.ID = "native-saga-tenant"
 // their production paths. Target telemetry is additionally bound to the live observer work order, so the
 // observer's assignment does not relabel its general primary-host telemetry. The process-exit telemetry
 // projects into the authoritative endpoint timeline and derives fixed-window process coverage before
-// verification is attempted.
+// verification is attempted. The sensor and WAL are real; signed transport and coverage materialization
+// below use test fixtures, so this test alone does not prove the deployed telemetry transport.
 func TestNativeGovernedResponseSaga(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skipf("live Registry/Actuator response requires root; uid=%d", os.Geteuid())
@@ -88,11 +92,51 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 
 	assetID, observerHostID := shared.ID("native-asset"), shared.ID("native-observer-host")
 	executorID, observerID := shared.ID("native-executor"), shared.ID("native-observer")
-	probe, event, processID := nativeSagaProcess(t, assetID)
+	wal, err := spool.Open(spool.Config{Dir: t.TempDir(), Session: fleetagent.CanonicalSessionID(executorID), Boot: fleetagent.BootID("native-boot")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = wal.Close() }()
+	raw := ebpf.NewSensor(executorID, executorID, []detection.Class{detection.ClassProcess})
+	durable, err := agentspool.NewDurableSensor(raw, wal, agentspool.SensorIdentity{AgentID: executorID, AssetID: assetID, AgentSession: shared.ID(fleetagent.CanonicalSessionID(executorID)), BootID: "native-boot", SensorID: "native-test", SensorVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := durable.SetProcessLifecycleObserver(registry); err != nil {
+		t.Fatal(err)
+	}
+	if err := durable.Start(ctx); err != nil {
+		t.Skipf("native eBPF process sensor unavailable: %v", err)
+	}
+	defer func() { _ = durable.Close() }()
+	processEvents := make(chan detection.Event, 256)
+	go func() {
+		for observed := range durable.Events() {
+			if observed.Process != nil {
+				select {
+				case processEvents <- observed:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	probe := nativeSagaRestartProbe(t)
+	if err := probe.command.Start(); err != nil {
+		t.Skipf("cannot start disposable non-root actuator target: %v", err)
+	}
 	defer probe.stop(t)
+	if err := nativeSagaWaitForProbeReady(t, probe.ready); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := nativeSagaWaitProcessEvent(ctx, processEvents, probe.command.Process.Pid, "exec")
+	if err != nil {
+		t.Fatalf("observe original kernel exec: %v", err)
+	}
+	event := *initial.Process
+	processID := telemetry.ProcessEntityID(assetID, "native-boot", event.PID, event.StartTimeNanos)
 	childExited := make(chan error, 1)
 	go func() { childExited <- probe.command.Wait() }()
-	registry.ObserveProcess(assetID, "native-boot", event)
 
 	engagements := memory.NewEngagementRepository()
 	eng := nativeSagaEngagement(t, clock.Now(), processID)
@@ -214,7 +258,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	receiptBuilder, err := NewTargetEvidenceReceiptBuilder(bindings, timeline, coverage, observations, clock)
+	receiptBuilder, err := NewTargetEvidenceReceiptBuilder(bindings, agents, timeline, coverage, observations, clock, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +288,7 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := engagement.Target{Kind: engagement.TargetCloudAccount, Value: processID.String()}
+	target := engagement.Target{Kind: engagement.TargetProcess, Value: processID.String()}
 	fingerprint := responsesaga.TargetFingerprint{
 		Kind: responsesaga.FingerprintProcess, ProcessAssetID: assetID, ProcessEntityID: processID,
 	}
@@ -263,7 +307,11 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 		if err := nativeSagaExpectTermination(ctx, childExited); err != nil {
 			return err
 		}
-		return nativeSagaIngestTargetProcess(ctx, telemetryService, observerKeys, timeline, coverage, executorID, assetID, privacyAssignment.Digest, command, event, "", clock)
+		exit, err := nativeSagaWaitProcessEvent(ctx, processEvents, event.PID, "exit")
+		if err != nil {
+			return err
+		}
+		return nativeSagaIngestTargetProcess(ctx, telemetryService, observerKeys, timeline, coverage, executorID, assetID, privacyAssignment.Digest, command, *exit.Process, "", exit.At, clock)
 	}, endpointDone)
 	observerDone := make(chan error, 1)
 	ingestService, err := responseverificationingest.NewService(observations, observations, responseStore, work, observerAwareBindings, observerKeys, auditLog, clock)
@@ -282,12 +330,6 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	if err := <-observerDone; err != nil {
 		t.Fatalf("observer worker: %v", err)
 	}
-	// The live agent would receive the canonical exit event through its durable telemetry path. The test
-	// supplies that observed fact only after endpoint execution has completed; this preserves the Registry's
-	// prerequisite that restart waits for the original pidfd-confirmed identity to exit.
-	exitEvent := event
-	exitEvent.Kind = "exit"
-	registry.ObserveProcess(assetID, "native-boot", exitEvent)
 
 	record, err = coordinator.Apply(ctx, "native-incident", action, target, fingerprint, "operator-alice")
 	if err != nil {
@@ -310,11 +352,16 @@ func TestNativeGovernedResponseSaga(t *testing.T) {
 	}
 	rollbackEndpointDone := make(chan error, 1)
 	go nativeSagaRunEndpointWorker(ctx, work, endpointExecutor, executorID, func(ctx context.Context, command fleetagent.ResponseCommand) error {
-		restarted, replacementProcessID, err := nativeSagaFindRestartedProbe(ctx, probe, event.PID, assetID)
+		pid, err := nativeSagaRestartedPID(ctx, probe, event.PID)
 		if err != nil {
 			return err
 		}
-		return nativeSagaIngestTargetProcess(ctx, telemetryService, observerKeys, timeline, coverage, executorID, assetID, privacyAssignment.Digest, command, restarted, replacementProcessID, clock)
+		restarted, err := nativeSagaWaitProcessEvent(ctx, processEvents, pid, "exec")
+		if err != nil {
+			return err
+		}
+		replacementProcessID := telemetry.ProcessEntityID(assetID, "native-boot", pid, restarted.Process.StartTimeNanos)
+		return nativeSagaIngestTargetProcess(ctx, telemetryService, observerKeys, timeline, coverage, executorID, assetID, privacyAssignment.Digest, command, *restarted.Process, replacementProcessID, restarted.At, clock)
 	}, rollbackEndpointDone)
 
 	record, err = responseService.Revert(ctx, action.ID, target, fingerprint, "operator-alice")
@@ -354,7 +401,7 @@ func nativeSagaEngagement(t *testing.T, now time.Time, processID shared.ID) *eng
 	if err := eng.SetAuthorizationWindow(&from, &until, "UTC", now); err != nil {
 		t.Fatal(err)
 	}
-	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetCloudAccount, Value: processID.String()}}}
+	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetProcess, Value: processID.String()}}}
 	return eng
 }
 
@@ -435,27 +482,6 @@ type nativeSagaProbe struct {
 	ready   string
 }
 
-func nativeSagaProcess(t *testing.T, assetID shared.ID) (nativeSagaProbe, detection.ProcessEvent, shared.ID) {
-	t.Helper()
-	probe := nativeSagaRestartProbe(t)
-	if err := probe.command.Start(); err != nil {
-		t.Skipf("cannot start disposable non-root actuator target: %v", err)
-	}
-	if err := nativeSagaWaitForProbeReady(t, probe.ready); err != nil {
-		_ = probe.command.Process.Kill()
-		t.Fatal(err)
-	}
-	startNanos, err := nativeSagaProcessStartNanos(probe.command.Process.Pid)
-	if err != nil {
-		_ = probe.command.Process.Kill()
-		t.Fatal(err)
-	}
-	event := detection.ProcessEvent{
-		Kind: "exec", PID: probe.command.Process.Pid, PPID: os.Getpid(), StartTimeNanos: startNanos, Comm: "native-probe", Path: probe.binary,
-	}
-	return probe, event, telemetry.ProcessEntityID(assetID, "native-boot", event.PID, event.StartTimeNanos)
-}
-
 func nativeSagaWaitForProbeReady(t *testing.T, ready string) error {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -507,10 +533,21 @@ func main() {
 	if err := os.WriteFile(source, []byte(program), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	build := exec.Command("go", "build", "-o", binary, source)
-	build.Env = append([]string{}, os.Environ()...)
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build native response restart probe: %v: %s", err, output)
+	if prebuilt := os.Getenv("SYNAPSE_NATIVE_RESPONSE_PROBE"); prebuilt != "" {
+		// Isolated kernel VMs can use the same fixture built by the host toolchain.
+		data, err := os.ReadFile(prebuilt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(binary, data, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		build := exec.Command("go", "build", "-o", binary, source)
+		build.Env = append([]string{}, os.Environ()...)
+		if output, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build native response restart probe: %v: %s", err, output)
+		}
 	}
 	if err := os.Chmod(binary, 0o700); err != nil {
 		t.Fatal(err)
@@ -553,47 +590,32 @@ func (p nativeSagaProbe) stop(t *testing.T) {
 	}
 }
 
-func nativeSagaFindRestartedProbe(ctx context.Context, probe nativeSagaProbe, originalPID int, assetID shared.ID) (detection.ProcessEvent, shared.ID, error) {
+func nativeSagaRestartedPID(ctx context.Context, probe nativeSagaProbe, originalPID int) (int, error) {
 	for {
 		data, err := os.ReadFile(probe.pidFile)
 		if err == nil {
 			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
 			if parseErr == nil && pid > 1 && pid != originalPID {
-				if _, err := os.Stat(probe.ready); err == nil {
-					startNanos, err := nativeSagaProcessStartNanos(pid)
-					if err == nil {
-						event := detection.ProcessEvent{
-							Kind: "exec", PID: pid, PPID: os.Getpid(), StartTimeNanos: startNanos, Comm: "native-probe", Path: probe.binary,
-						}
-						return event, telemetry.ProcessEntityID(assetID, "native-boot", event.PID, event.StartTimeNanos), nil
-					}
-				}
+				return pid, nil
 			}
 		}
 		if !nativeSagaPause(ctx) {
-			return detection.ProcessEvent{}, "", fmt.Errorf("observe restarted probe: %w", ctx.Err())
+			return 0, fmt.Errorf("observe restarted probe PID: %w", ctx.Err())
 		}
 	}
 }
 
-func nativeSagaProcessStartNanos(pid int) (uint64, error) {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return 0, fmt.Errorf("read child process stat: %w", err)
+func nativeSagaWaitProcessEvent(ctx context.Context, events <-chan detection.Event, pid int, kind string) (detection.Event, error) {
+	for {
+		select {
+		case event := <-events:
+			if event.Process != nil && event.Process.PID == pid && event.Process.Kind == kind {
+				return event, nil
+			}
+		case <-ctx.Done():
+			return detection.Event{}, fmt.Errorf("observe %s for PID %d: %w", kind, pid, ctx.Err())
+		}
 	}
-	boundary := strings.LastIndexByte(string(data), ')')
-	if boundary < 0 {
-		return 0, fmt.Errorf("child process stat has no command boundary")
-	}
-	fields := strings.Fields(string(data[boundary+1:]))
-	if len(fields) <= 19 {
-		return 0, fmt.Errorf("child process stat is truncated")
-	}
-	ticks, err := strconv.ParseUint(fields[19], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parse child process start tick: %w", err)
-	}
-	return ticks * 10_000_000, nil
 }
 
 func nativeSagaRunEndpointWorker(ctx context.Context, work *fleetwork.Service, service *responseexecute.Service, agentID shared.ID, observe func(context.Context, fleetagent.ResponseCommand) error, done chan<- error) {
@@ -714,8 +736,8 @@ func nativeSagaIngestObserverReport(ctx context.Context, ingest *responseverific
 	return err
 }
 
-func nativeSagaIngestTargetProcess(ctx context.Context, ingest *telemetryingest.Service, keys *memory.AgentSigningKeyStore, timeline *memory.EndpointTimelineStore, coverage *memory.CoverageWindowStore, agentID, assetID shared.ID, privacyDigest string, command fleetagent.ResponseCommand, event detection.ProcessEvent, replacementProcessID shared.ID, clock ports.Clock) error {
-	observedAt := clock.Now().UTC().Truncate(time.Microsecond)
+func nativeSagaIngestTargetProcess(ctx context.Context, ingest *telemetryingest.Service, keys *memory.AgentSigningKeyStore, timeline *memory.EndpointTimelineStore, coverage *memory.CoverageWindowStore, agentID, assetID shared.ID, privacyDigest string, command fleetagent.ResponseCommand, event detection.ProcessEvent, replacementProcessID shared.ID, eventAt time.Time, clock ports.Clock) error {
+	observedAt := eventAt.UTC().Truncate(time.Microsecond)
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
@@ -810,7 +832,7 @@ func nativeSagaIngestTargetProcess(ctx context.Context, ingest *telemetryingest.
 
 	kind, entityID := endpoint.TimelineProcessExit, command.Target.ProcessEntityID
 	if command.Reversal {
-		kind, entityID = endpoint.TimelineProcessStart, replacementProcessID
+		kind, entityID = endpoint.TimelineProcessExec, replacementProcessID
 	}
 	timelineEntry := endpoint.TimelineEntry{
 		OccurredAt: observedAt, TenantID: nativeSagaTenantID, AssetID: assetID,
@@ -818,22 +840,16 @@ func nativeSagaIngestTargetProcess(ctx context.Context, ingest *telemetryingest.
 		EntityID: entityID, Kind: kind, EventID: eventID,
 	}
 	timelineEntries := []endpoint.TimelineEntry{timelineEntry}
-	if command.Reversal {
-		timelineEntries = append([]endpoint.TimelineEntry{{
-			OccurredAt: command.IssuedAt.UTC().Truncate(time.Microsecond).Add(time.Microsecond), TenantID: nativeSagaTenantID, AssetID: assetID,
-			SourceAgentID: agentID, SourceAgentSessionID: shared.ID(sessionID), EntityKind: endpoint.EntityProcess,
-			EntityID: command.Target.ProcessEntityID, Kind: endpoint.TimelineProcessExit, EventID: shared.ID("native-original-exit:" + command.AttemptKey),
-		}}, timelineEntries...)
-	}
+
 	if err := timeline.AppendTimeline(ctx, timelineEntries); err != nil {
 		return fmt.Errorf("append authoritative process timeline: %w", err)
 	}
 	window := sensorstate.CoverageWindow{
-		AssetID: assetID, AgentID: agentID, HostID: assetID,
+		AssetID: assetID, AgentID: agentID, HostID: agentID,
 		Since: command.IssuedAt.UTC().Truncate(time.Microsecond).Add(-time.Second), Until: command.NotAfter.UTC().Truncate(time.Microsecond),
 		InputDigest: strings.Repeat("a", 64), CreatedAt: observedAt.Add(time.Microsecond), BatchCount: 1,
 		States: []detection.ClassCoverage{{
-			Class: detection.ClassProcess, HostID: assetID, AgentID: agentID,
+			Class: detection.ClassProcess, HostID: agentID, AgentID: agentID,
 			State: detection.StateActive, Since: command.IssuedAt.UTC().Truncate(time.Microsecond),
 		}},
 	}
@@ -843,7 +859,7 @@ func nativeSagaIngestTargetProcess(ctx context.Context, ingest *telemetryingest.
 		return fmt.Errorf("append authoritative process coverage: %w", err)
 	}
 	storedTimeline, _ := timeline.QueryTimeline(ctx, ports.EndpointTimelineQuery{AssetID: assetID, SourceAgentID: agentID, SourceAgentSessionID: shared.ID(sessionID), From: command.IssuedAt, To: observedAt.Add(time.Second), Limit: 10})
-	storedCoverage, _ := coverage.ListCoverageWindowsBounded(ctx, ports.CoverageWindowQuery{AgentID: agentID, AssetID: assetID, HostID: assetID, Since: command.IssuedAt, Until: observedAt.Add(time.Second)}, 10)
+	storedCoverage, _ := coverage.ListCoverageWindowsBounded(ctx, ports.CoverageWindowQuery{AgentID: agentID, AssetID: assetID, HostID: agentID, Since: command.IssuedAt, Until: observedAt.Add(time.Second)}, 10)
 	if len(storedTimeline) == 0 || len(storedCoverage) == 0 {
 		return fmt.Errorf("authoritative process evidence was not readable: timeline=%d coverage=%d", len(storedTimeline), len(storedCoverage))
 	}

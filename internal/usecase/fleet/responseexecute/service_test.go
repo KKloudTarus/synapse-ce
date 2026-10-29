@@ -133,7 +133,7 @@ func executeCommand(t *testing.T) (fleetagent.ResponseCommand, ed25519.PublicKey
 	if err != nil {
 		t.Fatal(err)
 	}
-	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +146,8 @@ func executeCommand(t *testing.T) (fleetagent.ResponseCommand, ed25519.PublicKey
 		ProtocolVersion: fleetagent.ResponseCommandProtocolVersion, CommandID: "command-1", TenantID: "tenant-1",
 		AgentID: "executor-1", AssetID: "asset-1", EngagementID: "eng-1", Action: action,
 		ActionDigest: digest, AttemptKey: "attempt-1", VerificationChallenge: strings.Repeat("a", 64),
-		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "process-1"},
-		Target:              responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: "pe_11111111111111111111111111111111"},
+		Target:              responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		HaltGeneration:      0, IssuedAt: now.Add(-time.Second), NotAfter: now.Add(time.Minute), SigningKeyID: evidence.KeyFingerprint(public),
 	}
 	command.Signature = fleetagent.SignResponseCommand(private, command)
@@ -512,5 +512,25 @@ func TestLeaseExpiryCancelsInFlightActuatorAndMarksOutcomeUnknown(t *testing.T) 
 	}
 	if !journal.entry.LeaseUntil.Equal(leaseUntil) {
 		t.Fatalf("journal lease until=%s want=%s", journal.entry.LeaseUntil, leaseUntil)
+	}
+}
+
+func TestReversalWithoutReplacementIsUnknownAndNeverRelaunched(t *testing.T) {
+	command, public, private, now := executeCommand(t)
+	command.Reversal = true
+	command.Signature = fleetagent.SignResponseCommand(private, command)
+	journal := &executeJournal{}
+	actuator := &executeActuator{journal: journal}
+	service, err := NewService("executor-1", "asset-1", executeKeys{public: public}, journal, actuator, executeClock{at: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Execute(context.Background(), command, "lease-1", command.NotAfter)
+	if !errors.Is(err, shared.ErrValidation) || result.State != fleetagent.ResponseExecutionOutcomeUnknown {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	retry, _ := service.Execute(context.Background(), command, "lease-1", command.NotAfter)
+	if retry.State != fleetagent.ResponseExecutionOutcomeUnknown || actuator.calls != 1 {
+		t.Fatalf("retry=%+v calls=%d", retry, actuator.calls)
 	}
 }

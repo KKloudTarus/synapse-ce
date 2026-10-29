@@ -15,7 +15,7 @@ import (
 
 type processController interface {
 	StopProcess(context.Context, shared.ID) (alreadyStopped bool, err error)
-	RestartProcess(context.Context, shared.ID) (alreadyRestarted bool, err error)
+	RestartProcessCorrelated(context.Context, shared.ID) (alreadyRestarted bool, replacement shared.ID, err error)
 }
 
 // Actuator maps a validated protocol command to a direct kernel/process API. It never executes the
@@ -45,18 +45,22 @@ func (a *Actuator) ExecuteResponse(ctx context.Context, command fleetagent.Respo
 		return ports.ResponseActuatorOutcome{}, fmt.Errorf("%w: endpoint actuator supports only best-effort reversible process stop", shared.ErrValidation)
 	}
 	if command.Reversal {
-		alreadyRestarted, err := a.processes.RestartProcess(ctx, command.Target.ProcessEntityID)
+		alreadyRestarted, replacement, err := a.processes.RestartProcessCorrelated(ctx, command.Target.ProcessEntityID)
 		if err != nil {
 			return ports.ResponseActuatorOutcome{}, fmt.Errorf("restart process target: %w", err)
+		}
+		if replacement.IsZero() || replacement == command.Target.ProcessEntityID {
+			return ports.ResponseActuatorOutcome{}, fmt.Errorf("%w: restart lacks an exact replacement identity", shared.ErrConflict)
 		}
 		affected := 1
 		if alreadyRestarted {
 			affected = 0
 		}
 		return ports.ResponseActuatorOutcome{
-			ObservedRadius: offensivepolicy.RadiusStateChanging,
-			AffectedCount:  affected,
-			AlreadyApplied: alreadyRestarted,
+			ReplacementProcessEntityID: replacement,
+			ObservedRadius:             offensivepolicy.RadiusStateChanging,
+			AffectedCount:              affected,
+			AlreadyApplied:             alreadyRestarted,
 		}, nil
 	}
 	alreadyStopped, err := a.processes.StopProcess(ctx, command.Target.ProcessEntityID)
