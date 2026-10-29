@@ -131,6 +131,15 @@ and the [SMTP AUTH enablement requirements](https://learn.microsoft.com/en-us/ex
 The [client SMTP submission guide](https://learn.microsoft.com/en-us/exchange/mail-flow-best-practices/how-to-set-up-a-multifunction-device-or-application-to-send-email-using-microsoft-365-or-office-365)
 requires STARTTLS; Microsoft 365 does not support port 465 for this path.
 
+Microsoft's [revised SMTP AUTH Basic authentication schedule](https://techcommunity.microsoft.com/blog/exchange/updated-exchange-online-smtp-auth-basic-authentication-deprecation-timeline/4489835)
+was checked on 2026-10-29. It leaves Basic authentication unchanged through
+December 2026, then turns it off by default for existing tenants at month end.
+Tenants created after December 2026 use OAuth by default. Microsoft plans to
+announce the final Basic authentication removal date in the second half of 2027;
+that is an announcement milestone, not the removal date itself. These milestones
+concern Basic authentication, not Synapse's OAuth/XOAUTH2 flow. The mailbox,
+Exchange grants and SMTP AUTH policy above still require independent verification.
+
 ```json
 {
   "host": "smtp.office365.com",
@@ -145,6 +154,14 @@ requires STARTTLS; Microsoft 365 does not support port 465 for this path.
   }
 }
 ```
+
+## Google Chat webhook prerequisites
+
+Google's [incoming webhook quickstart](https://developers.google.com/workspace/chat/quickstart/webhooks)
+requires a Business or Enterprise Workspace account whose organization permits
+incoming webhooks, plus a destination space. Access to the personal Gmail Chat UI
+or the ability to create a personal space does not establish those prerequisites.
+Check the authorized account and space before creating a webhook credential.
 
 ## Threading and tests
 
