@@ -34,6 +34,10 @@ func NormalizeRoot(provider Provider, root string) (string, string, error) {
 	if !provider.Valid() || root == "" || strings.ContainsAny(root, " \t\r\n") {
 		return "", "", fmt.Errorf("%w: invalid cloud scope", shared.ErrValidation)
 	}
+	root = strings.TrimPrefix(root, string(provider)+":")
+	if root == "" {
+		return "", "", fmt.Errorf("%w: cloud scope root is empty", shared.ErrValidation)
+	}
 	switch provider {
 	case ProviderAWS:
 		root = strings.TrimPrefix(root, "organization/")

@@ -1377,6 +1377,28 @@ func main() {
 			log.Error("egress grant service init failed", "err", serr)
 			os.Exit(1)
 		}
+		if cfg.CSPMEnabled {
+			reader, ok := cloudRunStore.(ports.CloudRunAuthorizationReader)
+			if !ok {
+				log.Error("CSPM grant authority requires persisted execution metadata")
+				os.Exit(1)
+			}
+			hosts := make(map[cloudposture.Provider][]string, len(cfg.CSPMProviders))
+			for _, name := range cfg.CSPMProviders {
+				hosts[cloudposture.Provider(strings.ToLower(strings.TrimSpace(name)))] = nil
+			}
+			for _, entry := range cfg.CSPMEgressHosts {
+				name, host, valid := strings.Cut(entry, "=")
+				provider := cloudposture.Provider(strings.ToLower(strings.TrimSpace(name)))
+				if _, enabled := hosts[provider]; valid && enabled {
+					hosts[provider] = append(hosts[provider], strings.TrimSpace(host))
+				}
+			}
+			if serr = grantService.SetCSPM(reader, hosts); serr != nil {
+				log.Error("CSPM grant authority init failed", "err", serr)
+				os.Exit(1)
+			}
+		}
 		egressGrantHandler, serr := httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
 		if serr != nil {
 			log.Error("egress grant HTTP handler init failed", "err", serr)

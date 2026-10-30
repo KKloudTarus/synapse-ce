@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -62,6 +63,7 @@ type Service struct {
 	executor     ports.CloudSandboxExecutor
 	runs         ports.CloudRunStore
 	runEnqueuer  ports.CloudRunEnqueuer
+	jobReader    ports.CloudRunJobReader
 	observations ports.CloudObservationStore
 	queue        ports.JobQueue
 	runLock      ports.RunLocker
@@ -109,23 +111,20 @@ func (s *Service) SetDurableExecution(runs ports.CloudRunStore, queue ports.JobQ
 	if !ok {
 		return fmt.Errorf("%w: CSPM run store must support atomic enqueue", shared.ErrValidation)
 	}
+	reader, ok := runs.(ports.CloudRunJobReader)
+	if !ok {
+		return fmt.Errorf("%w: CSPM run store must support authoritative job retrieval", shared.ErrValidation)
+	}
 	if binder, ok := runs.(interface{ SetQueue(ports.JobQueue) }); ok {
 		binder.SetQueue(queue)
 	}
-	s.runs, s.runEnqueuer, s.queue, s.ids = runs, enqueuer, queue, ids
+	s.runs, s.runEnqueuer, s.queue, s.ids, s.jobReader = runs, enqueuer, queue, ids, reader
 	return nil
 }
 
 func (s *Service) SetRunLock(lock ports.RunLocker) { s.runLock = lock }
 
-type cloudJob struct {
-	TenantID        shared.ID          `json:"tenant_id"`
-	RunID           shared.ID          `json:"run_id"`
-	EngagementID    shared.ID          `json:"engagement_id"`
-	Actor           string             `json:"actor"`
-	Scopes          []ports.CloudScope `json:"scopes"`
-	ApprovedTargets []string           `json:"approved_targets"`
-}
+type cloudJob = ports.CloudRunJob
 
 func (s *Service) Submit(ctx context.Context, in RunInput) (cloudposture.Run, error) {
 	if s.runs == nil || s.queue == nil || s.ids == nil {
@@ -199,6 +198,14 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	}
 	defer release()
 	ctx = leaseCtx
+	original, err := s.jobReader.GetCloudRunJob(ctx, job.TenantID, job.RunID)
+	if err != nil {
+		return fmt.Errorf("load authoritative CSPM job: %w", err)
+	}
+	if !reflect.DeepEqual(job, original) {
+		return fmt.Errorf("%w: dispatched CSPM job differs from original", shared.ErrForbidden)
+	}
+	job = original
 	run, err := s.runs.GetCloudRun(ctx, job.TenantID, job.RunID)
 	if err != nil {
 		return err
@@ -213,9 +220,19 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	for index := range job.Scopes {
 		job.Scopes[index].ApprovedTarget = job.ApprovedTargets[index]
 		job.Scopes[index].EgressExecutionKind = "cspm"
-		job.Scopes[index].EgressExecutionID = job.RunID.String()
+		job.Scopes[index].EgressExecutionID = ports.CSPMExecutionID(job.RunID, index)
 	}
 	result, runErr := s.Run(ctx, RunInput{TenantID: job.TenantID, EngagementID: job.EngagementID, Actor: job.Actor, Scopes: job.Scopes})
+	// Preserve a cancellation recorded while the helper was executing.
+	reloadCtx, reloadCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	current, err := s.runs.GetCloudRun(reloadCtx, job.TenantID, job.RunID)
+	reloadCancel()
+	if err != nil {
+		return fmt.Errorf("reload CSPM run: %w", err)
+	}
+	if current.Status.Terminal() {
+		return nil
+	}
 	if runErr != nil {
 		finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -345,6 +362,19 @@ func azureTokenEndpointIsReadOnly(target string) bool {
 	return ok && tenant != "" && !strings.ContainsAny(tenant, "/?#") && (endpoint == "oauth2/token" || endpoint == "oauth2/v2.0/token")
 }
 
+func azureIdentityMetadataIsReadOnly(target string) bool {
+	if target == "login.microsoftonline.com/common/discovery/instance" {
+		return true
+	}
+	const host = "login.microsoftonline.com/"
+	if !strings.HasPrefix(target, host) {
+		return false
+	}
+	tenant, endpoint, ok := strings.Cut(strings.TrimPrefix(target, host), "/")
+	return ok && tenant != "" && tenant != "." && tenant != ".." && !strings.ContainsAny(tenant, "/?#") &&
+		endpoint == "v2.0/.well-known/openid-configuration"
+}
+
 func gcpOperationIsReadOnly(method, target string) bool {
 	if method == "POST" && target == "oauth2.googleapis.com/token" {
 		return true
@@ -386,7 +416,8 @@ func cloudOperationIsReadOnly(operation ports.CloudOperation) bool {
 		_, allowed := readOnlyAWSOperations[method]
 		return allowed && !hasTarget
 	case cloudposture.ProviderAzure:
-		return method == "POST" && hasTarget && (target == "management.azure.com/providers/Microsoft.ResourceGraph/resources" || azureTokenEndpointIsReadOnly(target))
+		return hasTarget && (method == "GET" && azureIdentityMetadataIsReadOnly(target) ||
+			method == "POST" && (target == "management.azure.com/providers/Microsoft.ResourceGraph/resources" || azureTokenEndpointIsReadOnly(target)))
 	case cloudposture.ProviderGCP:
 		return hasTarget && gcpOperationIsReadOnly(method, target)
 	default:
@@ -397,6 +428,24 @@ func cloudOperationIsReadOnly(operation ports.CloudOperation) bool {
 func (s *Service) authorizeOperation(ctx context.Context, in RunInput, scope ports.CloudScope, operation ports.CloudOperation) error {
 	if operation.Provider != scope.Provider || operation.ScopeKey != scope.ScopeKey {
 		return fmt.Errorf("%w: cloud operation scope mismatch", shared.ErrForbidden)
+	}
+	if scope.EgressExecutionID != "" {
+		runID, index, err := ports.ParseCSPMExecutionID(scope.EgressExecutionID)
+		if err != nil || s.runs == nil || s.jobReader == nil {
+			return fmt.Errorf("%w: CSPM run identity is invalid", shared.ErrForbidden)
+		}
+		run, err := s.runs.GetCloudRun(shared.WithTenant(ctx, in.TenantID), in.TenantID, runID)
+		if err != nil || run.ID != runID || run.TenantID != in.TenantID || run.EngagementID != in.EngagementID || run.Status != cloudposture.RunRunning || run.FinishedAt != nil {
+			return fmt.Errorf("%w: CSPM run is no longer running", shared.ErrForbidden)
+		}
+		job, err := s.jobReader.GetCloudRunJob(shared.WithTenant(ctx, in.TenantID), in.TenantID, runID)
+		if err != nil || job.Actor != in.Actor || job.EngagementID != in.EngagementID || index >= len(job.Scopes) || index >= len(job.ApprovedTargets) {
+			return fmt.Errorf("%w: CSPM job authority unavailable", shared.ErrForbidden)
+		}
+		original := job.Scopes[index]
+		if original.Provider != scope.Provider || original.Root != scope.Root || original.CredentialRef != scope.CredentialRef || original.EngagementID != scope.EngagementID || job.ApprovedTargets[index] != scope.ApprovedTarget {
+			return fmt.Errorf("%w: CSPM scope authority changed", shared.ErrForbidden)
+		}
 	}
 	if !cloudOperationIsReadOnly(operation) {
 		now := s.clock.Now()

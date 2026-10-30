@@ -18,6 +18,9 @@ func (EgressGrantCanonicalizer) Canonicalize(ctx context.Context, policy ports.E
 	if err != nil {
 		return nil, err
 	}
+	// Resolution already placed the exact CIDR/port permissions in Rules.
+	// Host bindings are metadata and must not add a second, unrestricted allow.
+	resolved.PinnedHosts = nil
 	rules, err := canonicalPolicy(resolved)
 	if err != nil {
 		return nil, err

@@ -318,8 +318,10 @@ degrades to an isolated sandbox rather than pretending to enforce egress. See
 
 ## Supported network execution posture
 
-Recon has an authoritative signed-grant issuer. Production refuses CSPM and networked SCA/acquisition until their
-issuer branches can reload authoritative aggregate state and independently derive exact egress. Production API
+Recon and CSPM have authoritative signed-grant issuers. CSPM grants bind one scope from the original persisted
+job to the running execution and current engagement authority; provider HTTPS hosts come from API-owned configuration.
+Both require the private issuer, root-owned broker, and capless sandboxed worker. Networked SCA/acquisition still
+lacks an authoritative issuer branch and is refused in production. Production API
 composition omits DAST execution workflows, so authenticated DAST and verifier probes cannot start. Do not bypass
 these refusals with host networking, a local privileged egress applier, a worker-supplied policy, or a broadly
 reachable proxy.
