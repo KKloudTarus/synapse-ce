@@ -45,6 +45,7 @@ type Service struct {
 	signer        Signer
 	cspmRuns      ports.CloudRunAuthorizationReader
 	cspmHosts     map[cloudposture.Provider][]string
+	dastRuns      ports.DASTRunAuthority
 }
 
 func NewService(runs ReconRunReader, engagements ports.EngagementRepository, guard ports.ExecutionAuthorizer, clock ports.Clock, tools map[string]ports.ReconTool, compiler ports.EgressPolicyCompiler, canonicalizer ports.EgressPolicyCanonicalizer, signer ports.EgressGrantSigner) (*Service, error) {
@@ -143,6 +144,9 @@ func (s *Service) Authorize(ctx context.Context, req Request) (string, error) {
 	}
 	if req.ExecutionKind == "cspm" {
 		return s.authorizeCSPM(ctx, tenantID, req)
+	}
+	if req.ExecutionKind == ExecutionKindDASTVerifier {
+		return s.authorizeDAST(ctx, tenantID, req)
 	}
 	if req.ExecutionKind != ExecutionKindRecon {
 		return "", fmt.Errorf("%w: unsupported egress execution kind %q", shared.ErrValidation, req.ExecutionKind)

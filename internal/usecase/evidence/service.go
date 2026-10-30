@@ -160,6 +160,9 @@ func (s *Service) SealForFinding(ctx context.Context, engagementID, findingID sh
 // Delegates to the underlying store.
 // LookupSealedByID returns a sealed evidence link by stable ID.
 func (s *Service) LookupSealedByID(ctx context.Context, engagementID, evidenceID shared.ID) (evdom.Evidence, bool, error) {
+	if lookup, ok := s.store.(ports.EvidenceLookup); ok {
+		return lookup.LookupSealedByID(ctx, engagementID, evidenceID)
+	}
 	items, err := s.store.ListByEngagement(ctx, engagementID)
 	if err != nil {
 		return evdom.Evidence{}, false, fmt.Errorf("list evidence: %w", err)
@@ -521,17 +524,21 @@ func (s *Service) anchorSealedHead(ctx context.Context, engagementID shared.ID, 
 	if s.tsa == nil || s.tsStore == nil || head == "" {
 		return
 	}
-	if tok, err := s.tsStore.Get(ctx, ChainEvidence, engagementID, head); err == nil && tok != nil {
-		return // already retained
+	if deferred, ok := ctx.Value(deferredAnchorsKey{}).(*deferredAnchors); ok {
+		deferred.add(s, engagementID, head)
+		return
 	}
 	actx, cancel := context.WithTimeout(ctx, anchorTimeout)
 	defer cancel()
+	if tok, err := s.tsStore.Get(actx, ChainEvidence, engagementID, head); err == nil && tok != nil {
+		return // already retained
+	}
 	tok, err := s.tsa.Timestamp(actx, []byte(head))
 	if err != nil {
 		s.logger().Warn("sealed head not externally anchored (pending)", "engagement", engagementID.String(), "err", err)
 		return
 	}
-	if err := s.tsStore.Put(ctx, ChainEvidence, engagementID, head, tok); err != nil {
+	if err := s.tsStore.Put(actx, ChainEvidence, engagementID, head, tok); err != nil {
 		s.logger().Error("sealed head timestamp not stored", "engagement", engagementID.String(), "err", err)
 	}
 }

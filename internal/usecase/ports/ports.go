@@ -1171,6 +1171,12 @@ type EvidenceStore interface {
 	Head(ctx context.Context, engagementID shared.ID) (string, error)
 }
 
+// EvidenceLookup reads one engagement-scoped link without loading its ledger.
+// Stores without this optional capability retain the in-memory list fallback.
+type EvidenceLookup interface {
+	LookupSealedByID(ctx context.Context, engagementID, evidenceID shared.ID) (evidence.Evidence, bool, error)
+}
+
 // RestoreEvidenceChain is one independently verifiable evidence chain from a restored database.
 // ID is the engagement identifier; Items are ordered from genesis to head.
 type RestoreEvidenceChain struct {

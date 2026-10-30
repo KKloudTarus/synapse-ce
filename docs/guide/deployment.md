@@ -318,11 +318,25 @@ degrades to an isolated sandbox rather than pretending to enforce egress. See
 
 ## Supported network execution posture
 
-Recon and CSPM have authoritative signed-grant issuers. CSPM grants bind one scope from the original persisted
+Recon, CSPM and durable DAST verifier probes have authoritative signed-grant issuers. CSPM grants bind one scope from the original persisted
 job to the running execution and current engagement authority; provider HTTPS hosts come from API-owned configuration.
-Both require the private issuer, root-owned broker, and capless sandboxed worker. Networked SCA/acquisition still
-lacks an authoritative issuer branch and is refused in production. Production API
-composition omits DAST execution workflows, so authenticated DAST and verifier probes cannot start. Do not bypass
+They require the private issuer, root-owned broker, and capless sandboxed worker. With PostgreSQL,
+`SYNAPSE_JUDGMENTS_ENABLED` and the private issuer configured, the dispatch-only API exposes verifier
+proposal, decision and enqueue routes. The worker commits admission, approval ownership and consumption
+custody together before requesting a grant for that run. The issuer reads the original queued probe,
+checks the human decision and sealed custody, independently resolves its public destination and
+rechecks engagement authority. Grant issuance commits once per run; a lost response or failed broker
+setup requires a new approval rather than another grant. Migrate before starting the new binaries.
+Existing approvals using the older probe digest must be proposed and approved again.
+Rollback binaries with the expanded schema retained. Once a verifier has recorded ownership or
+grant issuance, migration 0270 Down refuses to erase that authority; use a forward migration for
+schema recovery, never clear those markers to force a downgrade. External evidence anchoring runs
+only after custody commits, outside the audit, approval and run locks.
+
+The trusted verifier workflow enforces the approved GET/HEAD configuration and URL; the broker enforces
+the signed process and destination IP/port. It does not enforce an HTTPS path against a compromised worker.
+Authenticated DAST sessions and networked SCA/acquisition still lack authoritative issuer branches and
+remain unavailable in production. Do not bypass
 these refusals with host networking, a local privileged egress applier, a worker-supplied policy, or a broadly
 reachable proxy.
 

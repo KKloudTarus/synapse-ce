@@ -1356,6 +1356,7 @@ func main() {
 		os.Exit(1)
 	}
 	var privateAuthorityHandler http.Handler
+	var dastGrantAuthorityConfigured bool
 	if cfg.EgressGrantAuthorityAddr != "" {
 		seed, serr := signing.DecodeSeed(cfg.EgressGrantSigningSeed)
 		if serr != nil {
@@ -1398,6 +1399,18 @@ func main() {
 				log.Error("CSPM grant authority init failed", "err", serr)
 				os.Exit(1)
 			}
+		}
+		if cfg.JudgmentsEnabled && cfg.DBDSN != "" {
+			reader, ok := dastRunStore.(ports.DASTRunAuthority)
+			if !ok {
+				log.Error("DAST grant authority requires persisted run and approval custody")
+				os.Exit(1)
+			}
+			if serr = grantService.SetDAST(reader); serr != nil {
+				log.Error("DAST grant authority init failed", "err", serr)
+				os.Exit(1)
+			}
+			dastGrantAuthorityConfigured = true
 		}
 		egressGrantHandler, serr := httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
 		if serr != nil {
@@ -2696,11 +2709,12 @@ func main() {
 			os.Exit(1)
 		} else {
 			router.SetRuntimeVerifier(runtimeVerifierSvc)
-			if egressLive {
+			durableVerifier := toolExecution == config.ToolExecutionDispatchOnly && reconQueue != nil && dastGrantAuthorityConfigured
+			if egressLive || durableVerifier {
 				// DAST actively probes a URL. Unlike typed runtime-verifier result ingestion,
 				// the workflow must never run on the plain ExecRunner because ExecRunner ignores
-				// ToolSpec.EgressPolicy. Serve the propose/approve/run routes only when the
-				// sandbox can kernel-enforce egress confinement.
+				// ToolSpec.EgressPolicy. Dispatch-only exposes these routes only with the
+				// durable queue and independent verifier grant authority; its runner refuses execution.
 				dastRunnerSvc, derr := dastrunneruc.NewService(reconRunner, evidenceService, runtimeVerifierSvc, "curl", 10*time.Second, cfg.ReconMaxOutput)
 				if derr != nil {
 					log.Error("DAST safe verifier runner init failed", "err", derr)
@@ -2710,6 +2724,12 @@ func main() {
 				if werr != nil {
 					log.Error("DAST verifier workflow init failed", "err", werr)
 					os.Exit(1)
+				}
+				if vulnerabilityTransactions != nil {
+					if err := dastWorkflowSvc.SetTransactionRunner(vulnerabilityTransactions); err != nil {
+						log.Error("DAST custody transaction init failed", "err", err)
+						os.Exit(1)
+					}
 				}
 				router.SetDASTWorkflow(dastWorkflowSvc)
 				// #823 durable DAST verification: with the Postgres job queue, the run route enqueues a
@@ -2726,25 +2746,29 @@ func main() {
 					router.SetDASTRunner(dastRunSvc)
 					log.Info("DAST verification runs execute on the worker (durable)", "route", "POST .../runtime-verification/proposals/{aid}/run")
 				}
-				engine, eerr := dastengine.New(reconRunner, cfg.DASTHelperBin, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
-				if eerr != nil {
-					log.Error("authenticated DAST engine init failed", "err", eerr)
-					os.Exit(1)
+				if egressLive {
+					engine, eerr := dastengine.New(reconRunner, cfg.DASTHelperBin, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
+					if eerr != nil {
+						log.Error("authenticated DAST engine init failed", "err", eerr)
+						os.Exit(1)
+					}
+					sessionSvc, serr := dastsessionuc.NewService(engine, reconGuard, evidenceService)
+					if serr != nil {
+						log.Error("authenticated DAST session init failed", "err", serr)
+						os.Exit(1)
+					}
+					ceilings := dastworkflowuc.DefaultScanCeilings()
+					ceilings.MaxReauth, ceilings.RatePerSec, ceilings.Concurrency = cfg.DASTMaxReauth, cfg.DASTRatePerSec, cfg.DASTConcurrency
+					ceilings.Limits.Depth, ceilings.Limits.Pages, ceilings.Limits.Requests, ceilings.Limits.WallClock = cfg.DASTMaxDepth, cfg.DASTMaxPages, cfg.DASTMaxRequests, cfg.DASTMaxWallClock
+					if err := dastWorkflowSvc.SetScan(sessionSvc, cfg.DASTHelperBin, evidenceService, dastchecks.NewEvaluator(), dastchecks.NewEvaluator(), judgmentSvc, runtimeVerifierSvc, ceilings); err != nil {
+						log.Error("authenticated DAST scan workflow init failed", "err", err)
+						os.Exit(1)
+					}
+					router.SetDASTScan(dastWorkflowSvc)
+					log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
+				} else {
+					log.Info("durable DAST verifier ENABLED; authenticated scanner remains unavailable")
 				}
-				sessionSvc, serr := dastsessionuc.NewService(engine, reconGuard, evidenceService)
-				if serr != nil {
-					log.Error("authenticated DAST session init failed", "err", serr)
-					os.Exit(1)
-				}
-				ceilings := dastworkflowuc.DefaultScanCeilings()
-				ceilings.MaxReauth, ceilings.RatePerSec, ceilings.Concurrency = cfg.DASTMaxReauth, cfg.DASTRatePerSec, cfg.DASTConcurrency
-				ceilings.Limits.Depth, ceilings.Limits.Pages, ceilings.Limits.Requests, ceilings.Limits.WallClock = cfg.DASTMaxDepth, cfg.DASTMaxPages, cfg.DASTMaxRequests, cfg.DASTMaxWallClock
-				if err := dastWorkflowSvc.SetScan(sessionSvc, cfg.DASTHelperBin, evidenceService, dastchecks.NewEvaluator(), dastchecks.NewEvaluator(), judgmentSvc, runtimeVerifierSvc, ceilings); err != nil {
-					log.Error("authenticated DAST scan workflow init failed", "err", err)
-					os.Exit(1)
-				}
-				router.SetDASTScan(dastWorkflowSvc)
-				log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
 			} else {
 				log.Warn("DAST execution workflows DISABLED: authoritative signed DAST grants are unavailable in this process posture")
 			}

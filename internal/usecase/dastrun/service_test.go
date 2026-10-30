@@ -20,10 +20,12 @@ type fakeProber struct {
 	result dastrunner.Result
 	err    error
 	calls  int
+	probe  dastrunner.Probe
 }
 
-func (f *fakeProber) Run(_ context.Context, _ string, _, _ shared.ID, _ dastrunner.Probe) (dastrunner.Result, error) {
+func (f *fakeProber) Run(_ context.Context, _ string, _, _ shared.ID, probe dastrunner.Probe) (dastrunner.Result, error) {
 	f.calls++
+	f.probe = probe
 	return f.result, f.err
 }
 
@@ -87,8 +89,8 @@ func TestRunJobExecutesAndRecordsVerdict(t *testing.T) {
 	if err := svc.RunJob(tenantCtx(), job.Payload); err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	if prober.calls != 1 {
-		t.Errorf("prober called %d times, want 1", prober.calls)
+	if prober.calls != 1 || prober.probe.RunID != run.ID {
+		t.Errorf("prober calls=%d run identity=%q, want 1 and %q", prober.calls, prober.probe.RunID, run.ID)
 	}
 	got, _ := runs.GetDASTRun(tenantCtx(), "t1", run.ID)
 	if got.Status != ddast.RunSucceeded || got.Verdict != "confirmed" || got.HTTPStatus != 200 || got.EvidenceID != "ev-1" {

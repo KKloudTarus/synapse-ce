@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-30T07:08:20.588795+00:00",
+  "scope": "One human-approved ordinary GET verifier, independently issued run-bound egress authority, signed evidence and native Slack/console journey",
+  "runtime": {
+    "build_base_revision": "c5b7aaf6ba979babae0544d051459ec601f1f663",
+    "build_modified": true,
+    "go_and_migration_source_digest": "6ec76e63f1bab0694bbc37b7aba838ede9f331b82cacc936b176195482085a03",
+    "binary_sha256": {
+      "synapse-api": "b8a6d37905bfd4290b4a147f85f08a82f9fe2ffe1406bd39353ab2c11bffcb6d",
+      "synapse-worker": "84eedf3a19ceff83d498f58762290d1531a28cc449dc228042a93b35f3aedcc5",
+      "synapse-migrate": "feeadf184581b671d1438642397ddc328db08c9846e436ddb26543c984c7f6bf"
+    },
+    "curl_sha256": "1ccbd3dae948374ba8eef1ebda26c64b783ede50b463196e53666e0880bdac60",
+    "placement": "Retained local KVM guest; capless worker, private API signer, root egress broker and pinned sandbox helper",
+    "private_resume": {
+      "at": "2026-10-30T07:06:02.676051+00:00",
+      "readiness_http": 200,
+      "binary_hashes_match": true,
+      "curl_pins_match": true,
+      "existing_runs": 1,
+      "approved_or_submitted": false,
+      "cloud_operation": false,
+      "console": "https://127.0.0.1:18450/engagements/59448a5562dc9faadced4ea5a89256b4/dast",
+      "note": "Default restores services and reads state. Each new probe still requires a concrete human approval; no consumed grant is reused."
+    }
+  },
+  "fixture": {
+    "url": "https://raw.githubusercontent.com/KKloudTarus/synapse-ce/c5b7aaf6ba979babae0544d051459ec601f1f663/docs/guide/assets/ui/notification-events/live/recon-live.json",
+    "method": "GET",
+    "expected_status": 200,
+    "expected_body_contains": "One real governed local HTTPX reconnaissance run",
+    "judgment_id": "4297f94f9ebdc80f004d4dd7fae46a22",
+    "judgment_input": "Synthetic engagement reachability proposal created through analysis.Propose; no finding or vulnerability claim",
+    "proposer": "agent:static-functional-fixture",
+    "verifier": "operator"
+  },
+  "run": {
+    "id": "41981f155b68cd284ba847a0a0325435",
+    "engagement_id": "59448a5562dc9faadced4ea5a89256b4",
+    "action_id": "30b58f45220f39fa5ad8e579d3496fd5",
+    "actor": "operator",
+    "status": "succeeded",
+    "verdict": "runtime_confirmed",
+    "http_status": 200,
+    "evidence_id": "2331ac2a54de485e193514896087601c",
+    "started_at": "2026-10-30T06:58:17.131902Z",
+    "finished_at": "2026-10-30T06:58:18.487611Z"
+  },
+  "authority": {
+    "approval_id": "30b58f45220f39fa5ad8e579d3496fd5",
+    "state": "consumed",
+    "consumed_by_dast_run_id": "41981f155b68cd284ba847a0a0325435",
+    "egress_grant_issued_at": "2026-10-30T06:58:17.625369+00:00",
+    "probe_digest": "v1:5343d6108bba2e7b30f89ad42f5bd65bcc96798b9820bf2f433ed272c33883dc",
+    "durable_run_count": 1,
+    "expired_predecessor_consumed": false,
+    "fresh_proposal_matches_expired_approved_scope": true
+  },
+  "result": {
+    "status": 200,
+    "body_marker_matched": true,
+    "body_sha256": "c600170c8f2c26094bfab3190afb9426546a6d30052f459aa888719e45181e56",
+    "proof_class": "runtime_confirmed",
+    "runner_exit_code": 0,
+    "runner_timed_out": false,
+    "runner_truncated": false
+  },
+  "broker_observation": {
+    "namespace": "syn0",
+    "configured_at": "2026-10-30T06:58:17.810074758Z",
+    "removed_at": "2026-10-30T06:58:18.38973895Z",
+    "allow_rule_count": 1,
+    "packet_or_ebpf_connect_receipt_available": false
+  },
+  "submission_denials": [
+    {
+      "case": "unsupported authenticated scanner",
+      "http_status": 404
+    },
+    {
+      "case": "out-of-scope verifier proposal",
+      "http_status": 403
+    },
+    {
+      "case": "credential-like target refusal",
+      "http_status": 400
+    }
+  ],
+  "evidence": {
+    "chain_intact": true,
+    "verified": 5,
+    "head": "6a9ec5524ac572ef97e459b29ab125683acd8a8ba3e87d18f9fc06d28f3e4e9f",
+    "attestation_algorithm": "ed25519",
+    "anchored": false,
+    "items": [
+      {
+        "id": "8249bac6506733b7d240a8f9c5c13843",
+        "kind": "judgment_proposed",
+        "hash": "391d674c5de73ebda8a9f2a075ded6c6b86e6f86207dc86afc0818a2296cbb03"
+      },
+      {
+        "id": "028328f4c12d7fc0eada6b53e518fdc5",
+        "kind": "agent_admission",
+        "hash": "fb43c9e79f03b96e2ef0105b93da078d2fdd002fc106b071835778f784da5813"
+      },
+      {
+        "id": "41981f155b68cd284ba847a0a0325435-approval-consumed",
+        "kind": "agent_approval_consumed",
+        "hash": "e2a8a05a8f26a108b3b35a2846faf8a18a98c85e7c304f513cff584125a4ac25"
+      },
+      {
+        "id": "2331ac2a54de485e193514896087601c",
+        "kind": "dast_verifier_result",
+        "hash": "fe4e94d000d9b0fc49e5a05f70bc017143333417d170e752a760c495cdddea0a"
+      },
+      {
+        "id": "2460023c738b32a282900c92dd6227d8",
+        "kind": "judgment_verdict",
+        "hash": "6a9ec5524ac572ef97e459b29ab125683acd8a8ba3e87d18f9fc06d28f3e4e9f"
+      }
+    ]
+  },
+  "notification": {
+    "event_id": "ce34ee117e0c31bc9d8d84c19a932b95",
+    "source_id": "41981f155b68cd284ba847a0a0325435",
+    "event_type": "dast.run_finished",
+    "data": {
+      "title": "DAST run finished",
+      "run_id": "41981f155b68cd284ba847a0a0325435",
+      "outcome": "succeeded",
+      "scan_id": "41981f155b68cd284ba847a0a0325435",
+      "summary": "A governed run reached a terminal outcome.",
+      "provider": "dast",
+      "providers": [
+        "dast"
+      ],
+      "scan_kind": "dast",
+      "error_code": "",
+      "engagement_id": "59448a5562dc9faadced4ea5a89256b4",
+      "counts_available": false,
+      "severity_counts_available": false
+    },
+    "delivery_id": "21cbc6f13403a98268bc319af23a5100",
+    "state": "delivered",
+    "attempts": 1,
+    "delivered_at": "2026-10-30T06:58:43.202239+00:00",
+    "response_code": 200,
+    "error_code": ""
+  },
+  "native_ui": {
+    "message_permalink": "https://jj-4qu2855.slack.com/archives/C0BJE2CPPQE/p1793343523003109",
+    "locale": "vi",
+    "data_class": "detail",
+    "vietnamese_diacritics_intact": true,
+    "console_link_clicked": true,
+    "normal_existing_sandbox_sign_in": true,
+    "console_link": "https://127.0.0.1:18450/engagements/59448a5562dc9faadced4ea5a89256b4",
+    "console_heading": "DAST functional: public static fixture only",
+    "evidence_verified_visible": true,
+    "run_verdict_visible": "runtime_confirmed",
+    "http_status_visible": 200,
+    "screenshots_sha256": {
+      "slack-dast-vi.png": "623d90dd1f87fea039be814aa947a470d64f9d2530f25c65eb48cca606734a0d",
+      "dast-verifier-console.png": "1fd76e27383c5d29a0f584260382b7c3d37faf2889d679a2ef9861de7a7dca85",
+      "dast-link-console.png": "563be1509173b3faa0c8739044d4054a693a4d663e922c6c1fd9707e04c642ab"
+    }
+  },
+  "cost_scope": {
+    "new_cloud_resource": false,
+    "new_cloud_credential": false,
+    "paid_service_or_model_call": false,
+    "billing_change": false,
+    "public_exposure_added": false,
+    "external_request": "Ordinary GET of a public immutable repository document; no cloud control-plane call"
+  },
+  "limits": [
+    "Representative safe HTTP verifier only; authenticated crawl/scanner remains unavailable in dispatch-only posture.",
+    "The synthetic input judgment and marker result establish the governed functional path, not a vulnerability or exploitability finding.",
+    "The trusted workflow binds the exact URL and probe digest; the broker independently enforces process, IP and port, not HTTPS path against a compromised worker.",
+    "No packet/eBPF connection receipt is claimed. Signed evidence is not externally anchored.",
+    "Binaries were built from the recorded modified source digest before commit; future commit hashes are not binary VCS provenance.",
+    "Default resume restores services and reads the accepted run without execution. Every new probe still needs its own concrete human approval."
+  ],
+  "post_functional_corrections": {
+    "changes": [
+      "Reject shared address space 100.64.0.0/10, including mapped IPv6, before grant signing or issuance",
+      "Flush external timestamps only after successful custody commit; rollback/uncertain commit cannot retain uncommitted head anchors",
+      "Use indexed tenant/engagement evidence lookup for reserved seals instead of whole-ledger reads"
+    ],
+    "verification": "Focused race tests; actual PostgreSQL authority/migration race tests including point lookup RLS; three offline mutation regressions failed at expected assertions before restoring fixes",
+    "new_http_probe": false,
+    "new_cloud_operation": false,
+    "functional_lineage": "The successful run and its evidence above were produced by the recorded pre-correction binaries; focused corrections have separate final binary lineage below",
+    "installed_final_build": {
+      "built_at": "2026-10-30T07:19:44.532833+00:00",
+      "head": "c5b7aaf6ba979babae0544d051459ec601f1f663",
+      "modified": true,
+      "binaries": {
+        "synapse-api": "dac7a6784a927a0cdbdb2c4637eaaa680ac8ce1436d5ff14dcececde77068c94",
+        "synapse-worker": "6164db14ca186b0a182e54ee0283f2f14ce0a7f50d3116005efa71b8c3a0a723",
+        "synapse-migrate": "8ed255fc939c10b04d665a391efc029cd43caeb3a7c912d9130ac0cfe77ce21c"
+      },
+      "source_digest": "5a3d646532f16d657ac2f8337d2453a6661460388b1ecf4ea831e633998d1977"
+    },
+    "deployment": {
+      "at": "2026-10-30T07:22:45.735045+00:00",
+      "migration": 270,
+      "readiness_http": 200,
+      "curl_sha256": "1ccbd3dae948374ba8eef1ebda26c64b783ede50b463196e53666e0880bdac60",
+      "existing_cloud_credentials_preserved": true,
+      "new_cloud_operation": false
+    },
+    "resume_verification": {
+      "at": "2026-10-30T07:23:45.537020+00:00",
+      "readiness_http": 200,
+      "binary_hashes_match": true,
+      "curl_pins_match": true,
+      "existing_runs": 1,
+      "approved_or_submitted": false,
+      "cloud_operation": false,
+      "console": "https://127.0.0.1:18450/engagements/59448a5562dc9faadced4ea5a89256b4/dast",
+      "note": "Default restores services and reads state. Each new probe still requires a concrete human approval; no consumed grant is reused."
+    }
+  }
+}
