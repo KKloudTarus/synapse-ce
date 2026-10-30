@@ -387,6 +387,24 @@ journey, with the inventory limits retained.
 Only the existing subscription's approved Reader grant was added. No cloud
 resource, model call, new cloud credential or paid service was created.
 
+### Governed local recon
+
+A real HTTPX run used the existing native execution tier against an owned static
+HTTP fixture inside the local VM. The [receipt](assets/ui/notification-events/live/recon-live.json)
+records the pinned tool, one scope-restricted destination, the fixture's HTTP 200
+GET and one persisted in-scope result. Submission was denied with live recon
+disabled and for a different, out-of-scope port before the successful run.
+
+Containment and tool output were sealed into an intact signed evidence chain.
+The terminal source produced one Vietnamese detail Slack delivery, HTTP 200 on
+attempt one. [Native rendering](assets/ui/notification-events/live/slack-recon-vi.png)
+was inspected; its link opened the correct engagement after normal sandbox
+sign-in, and the [Recon tab](assets/ui/notification-events/live/recon-console.png)
+showed the succeeded run, one in-scope result and
+`sandboxed-live` containment. The retained resume command restores this setup
+without another account grant. No public exposure, cloud target or paid service
+was added. This is representative HTTPX proof, not subfinder, naabu or DAST proof.
+
 ### Remaining environments
 
 Four service setups remain unavailable after the Gmail restoration above. The
@@ -409,11 +427,11 @@ Okta, Google Workspace identity, PingOne and PagerDuty are intentionally exclude
 by the maintainer and are not counted in those four. Google Workspace identity
 and Gmail SMTP are separate integrations.
 
-Governed DAST/recon remains the unproved execution environment group; it needs an
-authorized target and egress/grant authority. CSPM's representative Azure path is
-recorded above, without implying AWS/GCP or full cloud-posture coverage. Strict
-local sandbox conformance alone does not establish those remaining execution
-prerequisites. Custody failure was exercised in a disposable
+Governed DAST remains unproved; it needs an authorized target accepted by its
+probe policy and an independent egress/grant path. Representative recon and
+Azure CSPM paths are recorded above, without implying other recon tools,
+AWS/GCP or full cloud-posture coverage. Strict local sandbox conformance alone
+does not establish the remaining DAST prerequisites. Custody failure was exercised in a disposable
 chain and reporting failed closed; retained audit/evidence history was untouched.
 The [custody receipt](assets/ui/notification-events/live/functional-followup.json)
 records the verifier transition, HTTP 400 report denial and one delivered event.
