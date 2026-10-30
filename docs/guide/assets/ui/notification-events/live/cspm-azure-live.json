@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-30T04:03:15.988985+00:00",
+  "scope": "Representative governed Azure read-only CSPM source, signed evidence and Slack transport receipt",
+  "runtime_lineage_limit": "The native execution binds the binary hashes and source digest below. The subsequent five-second cleanup-read timeout and strengthened cancellation regression were verified locally; they are not represented as another cloud run.",
+  "runtime": {
+    "placement": "Dedicated local Linux KVM guest; no cloud compute",
+    "binary_sha256": {
+      "synapse-api": "28c8ca8df221421b6a5fd9f93d725f910d67d2eb1bcbe1d4b0df376af3eefc04",
+      "synapse-worker": "5c07383be0a7c9efc26dc876ecb3a93d2446f9b8169ff0277d0fb4b609735335",
+      "synapse-cspm": "a6bef8d0ab203b077367020e61163220bbc2f00b14a8165eea6d6f64ac61b608",
+      "synapse-egress-broker": "64e9cfdd5f04b5272f2877b28991a2f261e4517591bcb6e7f733effa50fc81da"
+    },
+    "source": {
+      "base_commit": "3f9ac827e2e49b9bf08c660ca1b62bb54e9d4b4b",
+      "go_sources_sha256": "2167dbc3e674500583d5d384c822353c994473b97c520a89ab27758ecf966e0c",
+      "hash_encoding": "sorted path NUL content NUL, tracked plus new Go source, go.mod, go.sum"
+    },
+    "worker": "capless, NoNewPrivileges, pinned helper inside strict bubblewrap/seccomp/cgroup bounds",
+    "network": "root broker, independently signed per-scope HTTPS443 grant, default-deny kernel namespace",
+    "credentials": "retained encrypted vault reference; helper secret FD only"
+  },
+  "source": {
+    "id": "093f5b8975b4e6ab0397edfef90c8de4",
+    "engagement_id": "5b6bfaafe66a72353a2fd10c853c36f3",
+    "status": "partial",
+    "complete": false,
+    "assets": 1,
+    "findings": 0,
+    "started_at": "2026-10-30T04:01:49.876911Z",
+    "finished_at": "2026-10-30T04:01:51.908691Z",
+    "provider": "azure",
+    "scope_identity_sha256": "b18ea4adb7cc3bbbea840459883603cf3fc0efd4a16dfa098911be0fef29cb58",
+    "coverage": [
+      {
+        "category": "identity-last-use",
+        "code": "unsupported"
+      },
+      {
+        "category": "network-effective-security",
+        "code": "unsupported"
+      }
+    ]
+  },
+  "evidence": {
+    "id": "68671d2d8fd25d3f3877c0eb9ebd907a",
+    "sha256": "d950c6a4199c01737166dbc53173f01142f3152d86785fe803a71f2b06cfbbf9",
+    "chain_intact": true,
+    "verified": 2,
+    "attestation_algorithm": "ed25519",
+    "anchored": false
+  },
+  "delivery": {
+    "event_id": "0f490fa09d960d78a362655c33022f91",
+    "source_id": "093f5b8975b4e6ab0397edfef90c8de4",
+    "delivery_id": "c8dea96f4ce0f08b8f15a79605aefe78",
+    "state": "delivered",
+    "attempts": 1,
+    "delivered_at": "2026-10-30T04:02:42.892218+00:00",
+    "response_code": 200,
+    "error_code": "",
+    "template_ref": "builtin:cspm.run_finished:chat:vi@v1",
+    "event_type": "cspm.run_finished",
+    "provider": "slack",
+    "locale": "vi",
+    "data_class": "detail"
+  },
+  "observed_operations": [
+    "cspm.GET login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration",
+    "cspm.GET login.microsoftonline.com/common/discovery/instance",
+    "cspm.POST login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+    "cspm.POST management.azure.com/providers/Microsoft.ResourceGraph/resources",
+    "cspm.coverage_gap",
+    "cspm.enumerate",
+    "cspm.run_partial",
+    "cspm.run_requested",
+    "cspm.run_started"
+  ],
+  "cost_scope": {
+    "new_cloud_resources": 0,
+    "model_invocations": 0,
+    "new_paid_services": 0,
+    "new_cloud_credentials": 0,
+    "access": "Owner-approved Reader on existing sandbox subscription only",
+    "resource_graph_pricing_source": "https://learn.microsoft.com/en-us/azure/governance/resource-graph/overview"
+  },
+  "limits": [
+    "Existing Foundry resources are outside the inventory filter. One account asset and zero findings do not prove a clean subscription.",
+    "Azure effective-network and identity-activity coverage remain unsupported; partial is intentional.",
+    "Previous failed attempts retained privately. This execution followed final API/worker rollout through resume.",
+    "Evidence has signed attestation but is not externally anchored. Other provider/event cells are not implied."
+  ],
+  "native_ui": {
+    "provider": "slack",
+    "message_permalink": "https://jj-4qu2855.slack.com/archives/C0BJE2CPPQE/p1793332962735569",
+    "screenshot": "slack-cspm-vi.png",
+    "screenshot_sha256": "f34b305bad07716c8f87469b044a258cf8bd8aa34027da6741584138fcc51aeb",
+    "rendered_title": "Lần quét đã hoàn tất",
+    "rendered_outcome": "partial",
+    "vietnamese_diacritics_intact": true,
+    "raw_markdown_or_escaped_tags_observed": false,
+    "console_link_clicked": true,
+    "console_url": "https://127.0.0.1:18450/engagements/5b6bfaafe66a72353a2fd10c853c36f3",
+    "normal_existing_sandbox_sign_in": true,
+    "console_heading": "Azure sandbox: kiểm tra posture chỉ đọc",
+    "console_evidence_badge": "Evidence verified"
+  }
+}

@@ -35,3 +35,30 @@ func TestCloudOperationReadOnlyAllowlist(t *testing.T) {
 		})
 	}
 }
+
+func TestAzureReadOnlyIdentityMetadata(t *testing.T) {
+	for _, tt := range []struct {
+		operation string
+		allowed   bool
+	}{
+		{"GET login.microsoftonline.com/common/discovery/instance", true},
+		{"GET login.microsoftonline.com/tenant/v2.0/.well-known/openid-configuration", true},
+		{"GET login.microsoftonline.com/tenant/.well-known/openid-configuration", false},
+		{"POST login.microsoftonline.com/tenant/oauth2/v2.0/token", true},
+		{"POST management.azure.com/providers/Microsoft.ResourceGraph/resources", true},
+		{"POST login.microsoftonline.com/common/discovery/instance", false},
+		{"GET login.microsoftonline.com/tenant/oauth2/v2.0/token", false},
+		{"GET login.microsoftonline.com/tenant/directory/users", false},
+		{"GET login.microsoftonline.com/tenant/other/v2.0/.well-known/openid-configuration", false},
+		{"GET login.microsoftonline.com/../v2.0/.well-known/openid-configuration", false},
+		{"GET login.microsoftonline.com.evil.test/common/discovery/instance", false},
+		{"PUT management.azure.com/subscriptions/example", false},
+	} {
+		t.Run(tt.operation, func(t *testing.T) {
+			got := cloudOperationIsReadOnly(ports.CloudOperation{Provider: cloudposture.ProviderAzure, Name: tt.operation})
+			if got != tt.allowed {
+				t.Fatalf("allowed=%t, want %t", got, tt.allowed)
+			}
+		})
+	}
+}

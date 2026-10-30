@@ -44,8 +44,10 @@ ADR supersedes only its execution-worker placement decision:
   native-worker security group; its egress reaches only the EKS backend port. Dedicated NLB subnet CIDRs form
   the pod NetworkPolicy source boundary. The listener is never exposed by browser Ingress and applies an
   authenticated request limit in addition to upstream NLB and security-group controls.
-- Only execution kinds with a trusted issuer branch may request network access. Recon is supported. Production
-  CSPM, networked SCA/acquisition, authenticated DAST, and DAST verifier execution fail at startup or composition
+- Only execution kinds with a trusted issuer branch may request network access. Recon and CSPM are supported.
+  CSPM authority reloads the original atomically enqueued job, binds each helper to one persisted scope, and derives
+  the selected provider's HTTPS policy independently from API configuration. Production
+  networked SCA/acquisition, authenticated DAST, and DAST verifier execution fail at startup or composition
   until each has an authoritative aggregate and independent policy-derivation branch. An execution-kind string
   carried by a worker is not authorization.
 

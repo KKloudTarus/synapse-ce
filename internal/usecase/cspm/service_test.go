@@ -2,6 +2,7 @@ package cspm_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -252,11 +253,23 @@ func TestDurableSubmitAndRunJob(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatalf("job=%#v err=%v", job, err)
 	}
+	var altered ports.CloudRunJob
+	if err := json.Unmarshal(job.Payload, &altered); err != nil {
+		t.Fatal(err)
+	}
+	altered.Scopes[0].CredentialRef = "substituted"
+	bad, err := json.Marshal(altered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RunJob(ctx, bad); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("tampered credential accepted: %v", err)
+	}
 	if err := svc.RunJob(ctx, job.Payload); err != nil {
 		t.Fatal(err)
 	}
-	if observedScope.EgressExecutionKind != "cspm" || observedScope.EgressExecutionID != run.ID.String() {
-		t.Fatalf("execution identity = %q/%q, want cspm/%s", observedScope.EgressExecutionKind, observedScope.EgressExecutionID, run.ID.String())
+	if observedScope.EgressExecutionKind != "cspm" || observedScope.EgressExecutionID != ports.CSPMExecutionID(run.ID, 0) {
+		t.Fatalf("execution identity = %q/%q, want cspm/%s", observedScope.EgressExecutionKind, observedScope.EgressExecutionID, ports.CSPMExecutionID(run.ID, 0))
 	}
 	finished, err := svc.GetRun(ctx, "tenant", run.ID)
 	if err != nil || finished.Status != cloudposture.RunSucceeded || finished.FinishedAt == nil {
@@ -388,5 +401,92 @@ func TestRunReconcilesObservationsBeforeAttributing(t *testing.T) {
 	}
 	if len(attributor.attributed) == 0 {
 		t.Fatal("no findings were attributed to any asset")
+	}
+}
+
+type cancellingExecutor struct {
+	runs   *memory.CloudRunStore
+	now    time.Time
+	t      *testing.T
+	cancel context.CancelFunc
+}
+
+func (e cancellingExecutor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (cloudposture.Inventory, []cloudposture.CoverageIssue, error) {
+	defer e.cancel()
+	runID, _, err := ports.ParseCSPMExecutionID(scope.EgressExecutionID)
+	if err != nil {
+		return cloudposture.Inventory{}, nil, err
+	}
+	run, err := e.runs.GetCloudRun(ctx, "tenant", runID)
+	if err != nil {
+		return cloudposture.Inventory{}, nil, err
+	}
+	run.Status, run.FinishedAt = cloudposture.RunCancelled, &e.now
+	if err := e.runs.SaveCloudRun(ctx, run); err != nil {
+		return cloudposture.Inventory{}, nil, err
+	}
+	err = scope.Authorize(ctx, ports.CloudOperation{Provider: scope.Provider, ScopeKey: scope.ScopeKey, Name: "ListBuckets"})
+	if !errors.Is(err, shared.ErrForbidden) {
+		e.t.Errorf("cancelled run operation denial = %v, want forbidden", err)
+	}
+	return cloudposture.Inventory{}, nil, err
+}
+
+type cleanupReadRunStore struct {
+	*memory.CloudRunStore
+	parent   context.Context
+	t        *testing.T
+	observed bool
+}
+
+func (s *cleanupReadRunStore) GetCloudRun(ctx context.Context, tenant, id shared.ID) (cloudposture.Run, error) {
+	if s.parent.Err() != nil {
+		s.observed = true
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > 5*time.Second || ctx.Err() != nil {
+			s.t.Errorf("cleanup read needs a live bounded context after caller cancellation: deadline=%v, bounded=%v, err=%v", deadline, ok, ctx.Err())
+		}
+	}
+	return s.CloudRunStore.GetCloudRun(ctx, tenant, id)
+}
+
+func TestDurableRunDeniesOperationAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(shared.WithTenant(context.Background(), "tenant"))
+	defer cancel()
+	now := time.Unix(1, 0)
+	audit := &auditStub{}
+	assets, _ := assetuc.NewService(memory.NewAssetStore(), audit, clockStub{now}, &idsStub{})
+	engagements := memory.NewEngagementRepository()
+	eng, _ := engagement.New("eng", "tenant", "cloud", "client", now)
+	eng.Status = engagement.StatusActive
+	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetCloudAccount, Value: "organization/o-1"}}}
+	_ = engagements.Create(ctx, eng)
+	svc, _ := cspm.NewService(map[cloudposture.Provider]ports.CloudConnector{cloudposture.ProviderAWS: connectorStub{}}, assets, memory.NewFindingRepository(), engagements, audit, clockStub{now})
+	runs := &cleanupReadRunStore{CloudRunStore: memory.NewCloudRunStore(), parent: ctx, t: t}
+	ids := &idsStub{}
+	queue := memory.NewJobQueue(ids, func() time.Time { return now })
+	if err := svc.SetDurableExecution(runs, queue, ids); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetRunLock(memory.NewRunLock())
+	svc.SetEvidenceSealer(evidenceStub{})
+	svc.SetSandboxExecutor(cancellingExecutor{runs: runs.CloudRunStore, now: now, t: t, cancel: cancel})
+	run, err := svc.Submit(ctx, cspm.RunInput{TenantID: "tenant", EngagementID: "eng", Actor: "operator", Scopes: []ports.CloudScope{{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "organization/o-1", CredentialRef: "aws"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := queue.Claim(ctx, time.Minute, cspm.JobKind)
+	if err != nil || job == nil {
+		t.Fatalf("job=%v err=%v", job, err)
+	}
+	if err := svc.RunJob(ctx, job.Payload); err != nil {
+		t.Fatal(err)
+	}
+	if !runs.observed {
+		t.Fatal("cleanup did not reload the run after caller cancellation")
+	}
+	got, err := runs.CloudRunStore.GetCloudRun(context.Background(), "tenant", run.ID)
+	if err != nil || got.Status != cloudposture.RunCancelled {
+		t.Fatalf("run=%+v err=%v", got, err)
 	}
 }

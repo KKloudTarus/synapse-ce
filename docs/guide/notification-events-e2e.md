@@ -366,6 +366,27 @@ parked, with configuration retained. This Testing grant expires around
 This is representative current SMTP/source proof, not every event/client cell
 or Microsoft SMTP acceptance. Historical receipts keep their original scope.
 
+### Governed Azure CSPM
+
+The owner-approved Azure sandbox now has representative source-to-delivery proof.
+A durable run executed through the native capless worker, independently signed
+scope grant, root egress broker and pinned sandbox helper. The final API/worker
+rollout was exercised through the retained resume command. The
+[receipt](assets/ui/notification-events/live/cspm-azure-live.json) records the
+binary hashes, source digest, signed evidence chain and one Vietnamese detail
+`cspm.run_finished` Slack delivery: HTTP 200 on its first attempt.
+
+The result is partial: one subscription asset, zero findings and explicit
+effective-network and identity-activity coverage gaps. Existing Foundry accounts
+and projects are outside the connector filter; this does not prove a clean
+subscription. [Native Slack rendering](assets/ui/notification-events/live/slack-cspm-vi.png)
+was inspected with intact Vietnamese text and the partial outcome. Clicking its
+link opened the correct engagement after normal sandbox sign-in, with evidence
+verified. This acceptance covers governed execution and its representative Slack
+journey, with the inventory limits retained.
+Only the existing subscription's approved Reader grant was added. No cloud
+resource, model call, new cloud credential or paid service was created.
+
 ### Remaining environments
 
 Four service setups remain unavailable after the Gmail restoration above. The
@@ -388,10 +409,11 @@ Okta, Google Workspace identity, PingOne and PagerDuty are intentionally exclude
 by the maintainer and are not counted in those four. Google Workspace identity
 and Gmail SMTP are separate integrations.
 
-Two execution environment groups remain unproved: governed DAST/recon needs an
-authorized target and egress/grant authority; CSPM needs authorized test-cloud
-credentials. Strict local sandbox conformance passed, but that does not establish
-these remaining execution prerequisites. Custody failure was exercised in a disposable
+Governed DAST/recon remains the unproved execution environment group; it needs an
+authorized target and egress/grant authority. CSPM's representative Azure path is
+recorded above, without implying AWS/GCP or full cloud-posture coverage. Strict
+local sandbox conformance alone does not establish those remaining execution
+prerequisites. Custody failure was exercised in a disposable
 chain and reporting failed closed; retained audit/evidence history was untouched.
 The [custody receipt](assets/ui/notification-events/live/functional-followup.json)
 records the verifier transition, HTTP 400 report denial and one delivered event.

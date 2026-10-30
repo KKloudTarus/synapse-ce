@@ -15,6 +15,8 @@ SYNAPSE_FLEET_ASSETS_ENABLED=true
 
 `SYNAPSE_CSPM_RATE=0` selects the provider default. A positive value from 1 through 100 caps requests per second. CSPM requires PostgreSQL, `synapse-worker`, fleet assets, sandboxing, and kernel egress enforcement. The API only validates and enqueues a run; the worker requires an absolute helper path plus an authoritative SHA-256 in `SYNAPSE_TOOL_HASHES`, then launches the pinned `synapse-cspm` helper inside bubblewrap with seccomp, dropped capabilities, cgroup bounds, a curated read-only root, and a default-deny provider-host network namespace. Provider SDKs do not run in the API or worker process. Store credentials through the engagement credential vault and submit only `credential_ref`; credential values must not appear in API requests, queue payloads, logs, evidence, artifacts, or model context.
 
+The API's private grant authority must have the same enabled providers and provider-host configuration as the worker. It reloads the original atomically enqueued job and the current run and engagement before signing a grant for one scope. It independently resolves that provider's HTTPS policy and rejects a worker policy that differs, including a union of multiple providers. Each helper has a distinct run/scope identity; the worker also rejects a delivered job that differs from the original submission. Missing or retained-away job metadata requires a new submission. Keep the dedicated issuer credential and signing key on the API; the broker receives only the verification key. See [the execution tier](deployment.md#supported-network-execution-posture) for the issuer and broker requirements.
+
 ## Least privilege
 
 Prefer workload identity, federation, or short-lived role assumption. The connector observes state and never calls mutation APIs.
@@ -42,6 +44,8 @@ Canonical scope identities are `aws:organizations/o-*`, `azure:subscriptions/*`,
 Connectors paginate all supported list operations and enforce request, page, resource, and time bounds. Missing permissions, throttling exhaustion, an unreachable child account, or a reached bound makes the run partial. Synapse does not translate partial inventory into a clean account.
 
 Supported checks cover public storage, publicly reachable compute, wildcard identity grants, unused high-privilege identities when last-use evidence exists, explicitly disabled encryption, and public network paths to sensitive resources. Unknown provider facts do not produce secure conclusions.
+
+Azure Foundry accounts and projects are outside the current inventory filter. A subscription containing only those resources returns no supported resource rows; this does not prove their posture or that the subscription is clean. Azure's unsupported effective-network and identity-activity checks remain explicit coverage gaps, so a successful Resource Graph request can still produce a partial run.
 
 When a file-derived expectation has a stable provider resource identity, Synapse compares `public` and `encrypted` controls to live state. A mismatch is a `cloud-iac-live-drift` finding. Dynamic or unmatched identities are coverage gaps, not drift findings.
 
