@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '.'
 
 // The DAST scan and runtime-verification adapters. Requests carry json tags (snake_case); the
-// Proposal / ApprovalDecision / runner Result responses have no Go json tags (PascalCase). Each
-// mapper must read the exact casing.
+// Proposals have a lowercase envelope and PascalCase nested fields; older envelopes
+// and runner results use PascalCase.
 describe('dast adapters', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>
   beforeEach(() => {
@@ -19,6 +19,15 @@ describe('dast adapters', () => {
     const p = await api.proposeDastScan('eng-1', { target: 'https://t', maxPages: 10 })
     expect(p).toMatchObject({ actionId: 'act-1', tool: 'zap', targetValue: 'https://t', risk: 'medium', decisionState: 'pending' })
     expect(lastBody()).toMatchObject({ target: 'https://t', crawler: { max_pages: 10 } })
+  })
+
+  it('preserves the runtime proposal ID from the server envelope for approval', async () => {
+    respond({ action: { ID: 'probe-action', Tool: 'run_dast_verifier', Target: { Kind: 'url', Value: 'https://t/fixture' } }, decision: { State: 'pending' } }, 202)
+    const p = await api.proposeRuntimeVerification('eng-1', 'jud-1', { url: 'https://t/fixture', method: 'GET', expectedStatus: 200, scoreIfConfirmed: 90, scoreIfRefuted: 10, version: 1 })
+    expect(p).toMatchObject({ actionId: 'probe-action', targetValue: 'https://t/fixture', decisionState: 'pending' })
+    respond({ ActionID: 'probe-action', State: 'approved' })
+    await api.decideDastApproval('eng-1', p.actionId, true, 'fixture only')
+    expect(String(fetchSpy.mock.calls[1][0])).toContain('/dast/approvals/probe-action/decide')
   })
 
   it('runs a scan and maps the result surface/coverage/proofs', async () => {

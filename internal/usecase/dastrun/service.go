@@ -28,11 +28,7 @@ type Prober interface {
 // jobPayload travels with the durable job. It carries the tenant (cross-checked against the ctx tenant),
 // the run id, and the probe to execute. The probe binds to the consumed approval by digest, so carrying
 // it on the internal queue is safe; it is never persisted on the secret-free run record.
-type jobPayload struct {
-	TenantID shared.ID        `json:"tenant_id"`
-	RunID    shared.ID        `json:"run_id"`
-	Probe    dastrunner.Probe `json:"probe"`
-}
+type jobPayload = ports.DASTRunJob
 
 // Service submits and reads DAST runs (API) and executes them (worker).
 type Service struct {
@@ -170,6 +166,7 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 		_ = s.audit.Record(ctx, ports.AuditEntry{Actor: run.Actor, Action: "dast.run_failed", Target: run.EngagementID.String(), At: s.clock.Now().UTC(), Metadata: map[string]string{"run": run.ID.String(), "reason": "egress_unavailable"}})
 		return nil
 	}
+	p.Probe.RunID = run.ID
 	result, runErr := s.prober.Run(ctx, run.Actor, run.EngagementID, run.ActionID, p.Probe)
 	if runErr != nil {
 		// A transport-level probe error can still carry sealed evidence (the runner seals before returning

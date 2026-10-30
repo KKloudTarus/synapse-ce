@@ -8,9 +8,8 @@ package dastworkflow
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,6 +39,7 @@ type Service struct {
 	proofVerifier ports.DASTProofVerifier
 	judgments     scanJudgmentProposer
 	verifier      scanProofVerifier
+	tx            ports.IndependentTenantTransactionRunner
 }
 
 func NewService(gate *safety.Gate, approvals *approval.Service, store ports.ApprovalStore, runner *dastrunner.Service, ev *evidence.Service, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
@@ -47,6 +47,17 @@ func NewService(gate *safety.Gate, approvals *approval.Service, store ports.Appr
 		return nil, fmt.Errorf("%w: dast workflow requires gate, approvals, store, runner, evidence, clock, and ids", shared.ErrValidation)
 	}
 	return &Service{gate: gate, approvals: approvals, store: store, runner: runner, evidence: ev, clock: clock, ids: ids}, nil
+}
+
+// SetTransactionRunner enables atomic custody for durable verifier runs.
+func (s *Service) SetTransactionRunner(tx ports.TenantTransactionRunner) error {
+	independent, ok := tx.(ports.IndependentTenantTransactionRunner)
+	if !ok || independent == nil {
+		s.tx = nil
+		return fmt.Errorf("%w: durable DAST requires an independent tenant transaction", shared.ErrValidation)
+	}
+	s.tx = independent
+	return nil
 }
 
 type Proposal struct {
@@ -61,10 +72,7 @@ func (s *Service) Propose(ctx context.Context, actor string, engagementID shared
 	if engagementID == "" || probe.JudgmentID == "" {
 		return Proposal{}, fmt.Errorf("%w: engagement id and judgment id are required", shared.ErrValidation)
 	}
-	method := strings.ToUpper(strings.TrimSpace(probe.Method))
-	if method == "" {
-		method = "GET"
-	}
+	method := probe.NormalizedMethod()
 	probe.URL = strings.TrimSpace(probe.URL)
 	if err := validateDASTURL(probe.URL); err != nil {
 		return Proposal{}, err
@@ -113,21 +121,50 @@ func (s *Service) Run(ctx context.Context, actor string, engagementID, actionID 
 	if p.EngagementID != engagementID || p.Tool != dastrunner.ToolRunDASTVerifier || p.Action != dastrunner.ActionSafeHTTPProbe {
 		return dastrunner.Result{}, fmt.Errorf("%w: DAST approval not found for this engagement", shared.ErrNotFound)
 	}
-	method := strings.ToUpper(strings.TrimSpace(probe.Method))
-	if method == "" {
-		method = "GET"
-	}
+	method := probe.NormalizedMethod()
 	if err := validateDASTURL(probe.URL); err != nil {
 		return dastrunner.Result{}, err
 	}
 	if len(p.Argv) != 2 || p.Argv[0] != "synapse-dast-probe" || subtle.ConstantTimeCompare([]byte(p.Argv[1]), []byte("--config-sha256="+probeDigest(probe, method))) != 1 {
 		return dastrunner.Result{}, fmt.Errorf("%w: DAST approval does not bind this probe configuration", shared.ErrValidation)
 	}
-	adm, err := s.gate.Admit(ctx, p, actor)
-	if err != nil {
-		return dastrunner.Result{}, err
+	var adm safety.AdmittedAction
+	if probe.RunID.IsZero() {
+		adm, err = s.gate.Admit(ctx, p, actor)
+		if err == nil {
+			err = s.consume(ctx, engagementID, actionID, actor)
+		}
+	} else {
+		consumer, ok := s.store.(ports.DASTApprovalConsumer)
+		tenant, hasTenant := shared.TenantFrom(ctx)
+		if !ok || s.tx == nil || !hasTenant || tenant.IsZero() {
+			return dastrunner.Result{}, fmt.Errorf("%w: durable DAST custody is unavailable", shared.ErrForbidden)
+		}
+		err = evidence.AnchorAfterCommit(ctx, func(anchorctx context.Context) error {
+			return s.tx.RunIndependent(anchorctx, tenant, func(txctx context.Context) error {
+				var admitErr error
+				adm, admitErr = s.gate.Admit(txctx, p, actor)
+				if admitErr != nil {
+					return admitErr
+				}
+				if err := consumer.ConsumeForDASTRun(txctx, actionID, probe.RunID); err != nil {
+					if errors.Is(err, shared.ErrConflict) {
+						return fmt.Errorf("%w: DAST approval was already consumed", shared.ErrForbidden)
+					}
+					return err
+				}
+				payload, err := json.Marshal(ports.DASTApprovalConsumption{TenantID: tenant, EngagementID: engagementID, RunID: probe.RunID, ActionID: actionID, Actor: actor, AdmissionID: adm.EvidenceID()})
+				if err != nil {
+					return fmt.Errorf("marshal DAST approval consumption: %w", err)
+				}
+				if _, err := s.evidence.SealWithID(txctx, ports.DASTConsumptionEvidenceID(probe.RunID), engagementID, "agent_approval_consumed", payload, actor); err != nil {
+					return fmt.Errorf("seal DAST approval consumption: %w", err)
+				}
+				return nil
+			})
+		})
 	}
-	if err := s.consume(ctx, engagementID, actionID, actor); err != nil {
+	if err != nil {
 		return dastrunner.Result{}, err
 	}
 	return s.runner.Execute(ctx, adm, probe)
@@ -152,9 +189,8 @@ func isDASTAction(p agent.ProposedAction) bool {
 }
 
 func probeDigest(probe dastrunner.Probe, method string) string {
-	payload := strings.Join([]string{probe.JudgmentID.String(), probe.URL, method, fmt.Sprint(probe.ExpectedStatus), probe.ExpectedBodyContains, fmt.Sprint(probe.ScoreIfConfirmed), fmt.Sprint(probe.ScoreIfRefuted), fmt.Sprint(probe.ExpectedVersion), probe.Rationale}, "\n")
-	digest := sha256.Sum256([]byte(payload))
-	return hex.EncodeToString(digest[:])
+	probe.Method = method
+	return probe.ApprovalDigest()
 }
 
 // validateDASTURL delegates to dastrunner.ValidateURL, the single source of truth for probe-target

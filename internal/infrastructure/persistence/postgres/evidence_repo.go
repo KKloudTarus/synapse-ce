@@ -54,6 +54,7 @@ func restoreRoleEligible(bypassRLS, databaseOwner bool) bool {
 }
 
 var _ ports.EvidenceStore = (*EvidenceStore)(nil)
+var _ ports.EvidenceLookup = (*EvidenceStore)(nil)
 var _ ports.RestoreEvidenceReader = (*RestoreEvidenceStore)(nil)
 
 // Append inserts sealed evidence items in order, in one transaction (append-only).
@@ -112,6 +113,19 @@ func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID share
 		return rows.Err()
 	})
 	return out, err
+}
+
+func (r *EvidenceStore) LookupSealedByID(ctx context.Context, engagementID, evidenceID shared.ID) (out evidence.Evidence, found bool, err error) {
+	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id,COALESCE(finding_id,''),engagement_id,kind,sha256,COALESCE(previous_hash,''),COALESCE(storage_ref,''),content,COALESCE(created_by,''),created_at FROM evidence WHERE engagement_id=$1 AND id=$2`, engagementID.String(), evidenceID.String()).Scan(&out.ID, &out.FindingID, &out.EngagementID, &out.Kind, &out.Hash, &out.PreviousHash, &out.StorageRef, &out.Content, &out.CreatedBy, &out.CreatedAt)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return evidence.Evidence{}, false, nil
+	}
+	if err != nil {
+		return evidence.Evidence{}, false, fmt.Errorf("lookup sealed evidence: %w", err)
+	}
+	return out, true, nil
 }
 
 // ListEvidenceChains enumerates every restored chain only inside a READ ONLY

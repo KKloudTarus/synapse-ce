@@ -405,6 +405,42 @@ showed the succeeded run, one in-scope result and
 without another account grant. No public exposure, cloud target or paid service
 was added. This is representative HTTPX proof, not subfinder, naabu or DAST proof.
 
+### Governed HTTP verification
+
+The safe DAST verifier now has representative functional proof through the same
+native execution tier. A synthetic engagement reachability judgment was proposed
+through the application service, then a human approved one ordinary GET of an
+immutable public repository document. The [receipt](assets/ui/notification-events/live/dast-verifier-live.json)
+binds the exact probe digest, durable run, consumed approval owner and independently
+committed one-shot grant. A previously expired proposal stayed unconsumed; its
+identical replacement was approved before execution.
+
+The pinned curl process returned HTTP 200 with the expected marker. The durable
+run succeeded with `runtime_confirmed`; all five evidence links were intact and
+the head was signed. The broker recorded one destination rule and namespace
+cleanup. No packet or eBPF connection receipt is claimed. The trusted workflow
+binds the exact URL; the broker enforces process, IP and port independently, not
+HTTPS path against a compromised worker.
+
+The terminal event delivered to Slack on its first attempt with HTTP 200.
+[Native Vietnamese rendering](assets/ui/notification-events/live/slack-dast-vi.png)
+showed the succeeded outcome and unavailable finding counts. Clicking its link
+and signing in with the existing local operator opened the
+[correct engagement with verified evidence](assets/ui/notification-events/live/dast-link-console.png).
+The [verifier UI](assets/ui/notification-events/live/dast-verifier-console.png)
+showed the terminal verdict and HTTP status without another submission. The
+retained resume command was exercised with one existing run, no new approval,
+probe or cloud operation. No credential, cloud resource or paid service was added.
+
+This proves the governed verifier and representative Slack journey. The seeded
+judgment and static marker are functional inputs, not a vulnerability claim.
+Authenticated crawling/scanning remains unavailable in dispatch-only posture.
+
+Final review also closed shared-address SSRF and transaction anchoring/ledger-read
+findings. Focused race and actual PostgreSQL checks cover those corrections.
+The retained runtime was updated and readied without another probe; the receipt
+keeps the successful run's original binary hashes separate from that final rollout.
+
 ### Remaining environments
 
 Four service setups remain unavailable after the Gmail restoration above. The
@@ -427,12 +463,10 @@ Okta, Google Workspace identity, PingOne and PagerDuty are intentionally exclude
 by the maintainer and are not counted in those four. Google Workspace identity
 and Gmail SMTP are separate integrations.
 
-Governed DAST remains unproved; it needs an authorized target accepted by its
-probe policy and an independent egress/grant path. Representative recon and
-Azure CSPM paths are recorded above, without implying other recon tools,
-AWS/GCP or full cloud-posture coverage. Strict local sandbox conformance alone
-does not establish the remaining DAST prerequisites. Custody failure was exercised in a disposable
-chain and reporting failed closed; retained audit/evidence history was untouched.
+Representative DAST verification, recon and Azure CSPM paths are recorded above,
+without implying authenticated DAST scanning, other recon tools, AWS/GCP or full
+cloud-posture coverage. Custody failure was exercised in a disposable chain and
+reporting failed closed; retained audit/evidence history was untouched.
 The [custody receipt](assets/ui/notification-events/live/functional-followup.json)
 records the verifier transition, HTTP 400 report denial and one delivered event.
 These source rehearsals reuse retained sandbox configuration with optional paid

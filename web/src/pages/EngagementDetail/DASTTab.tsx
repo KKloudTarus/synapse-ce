@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Play, ShieldZap, Target04 } from '@untitledui/icons'
 import { Button, Card, ErrorState, Field, InfoNote, Input, Pill, Select, cn } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
@@ -46,6 +46,29 @@ function RuntimeVerifyCard({ engagementId, canOperate, canReview }: { engagement
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [reason, setReason] = useState('')
+
+  const pendingRun = outcome?.durable && (outcome.run?.status === 'queued' || outcome.run?.status === 'running') ? outcome.run.id : ''
+  useEffect(() => {
+    if (!pendingRun) return
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function poll() {
+      try {
+        const next = await api.getDastRun(engagementId, pendingRun)
+        if (!active) return
+        if (next.id !== pendingRun) throw new Error('Run status did not match the requested run')
+        setOutcome((current) => current?.durable && current.run?.id === next.id ? { ...current, run: next } : current)
+        setErr('')
+        if (next.status !== 'queued' && next.status !== 'running') return
+      } catch (e) {
+        if (!active) return
+        setErr(e instanceof Error ? e.message : 'Could not read the probe status')
+      }
+      timer = setTimeout(poll, 1500)
+    }
+    void poll()
+    return () => { active = false; clearTimeout(timer) }
+  }, [engagementId, pendingRun])
 
   const selected = probeable.find((j) => j.id === judgmentId) ?? null
 
@@ -134,7 +157,7 @@ function RuntimeVerifyCard({ engagementId, canOperate, canReview }: { engagement
             </Field>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="primary" loading={busy} disabled={busy || !canOperate || !selected || !input.url.trim()} onClick={propose}>
+            <Button variant="primary" loading={busy} disabled={busy || !!pendingRun || !canOperate || !selected || !input.url.trim()} onClick={propose}>
               <Target04 className="size-4" /> Propose probe
             </Button>
             {!canOperate && <span className="text-xs text-tertiary">Proposing a probe needs the operator role.</span>}
@@ -156,18 +179,21 @@ function RuntimeVerifyCard({ engagementId, canOperate, canReview }: { engagement
                 )}
                 {proposal.decisionState === 'pending' && !canReview && <span className="text-xs text-tertiary">Awaiting a reviewer's decision.</span>}
                 {(proposal.decisionState === 'approved' || proposal.decisionState === 'consumed') && canOperate && (
-                  <Button variant="primary" loading={busy} disabled={busy} onClick={run}><Play className="size-4" /> Run probe</Button>
+                  <Button variant="primary" loading={busy} disabled={busy || !!outcome?.durable} onClick={run}><Play className="size-4" /> Run probe</Button>
                 )}
               </div>
             </div>
           )}
 
           {outcome && (
-            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-secondary p-3 text-sm">
+            <div aria-live="polite" className="flex flex-wrap items-center gap-3 rounded-lg border border-secondary p-3 text-sm">
               {outcome.durable && outcome.run ? (
                 <>
                   <Pill className="capitalize">{outcome.run.status}</Pill>
                   {outcome.run.verdict && <span className="text-tertiary">verdict {outcome.run.verdict}</span>}
+                  {outcome.run.httpStatus > 0 && <span className="text-tertiary">HTTP {outcome.run.httpStatus}</span>}
+                  {outcome.run.errorCode && <span className="text-error-primary">{outcome.run.errorCode}</span>}
+                  {outcome.run.evidenceId && <span className="font-mono text-[11px] text-quaternary">evidence {outcome.run.evidenceId}</span>}
                   <span className="ml-auto font-mono text-[11px] text-quaternary">run {outcome.run.id}</span>
                 </>
               ) : (
@@ -351,7 +377,7 @@ export function DASTTab({ engagementId }: { engagementId: string }) {
         </Card>
       )}
 
-      <RuntimeVerifyCard engagementId={engagementId} canOperate={canOperate} canReview={canReview} />
+      <RuntimeVerifyCard key={engagementId} engagementId={engagementId} canOperate={canOperate} canReview={canReview} />
     </div>
   )
 }

@@ -1107,6 +1107,10 @@ func main() {
 				log.Error("DAST workflow init failed", "err", werr)
 				os.Exit(1)
 			}
+			if err := dastWorkflowSvc.SetTransactionRunner(postgres.NewTenantTransactionRunner(pool)); err != nil {
+				log.Error("DAST custody transaction init failed", "err", err)
+				os.Exit(1)
+			}
 			dastProber = dastWorkflowSvc
 			log.Info("DAST verification runs execute on this worker (dast_run handler)")
 		} else {
