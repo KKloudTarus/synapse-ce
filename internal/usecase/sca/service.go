@@ -354,6 +354,9 @@ func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
 const (
 	defaultFPTriageMaxFindings = 100
 	maxFPTriageMaxFindings     = 1000
+	// maxUnresolvedInputsReported bounds how many unresolved IaC attributes a warning names, so a large
+	// configuration cannot push an unbounded list into the sealed result.
+	maxUnresolvedInputsReported = 20
 )
 
 // SetFPTriageMaxFindings sets the hard per-scan LLM candidate cap. Invalid values restore the finite
@@ -4458,6 +4461,30 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 						warning += ": " + strings.Join(misReport.ChartRenderReasons, "; ")
 					}
 					result.SourceWarnings = append(result.SourceWarnings, warning)
+				}
+				// A capability that could not evaluate its input leaves that input unassessed. The raw
+				// manifests behind it were still scanned, so coverage is partial rather than failed, and the
+				// difference between "nothing wrong" and "nothing applied" reaches the caller.
+				if misReport.UnassessedInputs > 0 {
+					result.partialEngine("iac", scanrun.ReasonAnalysisIncomplete, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(misReport.Findings)), scanrun.MeasureFilesUnscanned: int64(misReport.UnassessedInputs)})
+					warning := fmt.Sprintf("%d infrastructure-as-code input(s) were NOT evaluated by the capability that owns them",
+						misReport.UnassessedInputs)
+					if len(misReport.UnassessedReasons) > 0 {
+						warning += ": " + strings.Join(misReport.UnassessedReasons, "; ")
+					}
+					result.SourceWarnings = append(result.SourceWarnings, warning)
+				}
+				// An attribute whose effective value the bounded evaluator could not establish is a place a
+				// rule read source text rather than a value. Coverage stays complete, because the evaluation
+				// contract is documented and these are inside it, but the reader is told where it stopped.
+				if n := len(misReport.UnresolvedInputs); n > 0 {
+					shown := misReport.UnresolvedInputs
+					if len(shown) > maxUnresolvedInputsReported {
+						shown = shown[:maxUnresolvedInputsReported]
+					}
+					result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+						"%d infrastructure-as-code attribute(s) did not resolve to a value, so the rules read their source text: %s",
+						n, strings.Join(shown, "; ")))
 				}
 			} else {
 				misRaws, merr = s.misconfig.ScanConfigs(ctx, ws.Dir)

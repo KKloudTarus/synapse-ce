@@ -29,14 +29,15 @@ const (
 // egress denied), or an explicit trusted-local direct exec is used (the CLI). With NEITHER set, Helm
 // rendering is skipped. Always argv (never a shell), fixed release name, no chart hooks; best-effort.
 func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, helmBin, chartDir, relDir string) k8sScanResult {
-	if helmBin == "" {
-		return k8sScanResult{}
-	}
 	// A chart that will not render is NOT a chart with no findings, and the difference has to reach the
 	// caller. On one live repository 112 of 126 charts refused to render and the scan reported nothing about
-	// it, so every one of those apps read as clean.
+	// it, so every one of those apps read as clean. A chart nobody rendered BECAUSE the capability is off is
+	// the same clean-looking nothing, so it is reported the same way, with its own reason.
 	failed := func(reason string) k8sScanResult {
 		return k8sScanResult{chartRenderFailures: 1, chartRenderReasons: []string{reason}}
+	}
+	if helmBin == "" {
+		return failed("helm rendering is not configured, so the chart's values were not applied")
 	}
 	// A LIBRARY chart ships template helpers for other charts and declares no resources of its own, so
 	// `helm template` refusing it is correct and there is nothing to evaluate. Counting it as a chart the scan
@@ -68,7 +69,7 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 		// Trusted-local (CLI) direct exec, matching the CLI's maven/gradle posture. Output is capped
 		// DURING capture so a chart rendering gigabytes cannot OOM the process before a post-hoc cap.
 		if _, err := exec.LookPath(helmBin); err != nil {
-			return k8sScanResult{} // helm is absent: not a per-chart failure, the whole feature is off
+			return failed("the helm binary was not found, so the chart's values were not applied")
 		}
 		cctx, cancel := context.WithTimeout(ctx, helmRenderTimeout)
 		defer cancel()
@@ -82,7 +83,9 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 		}
 		rendered = cw.buf.Bytes()
 	default:
-		return k8sScanResult{} // Helm rendering not enabled (no sandbox runner, not trusted-local)
+		// Rendering an untrusted chart executes it, so it is off unless a sandbox runner or an explicit
+		// trusted-local exec is configured. That is a deliberate posture, and the chart is still unassessed.
+		return failed("helm rendering is not enabled for this scan, so the chart's values were not applied")
 	}
 	if len(rendered) > maxRenderedBytes {
 		rendered = rendered[:maxRenderedBytes]

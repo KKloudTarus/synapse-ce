@@ -106,6 +106,34 @@ literal line rules, because it attaches to nothing this scanner can establish.
 
 A trust policy's `Resource` element is not used by AWS and is not assessed.
 
+## Kubernetes, Helm and Kustomize
+
+A Kubernetes resource is the resource it declares, in whichever syntax declared it. A
+manifest authored as JSON is parsed and assessed exactly as its YAML equivalent is, and
+produces the same findings.
+
+Helm charts and Kustomize overlays carry their security-relevant values in templates and
+patches, so they have to be rendered before the Kubernetes rules can read them. Rendering
+executes untrusted input, so it is off unless a sandbox runner is configured (the API) or
+an explicit trusted-local exec is enabled (the CLI).
+
+An input left unrendered is reported, never returned as a clean result:
+
+| Situation | What is reported |
+| --- | --- |
+| Helm rendering disabled, binary absent, or the render failed | an unrendered chart, with the reason |
+| Kustomize rendering disabled, binary absent, the render failed, or the render budget was reached | an unassessed input, with the reason |
+
+Both make the `iac` engine's coverage partial, so `--require-complete` rejects the run.
+The manifests behind an unrendered input are still scanned raw, so this is a coverage gap
+and never a lost scan: a base manifest's findings stand, and only the patches or values
+that were never applied are missing. A Helm library chart declares no resources of its
+own and is not counted as a gap.
+
+Unresolved Terraform attributes are different. They sit inside the published evaluation
+contract above, so they are reported as a warning that names them rather than as a
+coverage gap.
+
 ## Network rules
 
 An exposure finding requires an allowing rule. The decision is read from

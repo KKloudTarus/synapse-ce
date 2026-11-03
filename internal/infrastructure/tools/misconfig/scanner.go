@@ -27,6 +27,9 @@ const (
 	maxFileBytes = 5 << 20 // skip files larger than 5 MiB (manifests are small)
 	sniffBytes   = 8 << 10 // read this much to decide binary-or-text
 	maxValueLen  = 256     // cap an untrusted config value embedded in a finding
+
+	// maxUnassessedReasons bounds the distinct capability-gap reasons carried on the report.
+	maxUnassessedReasons = 4
 )
 
 // Scanner implements ports.MisconfigScanner with an owned ruleset.
@@ -111,7 +114,21 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	// whose render SUCCEEDED, so a base resource is not double-counted (once unpatched) while a render
 	// failure or a non-referenced file never hides a finding. Disabled leaves manifests scanned raw.
 	kustomizeCovered := map[string]bool{}
-	if s.kustomizeRun != nil || s.kustomizeDir {
+	unassessed := 0
+	var unassessedReasons []string
+	noteUnassessed := func(n int, reason string) {
+		unassessed += n
+		for _, have := range unassessedReasons {
+			if have == reason {
+				return
+			}
+		}
+		if len(unassessedReasons) < maxUnassessedReasons {
+			unassessedReasons = append(unassessedReasons, reason)
+		}
+	}
+	kustomizeEnabled := s.kustomizeRun != nil || s.kustomizeDir
+	if kustomizeEnabled {
 		index, roots := collectKustomizations(ctx, root)
 		success := map[string]bool{} // files covered by a root that rendered successfully
 		failed := map[string]bool{}  // files in a root that failed to render or was not attempted
@@ -121,14 +138,16 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 				for f := range closure {
 					failed[f] = true
 				}
+				noteUnassessed(1, "the kustomization render budget was reached, so this overlay was not applied")
 				continue
 			}
 			relDir := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(dir, root), string(os.PathSeparator)))
-			res, ok := s.renderKustomization(ctx, root, dir, relDir)
+			res, ok, reason := s.renderKustomization(ctx, root, dir, relDir)
 			if !ok {
 				for f := range closure {
 					failed[f] = true
 				}
+				noteUnassessed(1, reason)
 				continue // render failed: leave this overlay's files to the raw scan (never suppress)
 			}
 			mergeK8sScanResult(&kubernetes, res)
@@ -152,6 +171,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	// the module block, not the root default). Deferring keeps the per-directory map complete regardless of
 	// walk order.
 	var tfConfigs, tfVarFiles []tfInputFile
+	kustomizationsSeen := 0
 	count := 0         // config files actually scanned
 	walked := 0        // total tree entries visited
 	truncated := false // set when a cap stopped the walk, so the caller never reads a bounded scan as complete
@@ -191,6 +211,9 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 				mergeK8sScanResult(&kubernetes, result)
 			}
 			return nil
+		}
+		if isKustomizationName(d.Name()) {
+			kustomizationsSeen++
 		}
 		kind := classifyName(d.Name())
 		isTFVars := isTFVarsName(d.Name())
@@ -278,6 +301,11 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	if walkErr != nil {
 		return ports.MisconfigScanReport{Findings: out}, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
 	}
+	// A kustomization in the tree that nothing rendered is an overlay whose patches were never applied. The
+	// base manifests were still scanned raw, so this is a coverage gap, never a lost scan.
+	if !kustomizeEnabled && kustomizationsSeen > 0 {
+		noteUnassessed(kustomizationsSeen, "kustomization rendering is not enabled for this scan, so overlay patches were not applied")
+	}
 	// Second Terraform pass: parse every module, resolve its variables, locals and module inputs within the
 	// bounded contract, and scan the normalized source in which each attribute carries its effective value.
 	tfFindings, tfUnresolved := buildTFWorkspace(tfConfigs, tfVarFiles).scanWorkspace()
@@ -291,6 +319,8 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		ChartRenderReasons: kubernetes.chartRenderReasons,
 		Truncated:          truncated,
 		UnresolvedInputs:   tfUnresolved,
+		UnassessedInputs:   unassessed,
+		UnassessedReasons:  unassessedReasons,
 	}, nil
 }
 
@@ -336,12 +366,16 @@ func maybeCFN(name string) bool {
 	return ext == ".json" || ext == ".template"
 }
 
-// looksKubernetes is a cheap pre-filter so we only parse YAML that declares a Kubernetes object, not
-// every CI/compose/config YAML in the tree. It matches the YAML form `apiVersion:` (colon-attached), so a
-// JSON-authored manifest (`"apiVersion":`) is intentionally not treated as Kubernetes here.
+// looksKubernetes is a cheap pre-filter so we only parse input that declares a Kubernetes object, not every
+// CI/compose/config file in the tree. Both authoring syntaxes count: the YAML form `apiVersion:` and the
+// JSON form `"apiVersion":`. A JSON manifest is the same resource as its YAML equivalent and must produce
+// the same findings; YAML is a superset of JSON, so the same parser reads both.
 func looksKubernetes(data []byte) bool {
 	t := string(data)
-	return strings.Contains(t, "apiVersion:") && strings.Contains(t, "kind:")
+	if strings.Contains(t, "apiVersion:") && strings.Contains(t, "kind:") {
+		return true
+	}
+	return strings.Contains(t, `"apiVersion"`) && strings.Contains(t, `"kind"`)
 }
 
 // looksCloudFormation is a cheap pre-filter for a CloudFormation template: it declares the format version

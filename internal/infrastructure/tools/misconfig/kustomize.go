@@ -182,9 +182,9 @@ func coveredFiles(rootDir string, index map[string]*kustomization) map[string]bo
 // scans the rendered manifests with the Kubernetes rules. root is bound read-only in the sandbox so a base
 // referenced from a sibling directory (../base) is readable. It returns ok=false when rendering is not
 // enabled or the render FAILED, so the caller can leave the raw scan in place rather than suppress findings.
-func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir string) (k8sScanResult, bool) {
+func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir string) (k8sScanResult, bool, string) {
 	if s.kustomizeBin == "" {
-		return k8sScanResult{}, false
+		return k8sScanResult{}, false, "kustomization rendering is not configured, so overlay patches were not applied"
 	}
 	args := []string{"build", dir}
 	var rendered []byte
@@ -201,12 +201,12 @@ func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir str
 		// Truncated output drops trailing manifests, so a covered resource might never be scanned: treat it as
 		// a failed render (ok=false) so those files fall back to the raw scan instead of being hidden.
 		if err != nil || res.ExitCode != 0 || res.Truncated {
-			return k8sScanResult{}, false
+			return k8sScanResult{}, false, "kustomize build failed, so this overlay's patches were not applied"
 		}
 		rendered = res.Stdout
 	case s.kustomizeDir:
 		if _, err := exec.LookPath(s.kustomizeBin); err != nil {
-			return k8sScanResult{}, false
+			return k8sScanResult{}, false, "the kustomize binary was not found, so overlay patches were not applied"
 		}
 		cctx, cancel := context.WithTimeout(ctx, kustomizeRenderTimeout)
 		defer cancel()
@@ -214,14 +214,15 @@ func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir str
 		cw := &cappedBuffer{max: maxRenderedBytes}
 		cmd.Stdout, cmd.Stderr = cw, io.Discard
 		if err := cmd.Run(); err != nil || cw.truncated {
-			return k8sScanResult{}, false // truncation would hide trailing manifests: fall back to raw scan
+			// Truncation would hide trailing manifests: fall back to the raw scan.
+			return k8sScanResult{}, false, "kustomize build failed, so this overlay's patches were not applied"
 		}
 		rendered = cw.buf.Bytes()
 	default:
-		return k8sScanResult{}, false // kustomize rendering not enabled
+		return k8sScanResult{}, false, "kustomization rendering is not enabled for this scan, so overlay patches were not applied"
 	}
 	agg := filepath.ToSlash(filepath.Join(relDir, "kustomization.yaml"))
-	return scanKubernetesFrom(agg, rendered, kustomizeOriginIndex(root, dir)), true
+	return scanKubernetesFrom(agg, rendered, kustomizeOriginIndex(root, dir)), true, ""
 }
 
 // kustomizeOriginIndex maps a rendered document back to the manifest that declared it, keyed by

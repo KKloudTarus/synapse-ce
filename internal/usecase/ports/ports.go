@@ -2448,6 +2448,13 @@ type MisconfigScanReport struct {
 	// establish within its bounded evaluation contract, as "file:line: attribute". These are the places a
 	// rule saw source text rather than a value, so a clean result there means "not evaluated", not "secure".
 	UnresolvedInputs []string
+	// UnassessedInputs counts the inputs a rendering or parsing capability could not evaluate at all: a
+	// Kustomize overlay left unrendered because the capability is off, absent, or failed. The raw manifests
+	// behind such an input are still scanned, so this is a coverage gap rather than a lost scan.
+	UnassessedInputs int
+	// UnassessedReasons holds up to a few distinct reasons for UnassessedInputs, so a reader learns what to
+	// enable rather than only that something was skipped.
+	UnassessedReasons []string
 }
 
 // MisconfigReporter is the reporting form of MisconfigScanner: it returns the same findings plus what the

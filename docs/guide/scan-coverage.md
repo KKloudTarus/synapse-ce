@@ -34,6 +34,18 @@ with a summary on stderr, read from these outcomes rather than from warning text
 required engine that did not complete, its execution and reason, the engines excluded on
 purpose, and the source warnings in full.
 
+## Infrastructure-as-code capability gaps
+
+The `iac` engine reports partial coverage when a capability could not evaluate its input,
+separately from whether the engine executed. A Helm chart that was not rendered is
+reported as `unrendered_charts`; a Kustomize overlay that was not rendered is reported as
+`analysis_incomplete` with the unassessed input count. Both cases carry a reason naming
+what to enable, and the raw manifests behind them are still scanned, so the findings that
+were available remain. Execution completing never implies that every input was assessed.
+
+[Infrastructure-as-code evaluation](iac-evaluation.md) states the full contract, including
+the Terraform constructs that are evaluated and the ones that stay unresolved.
+
 ## Compatibility and rollout
 
 Native scan-run schema v2 stores canonical engine outcomes in the lane record that is
