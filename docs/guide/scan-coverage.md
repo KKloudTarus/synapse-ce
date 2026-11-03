@@ -46,6 +46,15 @@ were available remain. Execution completing never implies that every input was a
 [Infrastructure-as-code evaluation](iac-evaluation.md) states the full contract, including
 the Terraform constructs that are evaluated and the ones that stay unresolved.
 
+## Installed-package catalog bounds
+
+The owned installed-package catalog walks a materialized image root filesystem under a
+file cap and a component cap. Reaching either returns the packages found so far and
+reports the catalog as a lower bound, naming the bound that was reached; entries the walk
+could not read are counted the same way. Both clear the inventory's confidence, mark the
+`inventory` engine's coverage partial with `analysis_incomplete`, and add a source
+warning. The components that were cataloged are kept and still match advisories.
+
 ## Semantic engine selection
 
 Selection and availability are separate facts. The configured flags are the selection, and

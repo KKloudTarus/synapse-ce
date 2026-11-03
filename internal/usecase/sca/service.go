@@ -3653,6 +3653,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	osApproximateDistro := ""
 	osCatalogFailed := false
 	inventoryPassIncomplete := false
+	// inventoryWarnings carries the cataloging gaps found here into the run's source warnings, which are
+	// assembled further down.
+	var inventoryWarnings []string
 	if s.osPkgCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
@@ -3692,11 +3695,33 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if s.instCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "installed-package-catalog", "bincat-cataloger", "Catalog installed Go/Python packages from image rootfs", map[string]int{"components": before})
-		if instComps, ierr := s.instCataloger.CatalogInstalled(ctx, ws.RootFS); ierr != nil {
+		var instReport ports.InstalledCatalogReport
+		var ierr error
+		reporter, hasInstalledReport := s.instCataloger.(ports.InstalledPackageCatalogReporter)
+		if hasInstalledReport {
+			instReport, ierr = reporter.CatalogInstalledReport(ctx, ws.RootFS)
+		} else {
+			instReport.Components, ierr = s.instCataloger.CatalogInstalled(ctx, ws.RootFS)
+		}
+		switch {
+		case ierr != nil:
 			trace.fail(step, ierr)
 			inventoryPassIncomplete = true
-		} else {
-			trace.succeed(step, "Installed-package cataloging completed", map[string]int{"packages_added": mergeComponents(doc, instComps)})
+		default:
+			trace.succeed(step, "Installed-package cataloging completed", map[string]int{"packages_added": mergeComponents(doc, instReport.Components)})
+			// A catalog that stopped at a bound, or skipped entries it could not read, found real packages
+			// and did not look everywhere. The components stand; the claim of a complete inventory does not.
+			if instReport.Truncated || instReport.Unreadable > 0 {
+				inventoryPassIncomplete = true
+				warning := "the installed-package catalog did not cover the whole image root filesystem, so its inventory is a lower bound"
+				if len(instReport.TruncationReasons) > 0 {
+					warning += ": " + strings.Join(instReport.TruncationReasons, "; ")
+				}
+				if instReport.Unreadable > 0 {
+					warning += fmt.Sprintf("; %d root-filesystem entries could not be read", instReport.Unreadable)
+				}
+				inventoryWarnings = append(inventoryWarnings, warning)
+			}
 		}
 	}
 	// Owned SBOM producer over the materialized image ROOTFS (D7.1): an owned producer's scan of the OCI layout
@@ -4108,6 +4133,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// a result is reproducible/explainable ("why did this differ from last month?").
 	grypeDB := ""
 	var sourceWarnings []string
+	sourceWarnings = append(sourceWarnings, inventoryWarnings...)
 	// A build-system resolver that ERRORED (vs "not this ecosystem") leaves the transitive tree
 	// uncaptured. The scan is already flagged INCOMPLETE, but surface WHY so the operator can act
 	// (e.g. unreachable private repo, missing mvn, un-resolvable parent POM) instead of guessing.

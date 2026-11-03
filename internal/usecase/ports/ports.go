@@ -1640,6 +1640,30 @@ type InstalledPackageCataloger interface {
 	CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom.Component, error)
 }
 
+// InstalledCatalogReport is the bounded output of an installed-package catalog: the components it found
+// plus what it did not cover. A cataloger that stops at a file or component cap returns a real inventory of
+// part of the image, and the difference between that and a complete one decides whether a scan may call its
+// inventory authoritative.
+type InstalledCatalogReport struct {
+	Components []sbom.Component
+	// Truncated reports that a bound stopped the catalog before it covered the rootfs.
+	Truncated bool
+	// TruncationReasons holds the distinct bounds that were reached, so the warning names what was hit.
+	TruncationReasons []string
+	// Unreadable counts the rootfs entries the walk could not read. Each one is a package that may exist and
+	// was never examined.
+	Unreadable int
+}
+
+// InstalledPackageCatalogReporter is the reporting form of InstalledPackageCataloger: the same components
+// plus the bounds and unreadable inputs that make the catalog a lower bound. A cataloger that does not
+// implement it is treated as completeness-unknown, which is why CatalogInstalled remains the interface the
+// service requires.
+type InstalledPackageCatalogReporter interface {
+	InstalledPackageCataloger
+	CatalogInstalledReport(ctx context.Context, rootfsDir string) (InstalledCatalogReport, error)
+}
+
 // Completeness signals how trustworthy a scan's results are: whether dependency
 // versions were actually resolved. Scanning source WITHOUT a lockfile yields
 // unresolved versions, so a "0 vulnerabilities" result must NOT be read as clean.

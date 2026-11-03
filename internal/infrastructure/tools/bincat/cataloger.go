@@ -28,11 +28,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const (
+var (
 	maxFilesWalked = 300_000 // rootfs entries examined (bound the walk of a large image)
 	maxComponents  = 200_000 // emitted-component cap
-	maxMetaBytes   = 1 << 20 // a dist-info METADATA / egg-info PKG-INFO read cap
-	maxModulePath  = 512     // clip an over-long module/name before it enters a PURL
+)
+
+const (
+	maxMetaBytes  = 1 << 20 // a dist-info METADATA / egg-info PKG-INFO read cap
+	maxModulePath = 512     // clip an over-long module/name before it enters a PURL
 )
 
 // Cataloger implements ports.InstalledPackageCataloger over a materialized image rootfs.
@@ -41,22 +44,49 @@ type Cataloger struct{}
 // New returns an installed-package cataloger.
 func New() *Cataloger { return &Cataloger{} }
 
-var _ ports.InstalledPackageCataloger = (*Cataloger)(nil)
+var (
+	_ ports.InstalledPackageCataloger       = (*Cataloger)(nil)
+	_ ports.InstalledPackageCatalogReporter = (*Cataloger)(nil)
+)
 
-// CatalogInstalled walks rootfsDir once, cataloging Go binaries + Python installed metadata. Best-effort: an
-// unreadable file contributes nothing; returns an error only on context cancellation.
-func (Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom.Component, error) {
+// CatalogInstalled returns the components of CatalogInstalledReport. A caller that reads only the
+// components cannot tell a complete catalog from a bounded one, which is why the reporting form exists.
+func (c Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom.Component, error) {
+	report, err := c.CatalogInstalledReport(ctx, rootfsDir)
+	return report.Components, err
+}
+
+// CatalogInstalledReport walks rootfsDir once, cataloging the installed packages it recognizes, and reports
+// what it did not cover. The walk is bounded by a file cap and a component cap; reaching either returns the
+// components found so far with Truncated set, because an image whose catalog stopped early is a lower bound
+// and never an inventory of the whole image. An unreadable entry is skipped and counted. An error is
+// returned only on context cancellation.
+func (Cataloger) CatalogInstalledReport(ctx context.Context, rootfsDir string) (ports.InstalledCatalogReport, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return ports.InstalledCatalogReport{}, err
 	}
 	if strings.TrimSpace(rootfsDir) == "" {
-		return nil, nil
+		return ports.InstalledCatalogReport{}, nil
+	}
+	report := ports.InstalledCatalogReport{}
+	noteTruncation := func(reason string) {
+		report.Truncated = true
+		for _, have := range report.TruncationReasons {
+			if have == reason {
+				return
+			}
+		}
+		report.TruncationReasons = append(report.TruncationReasons, reason)
 	}
 	var out []sbom.Component
 	seen := map[string]bool{} // dedup within this catalog by PURL
 	var curPath string        // the evidence file of the component(s) being added, for layer attribution
 	add := func(c sbom.Component, ok bool) {
-		if !ok || seen[c.PURL] || len(out) >= maxComponents {
+		if !ok || seen[c.PURL] {
+			return
+		}
+		if len(out) >= maxComponents {
+			noteTruncation("the installed-package component cap was reached, so later packages were not cataloged")
 			return
 		}
 		c.Location = curPath // the on-disk artifact, so the component attributes to the layer that wrote it
@@ -66,7 +96,8 @@ func (Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom
 	files := 0
 	walkErr := filepath.WalkDir(rootfsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // unreadable entry: skip
+			report.Unreadable++
+			return nil // unreadable entry: skip, and say how many were skipped
 		}
 		if err := ctx.Err(); err != nil {
 			return err // stop + propagate cancellation (never report a partial catalog as success)
@@ -75,7 +106,12 @@ func (Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom
 			return nil
 		}
 		files++
-		if files > maxFilesWalked || len(out) >= maxComponents {
+		if files > maxFilesWalked {
+			noteTruncation("the installed-package file-walk cap was reached, so part of the root filesystem was not examined")
+			return fs.SkipAll
+		}
+		if len(out) >= maxComponents {
+			noteTruncation("the installed-package component cap was reached, so later packages were not cataloged")
 			return fs.SkipAll
 		}
 		curPath = path
@@ -97,10 +133,11 @@ func (Cataloger) CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom
 		}
 		return nil
 	})
+	report.Components = out
 	if walkErr != nil { // the only non-nil walk error is context cancellation (entry errors are skipped)
-		return out, walkErr
+		return report, walkErr
 	}
-	return out, nil
+	return report, nil
 }
 
 // isPythonMetadata reports whether path is an installed-distribution metadata file
