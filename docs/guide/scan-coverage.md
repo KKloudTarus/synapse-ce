@@ -46,6 +46,16 @@ were available remain. Execution completing never implies that every input was a
 [Infrastructure-as-code evaluation](iac-evaluation.md) states the full contract, including
 the Terraform constructs that are evaluated and the ones that stay unresolved.
 
+## Semantic engine selection
+
+Selection and availability are separate facts. The configured flags are the selection, and
+whether a process could build the adapter is recorded against it, so an engine that was
+asked for and could not run reports `unavailable` with required coverage rather than
+`not_selected`. An entry point that does not support a capability at all reports
+`not_applicable`; the CLI does this for the semantic taint engines, which run in
+`synapse-api` and `synapse-worker`. [CLI](cli.md#engines-the-cli-does-not-run) lists the
+contract per entry point.
+
 ## Compatibility and rollout
 
 Native scan-run schema v2 stores canonical engine outcomes in the lane record that is

@@ -3843,6 +3843,7 @@ func main() {
 	// Composition-root only (the taintscan arch tripwire keeps it off the agent surface). Requires the
 	// sandbox: synapse-callgraph compiles the GENERAL target source, so there is NO safe unsandboxed dev
 	// fallback (contrast govulncheck's vuln-scan) – refuse rather than build untrusted code on the host.
+	scacompose.RecordSemanticSelection(scaService, cfg)
 	if cfg.TaintEnabled {
 		if judgmentSvc == nil {
 			log.Error("SYNAPSE_TAINT_ENABLED requires SYNAPSE_JUDGMENTS_ENABLED (taint mints judgments)")

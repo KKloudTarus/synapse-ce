@@ -123,6 +123,7 @@ type Service struct {
 	sbomCache                        ports.SBOMCache                       // optional content+version-addressed cache of the generated SBOM
 	sbomCrossCheck                   ports.SBOMCrossCheckRecorder          // optional SBOM-producer disagreement → judgment minter
 	taint                            ports.TaintScanner                    // optional deterministic taint-analysis → gated CapSAST proposals
+	taintSelection                   *TaintSelection                       // the operator's semantic-engine selection, recorded by the composition root
 	pythonTaint                      ports.TaintScanner                    // optional Python semantic value-flow → gated CapSAST proposals
 	jsTaint                          ports.TaintScanner                    // optional JavaScript/TypeScript semantic value-flow → gated CapSAST proposals
 	javaTaint                        ports.TaintScanner                    // optional Java semantic value-flow → gated CapSAST proposals
@@ -996,6 +997,35 @@ func (s *Service) SetJsTaint(t ports.TaintScanner) { s.jsTaint = t }
 // engines it is propose-only: positive witnesses become gated CapSAST proposals and partial coverage never
 // becomes a clean conclusion. A setter keeps NewService call sites unchanged.
 func (s *Service) SetJavaTaint(t ports.TaintScanner) { s.javaTaint = t }
+
+// TaintSelection is what the operator asked for, separately from what this process could build. Without it
+// the selection would be read back from the adapter, and an engine that was selected but could not be
+// constructed would be indistinguishable from one nobody asked for.
+//
+// Supported says whether this entry point runs semantic taint at all. The CLI does not: these engines mint
+// gated judgments through the propose-verify-confirm lifecycle, which needs a judgment store the CLI has
+// no access to, and pattern evidence is not a substitute for semantic proof.
+type TaintSelection struct {
+	Supported  bool
+	Go         bool
+	Python     bool
+	JavaScript bool
+	Java       bool
+}
+
+// SetTaintSelection records the semantic-engine selection for this process. A composition root calls it
+// with the configured flags whether or not it then manages to build each adapter, so an adapter that is
+// absent reports as unavailable rather than as unselected. Not calling it leaves the legacy behaviour, in
+// which a wired adapter is read as its own selection.
+func (s *Service) SetTaintSelection(sel TaintSelection) { s.taintSelection = &sel }
+
+// taintSelected reports whether engine was selected, and whether this entry point supports it at all.
+func (s *Service) taintSelected(configured bool, pick func(TaintSelection) bool) (selected, supported bool) {
+	if s.taintSelection == nil {
+		return configured, true
+	}
+	return pick(*s.taintSelection), s.taintSelection.Supported
+}
 
 // SetGraphResolver configures the optional transitive-edge resolver (Go via `go mod graph`). nil ⇒
 // no resolved Go edges. Best-effort + opt-in: a non-Go target / no module cache / tool error adds no edges
@@ -5185,12 +5215,28 @@ func (s *Service) engineOutcomePlan(opts ScanOptions, imported, sourceApplicable
 	addRequested("code_quality", opts.CodeQuality, s.codeQuality != nil, sourceApplicable)
 	_, historySupported := s.secretScanner.(ports.SecretHistoryScanner)
 	addRequested("secret_history", opts.scansVulnerabilities() && s.secretHistory, historySupported, sourceApplicable)
-	// Semantic engines stay optional until configured, then become selected
-	// security work whose absence or truncation affects coverage.
-	addRequested("taint_go", opts.scansVulnerabilities() && s.taint != nil, s.taint != nil, sourceApplicable)
-	addRequested("taint_python", opts.scansVulnerabilities() && s.pythonTaint != nil, s.pythonTaint != nil, sourceApplicable)
-	addRequested("taint_javascript", opts.scansVulnerabilities() && s.jsTaint != nil, s.jsTaint != nil, sourceApplicable)
-	addRequested("taint_java", opts.scansVulnerabilities() && s.javaTaint != nil, s.javaTaint != nil, sourceApplicable)
+	// Semantic engines are selected by the operator, not by whether this process managed to build their
+	// adapter. A selected engine that could not be built reports unavailable, and one this entry point does
+	// not support at all reports not applicable with its reason. Neither becomes a silent not_selected.
+	addSemantic := func(engine string, pick func(TaintSelection) bool, adapter ports.TaintScanner) {
+		selected, supported := s.taintSelected(adapter != nil, pick)
+		switch {
+		case !sourceApplicable:
+			add(engine, false, false)
+		case !opts.scansVulnerabilities() || !selected:
+			add(engine, false, true)
+		case !supported:
+			plan = append(plan, scanrun.EngineOutcome{Engine: engine, Required: false, Execution: scanrun.EngineNotRun, Coverage: scanrun.CoverageNotApplicable, Reason: scanrun.ReasonNotApplicable})
+		case adapter == nil:
+			plan = append(plan, scanrun.EngineOutcome{Engine: engine, Required: true, Execution: scanrun.EngineNotRun, Coverage: scanrun.CoverageUnknown, Reason: scanrun.ReasonUnavailable})
+		default:
+			add(engine, true, true)
+		}
+	}
+	addSemantic("taint_go", func(t TaintSelection) bool { return t.Go }, s.taint)
+	addSemantic("taint_python", func(t TaintSelection) bool { return t.Python }, s.pythonTaint)
+	addSemantic("taint_javascript", func(t TaintSelection) bool { return t.JavaScript }, s.jsTaint)
+	addSemantic("taint_java", func(t TaintSelection) bool { return t.Java }, s.javaTaint)
 	return plan
 }
 

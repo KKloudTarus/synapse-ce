@@ -278,6 +278,27 @@ Azure Pipelines is detected through `TF_BUILD=true`. A credential-free run URL i
 
 Provider-independent overrides are `SYNAPSE_PR_NUMBER`, `SYNAPSE_PR_TARGET_BRANCH`, `SYNAPSE_REPO_SLUG`, and `SYNAPSE_PR_HEAD_SHA`. Decoration is skipped unless all four identity fields are present.
 
+### Engines the CLI does not run
+
+The CLI runs the deterministic engines: SCA, pattern SAST, secret scanning and IaC. The
+semantic taint engines (`taint_go`, `taint_python`, `taint_javascript`, `taint_java`) run
+in `synapse-api` and `synapse-worker` only. Their witnesses are gated judgments minted
+through the propose-verify-confirm lifecycle, which needs the judgment store the CLI has
+no access to, and a pattern rule is not a substitute for semantic proof.
+
+Selecting one of those engines for a CLI run (`SYNAPSE_TAINT_ENABLED`,
+`SYNAPSE_PYTAINT_ENABLED`, `SYNAPSE_JSTAINT_ENABLED`, `SYNAPSE_JAVATAINT_ENABLED`) is
+reported, never silently dropped. The CLI prints one line on stderr naming the engines it
+will not run, and each one's engine outcome is `not_applicable` rather than
+`not_selected`: the capability is unsupported here, not unrequested. Neither `--mode full`
+nor `--detection-priority comprehensive` changes this.
+
+In `synapse-api` and `synapse-worker` the same flags are the selection. An engine that was
+selected and whose adapter could not be built, for example because
+`SYNAPSE_JUDGMENTS_ENABLED` is off or its sidecar is missing, reports `unavailable` with
+required coverage, so `--require-complete` rejects the run. An engine nobody selected
+reports `not_selected`.
+
 ## False-positive gate
 
 A scan of a real repository surfaces findings in test files and deliberately-insecure fixtures. Synapse
