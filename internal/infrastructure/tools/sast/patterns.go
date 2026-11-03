@@ -160,6 +160,58 @@ func commentOnlyLine(line string) bool {
 		strings.HasPrefix(l, "/*") || strings.HasPrefix(l, "--")
 }
 
+// skipUnlessStringPrefix keeps a literal-prefix rule (u"", f"", b"", r"") on actual prefixes. The
+// regex alone matches the letter wherever it sits, including as the last character INSIDE a
+// literal, which reported `subprocess.run(["date", "-u"])` as a redundant u prefix (#1638). This
+// walks the line's quoting so the letter counts only when it opens a literal from outside one.
+func skipUnlessStringPrefix(prefixes string) func(string) bool {
+	return func(line string) bool {
+		if commentOnlyLine(line) {
+			return true
+		}
+		return !hasStringLiteralPrefix(line, prefixes)
+	}
+}
+
+// hasStringLiteralPrefix reports whether any string literal on the line is introduced by one of
+// prefixes. A character inside a literal never counts, and a prefix letter that continues an
+// identifier (`menu"` in a dict, `value_u"`) never counts either.
+func hasStringLiteralPrefix(line, prefixes string) bool {
+	var quote byte
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if quote != 0 {
+			if c == '\\' { // an escape consumes the next byte, so a quote inside stays inside
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if !strings.ContainsRune(prefixes, rune(c)) {
+			continue
+		}
+		if i+1 >= len(line) || (line[i+1] != '\'' && line[i+1] != '"') {
+			continue
+		}
+		if i > 0 && isIdentifierByte(line[i-1]) {
+			continue // part of a longer identifier, not a literal prefix
+		}
+		return true
+	}
+	return false
+}
+
+func isIdentifierByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
 func commentOrTestPlaceholder(line string) bool {
 	l := strings.ToLower(line)
 	if commentOnlyLine(line) {
@@ -537,8 +589,21 @@ func skipCommentPlaceholderOrLabelSecret(line string) bool {
 			return true
 		}
 	}
-	return versionedLabelValueRe.MatchString(m[2])
+	if versionedLabelValueRe.MatchString(m[2]) {
+		return true
+	}
+	// A secret-like key is not evidence on its own: an endpoint mapping such as
+	// `secrets_manager_host = "secretsmanager.ap-southeast-1.amazonaws.com"` names a service, it
+	// does not embed a credential (#1638). The value shape decides, so a real literal credential
+	// assigned to the same key in the same file still reports.
+	return endpointValueRe.MatchString(m[2])
 }
+
+// endpointValueRe matches a value that is a hostname or a URL rather than a credential: dot
+// separated DNS labels ending in an alphabetic TLD, optionally with a scheme, port or path. A
+// credential of that shape would have to be lower-case alphanumerics and dots only, which no key,
+// token or base64 blob is.
+var endpointValueRe = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}(?::\d{1,5})?(?:/[^"'\s]*)?$`)
 
 func builtinRules() []rule {
 	core := []rule{
