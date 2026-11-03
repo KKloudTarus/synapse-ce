@@ -52,13 +52,18 @@ var (
 	tfBucketRefName = regexp.MustCompile(`^aws_s3_bucket\.([A-Za-z0-9_-]+)\.(?:id|bucket|arn)$`)
 	tfQuotedValue   = regexp.MustCompile(`^"([^"]*)"$`)
 	tfSubBlockOpen  = regexp.MustCompile(`^(ingress|egress)\b`)
-	tfIAMWildcard   = regexp.MustCompile(`(?i)("Action"\s*:\s*"\*"|actions\s*=\s*\[\s*"\*"\s*\])`)
-	tfSecretAttr    = regexp.MustCompile(`(?i)\b(password|secret|secret_key|access_key|private_key|api_key|token)\s*=\s*"([^"]+)"`)
+	// The wildcard forms a policy can be written in: JSON string, JSON array, the HCL object syntax
+	// jsonencode takes, and the aws_iam_policy_document attribute. A line-level match is the fallback for a
+	// document terraform_policy.go could not evaluate, so it has to recognise every supported spelling.
+	tfIAMWildcard = regexp.MustCompile(`(?i)("Action"\s*:\s*"\*"|"Action"\s*:\s*\[\s*"\*"\s*\]|\bAction\s*=\s*"\*"|\bAction\s*=\s*\[\s*"\*"\s*\]|actions\s*=\s*\[\s*"\*"\s*\])`)
+	tfSecretAttr  = regexp.MustCompile(`(?i)\b(password|secret|secret_key|access_key|private_key|api_key|token)\s*=\s*"([^"]+)"`)
 
 	// authz — public access / over-broad grants (some case-sensitive to separate IAM "Principal" from
 	// the lower-case `principal` attribute on aws_lambda_permission).
-	tfResourceWildcard  = regexp.MustCompile(`("Resource"\s*:\s*"\*"|\bResource\s*=\s*"\*"|\bresources\s*=\s*\[\s*"\*"\s*\])`)
-	tfWildcardPrincipal = regexp.MustCompile(`("Principal"\s*:\s*"?\*|\bPrincipal\s*=\s*"\*"|\bPrincipal"?\s*[:=]\s*\{[^}]*\*|\bidentifiers\s*=\s*\[\s*"\*"\s*\])`)
+	tfResourceWildcard = regexp.MustCompile(`("Resource"\s*:\s*"\*"|"Resource"\s*:\s*\[\s*"\*"\s*\]|\bResource\s*=\s*"\*"|\bResource\s*=\s*\[\s*"\*"\s*\]|\bresources\s*=\s*\[\s*"\*"\s*\])`)
+	// The object form requires the WHOLE value to be the wildcard. An ARN that merely contains one
+	// (arn:aws:iam::123456789012:role/app-*) names a scoped set of roles, not every principal.
+	tfWildcardPrincipal = regexp.MustCompile(`("Principal"\s*:\s*"?\*|\bPrincipal\s*=\s*"\*"|\bPrincipal"?\s*[:=]\s*\{[^}]*"\*"|\bidentifiers\s*=\s*\[\s*"\*"\s*\])`)
 	tfLambdaPublic      = regexp.MustCompile(`\bprincipal\s*=\s*"\*"`)
 	tfApiNoAuth         = regexp.MustCompile(`\bauthorization\s*=\s*"NONE"`)
 	tfAzureContainerPub = regexp.MustCompile(`\bcontainer_access_type\s*=\s*"(blob|container)"`)
@@ -184,6 +189,24 @@ func (f *tfBucketFacts) apply(in []ports.MisconfigRawFinding) []ports.MisconfigR
 	return out
 }
 
+// tfDropStructurallyAssessed removes the line-level policy rules inside a document that was already read as
+// statements. Outside such a span the line rules still run, so a policy this scan could not evaluate keeps
+// its literal detection rather than disappearing.
+func tfDropStructurallyAssessed(in []ports.MisconfigRawFinding, spans tfPolicySpans, rel string, line int) []ports.MisconfigRawFinding {
+	if spans == nil || !spans.covers(rel, line) {
+		return in
+	}
+	out := in[:0]
+	for _, f := range in {
+		switch f.RuleID {
+		case "terraform-iam-wildcard", "terraform-iam-wildcard-resource", "terraform-wildcard-principal":
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // tfAttributeLiteral returns the right-hand side of the first line of body matching re.
 func tfAttributeLiteral(body string, re *regexp.Regexp) (string, bool) {
 	for _, line := range strings.Split(body, "\n") {
@@ -206,7 +229,7 @@ func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 // lowerTFSource, in which every attribute whose value could be evaluated carries that value instead of its
 // source spelling, with the original line numbering intact. A file that did not parse is passed through
 // unchanged, so a syntax error degrades to literal matching rather than to no scan at all.
-func scanTerraformText(rel, text string, facts *tfBucketFacts) []ports.MisconfigRawFinding {
+func scanTerraformText(rel, text string, facts *tfBucketFacts, policySpans tfPolicySpans) []ports.MisconfigRawFinding {
 	lines := strings.Split(text, "\n")
 	var out []ports.MisconfigRawFinding
 
@@ -269,7 +292,7 @@ func scanTerraformText(rel, text string, facts *tfBucketFacts) []ports.Misconfig
 			blockDir = tfBlockDirection(lines, braceStack[len(braceStack)-1])
 			blockAction = tfBlockAction(lines, braceStack[len(braceStack)-1])
 		}
-		out = append(out, tfLineRules(rel, i+1, trimmed, curType, subBlock, cidrAttr, blockDir, blockAction)...)
+		out = append(out, tfDropStructurallyAssessed(tfLineRules(rel, i+1, trimmed, curType, subBlock, cidrAttr, blockDir, blockAction), policySpans, rel, i+1)...)
 		for n := strings.Count(line, "{"); n > 0; n-- {
 			braceStack = append(braceStack, i)
 		}

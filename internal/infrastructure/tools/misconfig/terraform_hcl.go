@@ -194,6 +194,19 @@ func tfEvalContextFor(vars, locals map[string]cty.Value) *hcl.EvalContext {
 	}
 }
 
+// withPolicyData binds the module's aws_iam_policy_document data sources, so a resource that references one
+// is assessed against the document it will carry. No other data source is bound: every other data.* read
+// stays unknown.
+func (m *tfModule) withPolicyData(ctx *hcl.EvalContext) *hcl.EvalContext {
+	data := tfPolicyDocData(m, ctx)
+	if data == cty.NilVal {
+		return ctx
+	}
+	out := tfEvalContextFor(m.vars, m.locals)
+	out.Variables["data"] = data
+	return out
+}
+
 func tfObject(m map[string]cty.Value) cty.Value {
 	if len(m) == 0 {
 		return cty.EmptyObjectVal
@@ -331,7 +344,7 @@ func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) ma
 func (m *tfModule) evaluate(extra map[string]cty.Value) *hcl.EvalContext {
 	m.vars = m.resolveVars(extra)
 	m.locals = tfResolveLocals(m.localAttrs, m.vars)
-	return tfEvalContextFor(m.vars, m.locals)
+	return m.withPolicyData(tfEvalContextFor(m.vars, m.locals))
 }
 
 // moduleCallInputs evaluates one `module` block's input attributes in the PARENT's context and returns the
@@ -799,12 +812,22 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
 		collect := func(ctx *hcl.EvalContext, record bool) {
 			var facts tfBucketFacts
 			var batch []ports.MisconfigRawFinding
+			// Policy documents are assessed as statements, not as lines. The spans they occupy are kept so
+			// the line rules do not report the same wildcard tokens under weaker reasoning.
+			sites, policyUnresolved, spans := tfCollectPolicySites(m, ctx)
+			for _, site := range sites {
+				spans.add(site.file, site.line, site.endLine)
+				batch = append(batch, site.assess()...)
+			}
+			if record {
+				unresolved = append(unresolved, policyUnresolved...)
+			}
 			for _, src := range m.sources {
 				text, un := lowerTFSource(src, ctx)
 				if record {
 					unresolved = append(unresolved, un...)
 				}
-				batch = append(batch, scanTerraformText(src.rel, text, &facts)...)
+				batch = append(batch, scanTerraformText(src.rel, text, &facts, spans)...)
 			}
 			for _, f := range facts.apply(batch) {
 				key := fmt.Sprintf("%s|%s|%d", f.RuleID, f.File, f.Line)
@@ -822,7 +845,7 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
 	}
 	for _, f := range ws.raw {
 		var facts tfBucketFacts
-		out = append(out, facts.apply(scanTerraformText(f.rel, string(f.data), &facts))...)
+		out = append(out, facts.apply(scanTerraformText(f.rel, string(f.data), &facts, nil))...)
 	}
 	return out, unresolved
 }
