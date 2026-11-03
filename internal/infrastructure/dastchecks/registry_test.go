@@ -16,7 +16,7 @@ func TestCatalogParity(t *testing.T) {
 }
 
 func TestEvaluateVulnerableAndCleanFixtures(t *testing.T) {
-	vulnerable := ports.DASTObservation{Method: "GET", URL: "https://app.example/.well-known/private", Status: 200, BodySHA256: strings.Repeat("a", 64), BodyExcerpt: "private synapse-auth-weakness", Headers: []string{"Set-Cookie: Secure", "X-Synapse-Auth-Weakness: configured"}}
+	vulnerable := ports.DASTObservation{Method: "GET", URL: "https://app.example/.well-known/private", Status: 200, BodySHA256: strings.Repeat("a", 64), BodyExcerpt: "private synapse-auth-weakness", HeadersCaptured: true, Headers: []string{"Set-Cookie: Secure", "X-Synapse-Auth-Weakness: configured"}}
 	evaluator := NewEvaluator()
 	findings, err := evaluator.Evaluate([]ports.DASTObservation{vulnerable}, nil)
 	if err != nil || len(findings) != 4 {
@@ -34,7 +34,7 @@ func TestEvaluateVulnerableAndCleanFixtures(t *testing.T) {
 			}
 		}
 	}
-	clean := ports.DASTObservation{Method: "GET", URL: "https://app.example/", Status: 200, BodySHA256: strings.Repeat("b", 64), Headers: []string{"Strict-Transport-Security: max-age=1", "Set-Cookie: Secure; HttpOnly; SameSite=Lax"}}
+	clean := ports.DASTObservation{Method: "GET", URL: "https://app.example/", Status: 200, BodySHA256: strings.Repeat("b", 64), HeadersCaptured: true, Headers: []string{"Strict-Transport-Security: max-age=1", "Set-Cookie: Secure; HttpOnly; SameSite=Lax"}}
 	findings, err = evaluator.Evaluate([]ports.DASTObservation{clean}, nil)
 	if err != nil || len(findings) != 0 {
 		t.Fatalf("clean findings=%+v err=%v", findings, err)
