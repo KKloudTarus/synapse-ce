@@ -80,7 +80,6 @@ type tfModule struct {
 	locals        map[string]cty.Value
 	localAttrs    []*hclsyntax.Attribute
 	calls         []*hclsyntax.Block
-	unresolved    []string
 }
 
 // tfScenario is one manually selected variable file.

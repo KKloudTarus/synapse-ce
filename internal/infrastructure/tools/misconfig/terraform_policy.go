@@ -372,11 +372,9 @@ func (s tfPolicySite) assess() []ports.MisconfigRawFinding {
 				"In "+where+", Action is \"*\", so the statement grants every action the policy can grant rather than the ones the workload performs. List the actions required.")
 		}
 
-		callerLevel, callerEvidence := restrictionNone, []string(nil)
+		callerLevel := restrictionUnknown
 		if condsOK {
-			callerLevel, callerEvidence = assessConditions(conds, principalScopingKeys)
-		} else {
-			callerLevel = restrictionUnknown
+			callerLevel, _ = assessConditions(conds, principalScopingKeys)
 		}
 
 		if s.kind.usesPrincipal() && principalsOK && wildcardPrincipal {
@@ -425,7 +423,6 @@ func (s tfPolicySite) assess() []ports.MisconfigRawFinding {
 			}
 		}
 		_ = principals
-		_ = callerEvidence
 	}
 	return out
 }
