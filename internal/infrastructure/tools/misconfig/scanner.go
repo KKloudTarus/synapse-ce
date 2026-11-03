@@ -151,20 +151,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	// must not be substituted into a same-named variable of a child module (which receives its value from
 	// the module block, not the root default). Deferring keeps the per-directory map complete regardless of
 	// walk order.
-	tfSets := map[string]tfValueSet{}
-	tfSetFor := func(dir string) tfValueSet {
-		s, ok := tfSets[dir]
-		if !ok {
-			s = newTFValueSet()
-			tfSets[dir] = s
-		}
-		return s
-	}
-	type tfFile struct {
-		rel  string
-		data []byte
-	}
-	var tfFiles []tfFile
+	var tfConfigs, tfVarFiles []tfInputFile
 	count := 0         // config files actually scanned
 	walked := 0        // total tree entries visited
 	truncated := false // set when a cap stopped the walk, so the caller never reads a bounded scan as complete
@@ -226,7 +213,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		rel := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator)))
 		// A .tfvars file carries variable values only; collect them for resolution, never scan it for rules.
 		if isTFVars {
-			collectTFVarsFile(data, tfSetFor(filepath.Dir(rel)))
+			tfVarFiles = append(tfVarFiles, tfInputFile{rel: rel, data: data})
 			return nil
 		}
 		if kind == cfgNone {
@@ -264,10 +251,9 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 				mergeK8sScanResult(&kubernetes, scanKubernetes(rel, data))
 			}
 		case cfgTerraform:
-			// Defer: collect this file's variable/local literal definitions into its directory's map, then
-			// scan it after the walk with that (module-scoped) resolved map.
-			collectTFDefinitions(data, tfSetFor(filepath.Dir(rel)))
-			tfFiles = append(tfFiles, tfFile{rel: rel, data: data})
+			// Defer: Terraform is evaluated per module directory after the walk, so a child module sees the
+			// inputs its parent binds and a variable file is applied in Terraform's own precedence order.
+			tfConfigs = append(tfConfigs, tfInputFile{rel: rel, data: data})
 		case cfgARM:
 			out = append(out, scanARM(rel, data)...)
 		case cfgBicep:
@@ -292,15 +278,10 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	if walkErr != nil {
 		return ports.MisconfigScanReport{Findings: out}, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
 	}
-	// Second Terraform pass: resolve each directory's variable/local map (unambiguous literals only) and
-	// scan each deferred .tf file with its own directory's map.
-	resolvedByDir := make(map[string]map[string]string, len(tfSets))
-	for dir, set := range tfSets {
-		resolvedByDir[dir] = set.resolve()
-	}
-	for _, f := range tfFiles {
-		out = append(out, scanTerraformResolved(f.rel, f.data, resolvedByDir[filepath.Dir(f.rel)])...)
-	}
+	// Second Terraform pass: parse every module, resolve its variables, locals and module inputs within the
+	// bounded contract, and scan the normalized source in which each attribute carries its effective value.
+	tfFindings, tfUnresolved := buildTFWorkspace(tfConfigs, tfVarFiles).scanWorkspace()
+	out = append(out, tfFindings...)
 	out = append(out, kubernetes.findings...)
 	out = append(out, networkPolicyFindings(kubernetes)...)
 	out = append(out, secretReaderFindings(kubernetes)...)
@@ -309,14 +290,14 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		UnrenderedCharts:   kubernetes.chartRenderFailures,
 		ChartRenderReasons: kubernetes.chartRenderReasons,
 		Truncated:          truncated,
+		UnresolvedInputs:   tfUnresolved,
 	}, nil
 }
 
-// isTFVarsName recognises an HCL Terraform variable-values file (terraform.tfvars, *.auto.tfvars, or any
-// *.tfvars). Its assignments feed variable resolution but are never scanned for misconfigurations. The JSON
-// variant (*.tfvars.json) is not parsed here, so it simply does not contribute resolved values.
+// isTFVarsName recognises a Terraform variable-values file in either syntax (*.tfvars, *.tfvars.json). Its
+// assignments feed variable resolution but are never scanned for misconfigurations.
 func isTFVarsName(name string) bool {
-	return strings.HasSuffix(strings.ToLower(name), ".tfvars")
+	return isTFVarsFileName(name)
 }
 
 // classifyName recognises a Dockerfile by conventional names; YAML is decided later by content.
@@ -326,7 +307,7 @@ func classifyName(name string) configKind {
 		strings.HasSuffix(strings.ToLower(name), ".dockerfile") {
 		return cfgDockerfile
 	}
-	if strings.HasSuffix(strings.ToLower(name), ".tf") {
+	if l := strings.ToLower(name); strings.HasSuffix(l, ".tf") || (strings.HasSuffix(l, ".tf.json") && !isTFVarsFileName(l)) {
 		return cfgTerraform
 	}
 	if strings.HasSuffix(strings.ToLower(name), ".bicep") {

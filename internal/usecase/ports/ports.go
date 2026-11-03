@@ -2444,6 +2444,10 @@ type MisconfigScanReport struct {
 	// ChartRenderReasons holds up to a few distinct failure reasons, so the warning tells the reader what to
 	// fix (run `helm dependency build`, give the chart a name) rather than only that something failed.
 	ChartRenderReasons []string
+	// UnresolvedInputs names the configuration attributes whose effective value the scanner could not
+	// establish within its bounded evaluation contract, as "file:line: attribute". These are the places a
+	// rule saw source text rather than a value, so a clean result there means "not evaluated", not "secure".
+	UnresolvedInputs []string
 }
 
 // MisconfigReporter is the reporting form of MisconfigScanner: it returns the same findings plus what the
