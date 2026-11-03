@@ -513,8 +513,11 @@ func lowerTFSource(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 	}
 	var reps []repl
 	var unresolved []string
-	var walk func(b *hclsyntax.Body)
-	walk = func(b *hclsyntax.Body) {
+	// Only an attribute of a resource, data or module block carries a configuration VALUE. A variable's
+	// `type = list(string)`, a validation's condition and a lifecycle's ignore_changes are grammar, not
+	// values, so leaving them unevaluated is not a gap and reporting them would bury the ones that are.
+	var walk func(b *hclsyntax.Body, carriesValues bool)
+	walk = func(b *hclsyntax.Body, carriesValues bool) {
 		for _, attr := range b.Attributes {
 			rng := attr.Expr.Range()
 			if rng.Start.Byte < 0 || rng.End.Byte > len(src.data) || rng.End.Byte < rng.Start.Byte {
@@ -523,7 +526,7 @@ func lowerTFSource(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 			source := string(src.data[rng.Start.Byte:rng.End.Byte])
 			v, diags := attr.Expr.Value(ctx)
 			if diags.HasErrors() || !v.IsWhollyKnown() {
-				if len(attr.Expr.Variables()) > 0 {
+				if carriesValues && len(attr.Expr.Variables()) > 0 {
 					unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s", src.rel, rng.Start.Line, attr.Name))
 				}
 				continue
@@ -535,12 +538,20 @@ func lowerTFSource(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 			reps = append(reps, repl{rng.Start.Byte, rng.End.Byte, text, rng.End.Line - rng.Start.Line})
 		}
 		for _, blk := range b.Blocks {
-			if blk.Body != nil {
-				walk(blk.Body)
+			if blk.Body == nil {
+				continue
 			}
+			nested := carriesValues
+			switch blk.Type {
+			case "resource", "data", "module":
+				nested = true
+			case "variable", "output", "terraform", "provider", "locals", "lifecycle", "validation", "moved", "import", "check":
+				nested = false
+			}
+			walk(blk.Body, nested)
 		}
 	}
-	walk(body)
+	walk(body, false)
 	if len(reps) == 0 {
 		return string(src.data), unresolved
 	}
