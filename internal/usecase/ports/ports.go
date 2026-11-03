@@ -1706,6 +1706,19 @@ type SBOMWarningReporter interface {
 // supplies the pure producerVersion string. It preserves SBOM.Raw (which is json:"-") so a cache hit still
 // hands a downstream detector (Grype) the EXACT original document, not a lossy reconstruction. Best-effort:
 // an empty producerVersion, an uncomputable key, or any cache error is a silent miss, NEVER a scan failure.
+// SBOMProducerIdentity reports which producer will generate the SBOM, and under which
+// output-affecting version, BEFORE any generation runs. A cache key built from the provenance map
+// cannot do this: that map is stamped with the generator's version only after a successful
+// generation, so a cache lookup made before it would read the same key for every producer and hand
+// one producer's inventory to another (#1638).
+//
+// An implementation returns an error when the identity cannot be established, for example when the
+// selected external binary is absent. The caller must then skip the cache rather than reuse an
+// inventory it cannot attribute.
+type SBOMProducerIdentity interface {
+	SBOMProducerIdentity(ctx context.Context) (string, error)
+}
+
 type SBOMCache interface {
 	// Load returns the cached SBOM for (dir, producerVersion) when present + fresh; ok=false on a miss.
 	Load(ctx context.Context, dir, producerVersion string) (*sbom.SBOM, bool, error)

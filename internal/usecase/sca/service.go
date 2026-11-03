@@ -439,6 +439,52 @@ func sbomProducerVersion(tv map[string]string) string {
 	return v
 }
 
+// sbomProducerIdentity resolves the selected producer's cache identity before generation. ok is
+// false when the producer cannot say who it is, which disables the cache for this scan rather than
+// reusing an inventory this scan cannot attribute. A producer that does not implement the optional
+// port keeps the legacy provenance-derived key, which stays correct for a single-producer
+// deployment and is still combined with the classifier and binary versions below.
+func (s *Service) sbomProducerIdentity(ctx context.Context) (string, bool) {
+	identified, ok := s.sbomGen.(ports.SBOMProducerIdentity)
+	if !ok {
+		legacy := sbomProducerVersion(s.prov.ToolVersions)
+		return legacy, legacy != ""
+	}
+	id, err := identified.SBOMProducerIdentity(ctx)
+	if err != nil || strings.TrimSpace(id) == "" {
+		return "", false
+	}
+	return id + "\x00" + s.prov.ToolVersions["go-enry"] + "\x00" + s.prov.ToolVersions["synapse"], true
+}
+
+// loadOrGenerateSBOM serves the inventory for dir from the cache when, and only when, the selected
+// producer can be identified before the lookup, otherwise it generates. It returns the document,
+// whether the cache served it, and the producer error that degrades the scan to an empty inventory.
+//
+// The identity gate is the fix for #1638: a key derived from the provenance map is written only
+// after a successful generation, so a lookup made with it reads the same key for every producer and
+// hands one producer's inventory to another. A producer that cannot say who it is disables the
+// cache for this scan rather than being served someone else's components.
+func (s *Service) loadOrGenerateSBOM(ctx context.Context, dir string) (*sbom.SBOM, bool, error) {
+	producerVer, producerKnown := s.sbomProducerIdentity(ctx)
+	cacheEligible := s.sbomCache != nil && producerKnown
+	if cacheEligible {
+		if cached, ok, _ := s.sbomCache.Load(ctx, dir, producerVer); ok && cached != nil {
+			return cached, true, nil
+		}
+	}
+	doc, err := s.sbomGen.Generate(ctx, dir)
+	if err != nil {
+		return &sbom.SBOM{}, false, err
+	}
+	if cacheEligible {
+		// Store re-fingerprints dir; this assumes the generator did NOT mutate the workspace (Syft +
+		// the owned parsers read only), so the stored key matches the next clean scan's Load key.
+		_ = s.sbomCache.Store(ctx, dir, producerVer, doc) // best-effort; a store error never fails the scan
+	}
+	return doc, false, nil
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -3490,31 +3536,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Content+version-addressed cache (opt-in): on an unchanged tree scanned with the same producer, reuse
 	// the cataloged SBOM and skip generation; a producer version bump makes the key miss (Trivy's
 	// analyzer-version invalidation). Best-effort – a miss/error just regenerates.
-	producerVer := sbomProducerVersion(s.prov.ToolVersions)
-	var doc *sbom.SBOM
-	var sbomGenErr error // non-nil ⇒ SBOM production failed; degrade to an empty inventory + INCOMPLETE
-	cacheHit := false
-	if s.sbomCache != nil {
-		if cached, ok, _ := s.sbomCache.Load(ctx, ws.Dir, producerVer); ok && cached != nil {
-			doc, cacheHit = cached, true
-		}
-	}
-	if doc == nil {
-		doc, err = s.sbomGen.Generate(ctx, ws.Dir)
-		if err != nil {
-			// Degrade, don't abort. An SBOM producer (syft) failing or being absent must NOT discard the
-			// source-only analyzers (secret / SAST / misconfig) — they run in-process, need no SBOM, and
-			// doctor advertises them as available with no external setup. Continue with an empty inventory
-			// and mark the scan INCOMPLETE (below) so the missing dependency/vuln/license coverage is
-			// explicit, never a silent clean result.
-			trace.fail(step, err)
-			sbomGenErr = err
-			doc = &sbom.SBOM{}
-		} else if s.sbomCache != nil {
-			// Store re-fingerprints ws.Dir; this assumes the generator did NOT mutate the workspace (Syft +
-			// the owned parsers read only), so the stored key matches the next clean scan's Load key.
-			_ = s.sbomCache.Store(ctx, ws.Dir, producerVer, doc) // best-effort; a store error never fails the scan
-		}
+	// The cache key names the producer that will run, resolved BEFORE the lookup. The provenance map
+	// cannot provide it: the generator's version is stamped there only after a successful generation,
+	// so a key built from it reads the same for every producer and serves one producer's inventory to
+	// another (#1638). An identity that cannot be established disables the cache for this scan, so a
+	// selected-but-unavailable producer fails visibly instead of being masked by a hit.
+	doc, cacheHit, sbomGenErr := s.loadOrGenerateSBOM(ctx, ws.Dir)
+	if sbomGenErr != nil {
+		// Degrade, don't abort. An SBOM producer (syft) failing or being absent must NOT discard the
+		// source-only analyzers (secret / SAST / misconfig) — they run in-process, need no SBOM, and
+		// doctor advertises them as available with no external setup. Continue with an empty inventory
+		// and mark the scan INCOMPLETE (below) so the missing dependency/vuln/license coverage is
+		// explicit, never a silent clean result.
+		trace.fail(step, sbomGenErr)
 	}
 	// Stamp the SBOM's creation time from the scan clock (an NTIA minimum element the producers don't set).
 	// Applied AFTER the cache block so it is the CURRENT scan's time on both a fresh generate and a cache hit

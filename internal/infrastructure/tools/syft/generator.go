@@ -49,6 +49,26 @@ func New(bin string) *Generator {
 func (g *Generator) WithRunner(r ports.ToolRunner) *Generator { g.runner = r; return g }
 
 var _ ports.SBOMGenerator = (*Generator)(nil)
+var _ ports.SBOMProducerIdentity = (*Generator)(nil)
+
+// SBOMProducerIdentity fingerprints the Syft binary that will produce the SBOM: its resolved path,
+// size and modification time. It is read before generation, so a cache lookup can be attributed to
+// this exact producer instead of reusing another one's inventory (#1638).
+//
+// An absent or unreadable binary is an error, not an empty identity. The caller must then skip the
+// cache: a scan that cannot say which producer it selected must not be served a cached inventory,
+// and the producer failure has to stay visible instead of being masked by a cache hit.
+func (g *Generator) SBOMProducerIdentity(context.Context) (string, error) {
+	resolved, err := exec.LookPath(g.bin)
+	if err != nil {
+		return "", fmt.Errorf("resolve syft binary %q: %w", g.bin, err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("stat syft binary %q: %w", resolved, err)
+	}
+	return fmt.Sprintf("syft:%s:%d:%d", resolved, info.Size(), info.ModTime().UTC().UnixNano()), nil
+}
 
 // Generate runs `syft scan dir:<target> -o cyclonedx-json` and maps the result
 // to the domain SBOM. argv (no shell); the `dir:` source scheme both pins the
