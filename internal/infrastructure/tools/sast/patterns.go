@@ -562,7 +562,10 @@ func skipURLQueryOnly(line string) bool {
 
 // credentialAssignmentRe captures the identifier and the quoted value of a credential-shaped
 // assignment: `MetricNewSecret = "new_secret"`, `cookieSecret: "..."`, `app.config['SECRET_KEY'] = '...'`.
-var credentialAssignmentRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_.]*)["']?\s*\]?\s*[:=]\s*["']([^"'\s]{6,})["']`)
+// The identifier may carry a hyphen: real configuration writes `"api-key": "..."`, and the credential
+// rule matches it. A capture that stopped at the hyphen yielded `key`, which the vocabulary filter then
+// excluded, so a hyphenated credential beside an endpoint was skipped entirely.
+var credentialAssignmentRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_.-]*)["']?\s*\]?\s*[:=]\s*["']([^"'\s]{6,})["']`)
 
 // labelIdentifierMarkers are identifier fragments that describe a metric, an enum member, a pattern set
 // or a category. A secret concept named by such an identifier is a label, not credential material.

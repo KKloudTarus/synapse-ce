@@ -2,6 +2,7 @@ package misconfig
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 
 	"github.com/zclconf/go-cty/cty"
@@ -428,11 +429,14 @@ func TestJoinIsRefusedBeforeItAllocates(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	_, err := join.Call(args)
+	refused, err := join.Call(args)
 	runtime.ReadMemStats(&after)
+	if err == nil && refused.IsKnown() {
+		t.Fatal("a call whose projected result exceeds the budget must not produce a value")
+	}
 
-	if err == nil {
-		t.Fatal("a call whose projected result exceeds the budget must be refused")
+	if err != nil {
+		t.Fatalf("a refusal must be an unknown value, not an error try can catch: %v", err)
 	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > uint64(projected/8) {
 		t.Fatalf("the refusal allocated %d bytes; the unbounded call would build about %d", allocated, projected)
@@ -610,5 +614,167 @@ func TestToListPreservesNull(t *testing.T) {
 `}))
 	if _, ok := got["terraform-encryption-disabled"]; ok {
 		t.Fatalf("tolist(null) is null, so the expression is true, got %v", keys(got))
+	}
+}
+
+// join is variadic. Projecting only the first list omitted the separator repeating across the COMBINED
+// elements of every list that follows.
+func TestVariadicJoinIsProjectedOverEveryList(t *testing.T) {
+	join := tfFunctions()["join"]
+	separator := cty.StringVal(strings.Repeat("s", 16<<10))
+	pieces := make([]cty.Value, 512)
+	for i := range pieces {
+		pieces[i] = cty.StringVal("y")
+	}
+	list := cty.ListVal(pieces)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	refused, err := join.Call([]cty.Value{separator, list, list})
+	runtime.ReadMemStats(&after)
+
+	if err == nil && refused.IsKnown() {
+		t.Fatal("two lists multiply the separator just as one does; the call must be refused")
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 2<<20 {
+		t.Fatalf("the refusal allocated %d bytes", allocated)
+	}
+}
+
+// A comprehension repeats its body once per element at RUNTIME, so its cost is not knowable from the
+// source. Such an expression is refused rather than evaluated.
+func TestComprehensionsAreRefusedBeforeEvaluation(t *testing.T) {
+	got := ruleIDs(scan(t, map[string]string{"main.tf": `locals {
+  seed = "` + strings.Repeat("a", 32) + `"
+  big  = join("", [for a in range(64) : join("", [for b in range(64) : local.seed])])
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = length(local.big) == 0
+}
+`}))
+	if _, ok := got["terraform-encryption-disabled"]; ok {
+		t.Fatalf("a comprehension must not be evaluated, got %v", keys(got))
+	}
+}
+
+// A scanner refusal is not a configuration failure. Surfacing it as an expression error let try() choose
+// a fallback and present the scanner's own limit as a confident answer.
+func TestRefusalIsNotCatchableByTry(t *testing.T) {
+	for name, fallback := range map[string]string{"true fallback": "true", "false fallback": "false"} {
+		t.Run(name, func(t *testing.T) {
+			findings, unresolved := scanReport(t, map[string]string{"main.tf": `locals {
+  s = join("", [for a in range(100) : "` + strings.Repeat("a", 32) + `"])
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = try(length(split(",", local.s)) > 1, ` + fallback + `)
+}
+`})
+			for _, id := range findings {
+				if id == "terraform-encryption-disabled" {
+					t.Fatal("a refusal must not be normalized to the fallback and reported as resolved")
+				}
+			}
+			var reported bool
+			for _, u := range unresolved {
+				if strings.Contains(u, "encrypted") {
+					reported = true
+				}
+			}
+			if !reported {
+				t.Fatalf("the refused attribute must be reported unresolved, got %v", unresolved)
+			}
+		})
+	}
+}
+
+// An ordinary split on a long string with no separator is not refused: the projection counts the
+// separator occurrences rather than assuming every character becomes an element.
+func TestOrdinarySplitIsNotRefused(t *testing.T) {
+	got := ruleIDs(scan(t, map[string]string{"main.tf": `locals {
+  s = "` + strings.Repeat("a", 3200) + `"
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = length(split(",", local.s)) > 1
+}
+`}))
+	if _, ok := got["terraform-encryption-disabled"]; !ok {
+		t.Fatalf("the split resolves to one element, so the expression is false and must report, got %v", keys(got))
+	}
+}
+
+// Variable files beyond the LOAD bound are work that was not done, and reach the same coverage gap as
+// those the evaluation budget skips.
+func TestScenariosDroppedAtLoadTimeAreCounted(t *testing.T) {
+	files := map[string]string{"main.tf": `variable "enc" {
+  default = true
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.enc
+}
+`}
+	for i := 1; i <= 9; i++ {
+		value := "true"
+		if i == 9 {
+			value = "false"
+		}
+		files[fmt.Sprintf("%02d.tfvars", i)] = "enc = " + value + "\n"
+	}
+	_, _, unassessed, reasons := scanReportFull(t, files)
+	if unassessed == 0 {
+		t.Fatalf("scenarios past the budget must be reported, reasons %v", reasons)
+	}
+}
+
+// An unknown input establishes no element type, so a comparison against a list of another type stays
+// unknown rather than becoming definitely false.
+func TestToListKeepsAnUnknownElementTypeDynamic(t *testing.T) {
+	got := ruleIDs(scan(t, map[string]string{"main.tf": `variable "items" {}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = tolist(var.items) == tolist([true])
+}
+`}))
+	if _, ok := got["terraform-encryption-disabled"]; ok {
+		t.Fatalf("an unknown input must not produce a definite comparison, got %v", keys(got))
+	}
+}
+
+// Binding policy-document data must EXTEND the supplied context. Rebuilding it from the resolved maps
+// discarded the unknown-aware bindings, so an unknown variable looked absent in any module that happened
+// to contain a policy document.
+func TestPolicyDataBindingKeepsUnknownVariables(t *testing.T) {
+	findings, unresolved := scanReport(t, map[string]string{"main.tf": `variable "enc" {}
+data "aws_iam_policy_document" "combined" {
+  source_policy_documents = []
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = try(var.enc, false)
+}
+`})
+	for _, id := range findings {
+		if id == "terraform-encryption-disabled" {
+			t.Fatal("an unknown variable must stay unknown when policy data is bound")
+		}
+	}
+	var reported bool
+	for _, u := range unresolved {
+		if strings.Contains(u, "encrypted") {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("the dependent attribute must be reported unresolved, got %v", unresolved)
 	}
 }

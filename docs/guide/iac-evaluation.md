@@ -23,9 +23,12 @@ A `*.tfvars` file Terraform loads only when it is named with `-var-file` is not 
 silently. Each such file is evaluated as its own scenario: the WHOLE workspace is resolved
 again under it, so the scenario's bindings travel down every module edge, and the findings
 of every scenario are unioned, because each is a configuration an operator applies. At most
-eight scenarios are evaluated across the workspace, and any beyond that are reported as a
-coverage gap so `--require-complete` rejects the run rather than passing work that was
-never done.
+eight scenarios are evaluated across the workspace, and at most 64 candidate variable
+files are read from one directory. A file dropped at either bound is reported as a coverage
+gap so `--require-complete` rejects the run rather than passing work that was never done.
+Both bounds report through the same counter, because a file skipped before it was read and
+a file skipped after the budget filled are the same thing to the operator: a configuration
+nobody evaluated.
 
 Locals resolve by repeated substitution. A local that is declared but not resolved yet is
 UNKNOWN rather than missing, so an expression reading it propagates uncertainty instead of
@@ -48,14 +51,27 @@ arguments BEFORE it runs. The check has to come first: a predicate on the finish
 arrives after the allocation it exists to prevent, and wrapping the call in `length()` hides
 the intermediate entirely. `join` is bounded by `separator x (n-1) + items`, because the
 separator repeats between every pair; `split` and `jsonencode` carry their own expansion
-factors; everything else cannot exceed the sum of its inputs. A refused call is an ordinary
-expression error, so the attribute stays unknown and is reported as unresolved.
+factors; everything else cannot exceed the sum of its inputs. `join` is variadic, so the
+projection spans every list it is given, not the first: two lists multiply the separator
+across their combined element count exactly as one longer list would.
 
-Two further bounds apply. A single resolved variable, module input or local is capped at
+A refused call returns an UNKNOWN value rather than an error. The distinction decides what
+`try(expr, fallback)` does with it. An error is a configuration failure, and Terraform
+answers one with the fallback; a refusal is the scanner declining to do work, and answering
+that with the fallback would print the scanner's own limit as a confident verdict about the
+target. The unknown propagates instead, and the attribute is reported as unresolved.
+
+Three further bounds apply. A single resolved variable, module input or local is capped at
 64 KiB and is not stored above that. One expression may read at most 64 variable or local
-references, so a template or comprehension cannot chain an unbounded number of
-budget-sized operands. A configuration past either bound is left unresolved rather than
-evaluated.
+references, so a template cannot chain an unbounded number of budget-sized operands.
+
+A `for` expression and a template `for` directive are refused before evaluation. Their cost
+is not a function of the arguments: the body runs once per element of a collection that is
+itself computed, so nesting two of them squares the work and the per-call projection above
+sees only the innermost call's small arguments. Terraform configurations that build values
+this way are left unresolved and reported, which costs coverage on a construct that
+appears in a minority of attributes and removes the only path from source text to unbounded
+work.
 
 ## Terraform: what stays unknown
 

@@ -1,7 +1,6 @@
 package misconfig
 
 import (
-	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -54,6 +53,9 @@ const (
 	// the whole workspace. Each one re-resolves every module, so the bound is on the workspace, not a
 	// per-directory count that would multiply.
 	tfMaxScenarios = 8
+	// tfMaxScenarioFiles bounds how many variable files one directory retains for evaluation. A file past
+	// this bound is counted as skipped rather than discarded silently.
+	tfMaxScenarioFiles = 64
 	// tfMaxValueBytes caps a single resolved variable, input or local. A target controls its own
 	// configuration, so an expression it writes must not be able to grow a value without limit inside the
 	// scanner: a value over this size is not stored and stays unknown. Combined with the fixed function
@@ -66,33 +68,29 @@ const (
 	tfMaxExprRefs = 64
 )
 
-// errEvaluationBound refuses a call whose output cannot be shown to fit the budget BEFORE it runs. The
-// refusal reaches the caller as an ordinary expression error, so the attribute stays unknown and is
-// reported as unresolved rather than silently treated as absent.
-var errEvaluationBound = errors.New("refused: the projected result exceeds the evaluation budget")
-
 // boundedFunction wraps f so the projected output size is checked before f executes. Checking the stored
 // result afterwards is too late: the allocation the bound exists to prevent has already happened, and a
 // small final result (length(...) of a large intermediate) hides it entirely.
+//
+// A refusal yields an UNKNOWN value rather than an error. The scanner declining to do work is not a
+// failure of the configuration, and surfacing it as an expression error let try() swallow it and choose a
+// fallback Terraform would never take, turning the scanner's own limit into a confident answer.
 func boundedFunction(name string, f function.Function) function.Function {
-	guard := func(args []cty.Value) error {
-		if projectedResultSize(name, args) > tfMaxValueBytes {
-			return errEvaluationBound
-		}
-		return nil
+	refuse := func(args []cty.Value) bool {
+		return projectedResultSize(name, args) > tfMaxValueBytes
 	}
 	return function.New(&function.Spec{
 		Params:   f.Params(),
 		VarParam: f.VarParam(),
 		Type: func(args []cty.Value) (cty.Type, error) {
-			if err := guard(args); err != nil {
-				return cty.NilType, err
+			if refuse(args) {
+				return cty.DynamicPseudoType, nil
 			}
 			return f.ReturnTypeForValues(args)
 		},
-		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
-			if err := guard(args); err != nil {
-				return cty.NilVal, err
+		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
+			if refuse(args) {
+				return cty.UnknownVal(retType), nil
 			}
 			return f.Call(args)
 		},
@@ -108,19 +106,37 @@ func projectedResultSize(name string, args []cty.Value) int {
 	}
 	switch name {
 	case "join":
-		// The separator is repeated between every pair, which is how a small separator and a short list
-		// still multiply into a large string.
-		if len(args) == 2 {
+		// join is VARIADIC: the separator repeats between every pair of the COMBINED elements of every
+		// list that follows. Projecting only the first list omitted that multiplication entirely.
+		if len(args) >= 2 {
 			sep := measuredSize(args[0])
-			if n := elementCount(args[1]); n > 1 {
-				return measuredSize(args[1]) + sep*(n-1)
+			items, elements := 0, 0
+			for _, list := range args[1:] {
+				items += measuredSize(list)
+				elements += elementCount(list)
 			}
+			if elements > 1 {
+				return items + sep*(elements-1)
+			}
+			return items
 		}
 	case "split":
-		// Every character can become its own element, each carrying collection overhead.
-		if len(args) == 2 {
-			return measuredSize(args[1]) * 24
+		// The result is the input plus per-element overhead, and the element count is the number of
+		// separator occurrences. Counting them is cheap and avoids refusing ordinary splits on a long
+		// string that contains no separator at all.
+		if len(args) == 2 && args[0].IsKnown() && !args[0].IsNull() && args[1].IsKnown() && !args[1].IsNull() &&
+			args[0].Type() == cty.String && args[1].Type() == cty.String {
+			input := args[1].AsString()
+			sep := args[0].AsString()
+			elements := 1
+			if sep == "" {
+				elements = len(input)
+			} else {
+				elements = strings.Count(input, sep) + 1
+			}
+			return len(input) + elements*16
 		}
+		return total * 24
 	case "jsonencode":
 		// Escaping and punctuation can expand the rendering several times over.
 		return total*6 + 64
@@ -149,10 +165,30 @@ func elementCount(v cty.Value) int {
 	return v.LengthInt()
 }
 
-// tfEvaluable reports whether an expression is within the reference bound. One that is not stays unknown,
-// which keeps it out of the rules and into the unresolved report.
+// tfEvaluable reports whether an expression's cost can be bounded BEFORE it is evaluated. One that cannot
+// stays unknown, which keeps it out of the rules and into the unresolved report.
+//
+// A syntactic reference count bounds a template, whose operands are written out one by one. It says
+// nothing about a comprehension: a `for` repeats its body once per element at RUNTIME, so a single
+// written interpolation can be emitted thousands of times and nested loops multiply that again. The cost
+// of such a construct is not knowable from the source, so it is refused rather than evaluated.
 func tfEvaluable(expr hcl.Expression) bool {
-	return len(expr.Variables()) <= tfMaxExprRefs
+	if len(expr.Variables()) > tfMaxExprRefs {
+		return false
+	}
+	node, ok := expr.(hclsyntax.Expression)
+	if !ok {
+		return true
+	}
+	bounded := true
+	hclsyntax.VisitAll(node, func(n hclsyntax.Node) hcl.Diagnostics {
+		switch n.(type) {
+		case *hclsyntax.ForExpr, *hclsyntax.TemplateJoinExpr:
+			bounded = false
+		}
+		return nil
+	})
+	return bounded
 }
 
 // tfValueWithinBudget reports whether v fits in budget bytes, walking only until the budget is exceeded so
@@ -213,8 +249,16 @@ var toListFunc = function.New(&function.Spec{
 		// A null or unknown input has no length to inspect; Terraform's own conversion preserves null,
 		// so asking for one here turned a true expression into a function error and sent try() to a
 		// fallback.
-		if args[0].IsNull() || !args[0].IsKnown() {
+		if args[0].IsNull() {
 			return cty.List(cty.String), nil
+		}
+		// An unknown input establishes no element type. Inventing one lets a comparison against a list of
+		// another type become definitely false, which is a certainty the input does not support.
+		if !args[0].IsKnown() {
+			if t := args[0].Type(); t.IsListType() || t.IsSetType() {
+				return cty.List(t.ElementType()), nil
+			}
+			return cty.List(cty.DynamicPseudoType), nil
 		}
 		if t := args[0].Type(); (t.IsTupleType() && t.Length() == 0) || ((t.IsSetType() || t.IsListType()) && args[0].LengthInt() == 0) {
 			return cty.List(cty.String), nil
@@ -258,6 +302,9 @@ type tfModule struct {
 	fileVars map[string]cty.Value
 	// scenarios are manually selected variable files (`-var-file`), each evaluated as its own overlay.
 	scenarios []tfScenario
+	// droppedScenarios counts variable files the LOAD bound refused to retain. They are work that was not
+	// done just as surely as the ones the evaluation budget skips, so they reach the same coverage gap.
+	droppedScenarios int
 	// contributions are the inputs each parent call site binds, keyed by that site's identity. Keying by
 	// site is what separates one call whose value is refined across resolution rounds from two different
 	// calls that genuinely disagree: only the second is a conflict.
@@ -402,7 +449,13 @@ func (m *tfModule) withPolicyData(ctx *hcl.EvalContext) *hcl.EvalContext {
 	if data == cty.NilVal {
 		return ctx
 	}
-	out := tfEvalContextFor(m.vars, m.locals)
+	// EXTEND the context that was supplied. Rebuilding it from the resolved maps discarded the
+	// unknown-aware bindings, so a declared variable with no value looked absent again the moment a
+	// module happened to contain a policy document.
+	out := &hcl.EvalContext{Variables: make(map[string]cty.Value, len(ctx.Variables)+1), Functions: ctx.Functions}
+	for k, v := range ctx.Variables {
+		out.Variables[k] = v
+	}
 	out.Variables["data"] = data
 	return out
 }
@@ -1030,8 +1083,10 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 			auto[dir] = append(auto[dir], ranked{rank: rank, name: base, vars: vals})
 			continue
 		}
-		if len(m.scenarios) < tfMaxScenarios {
+		if len(m.scenarios) < tfMaxScenarioFiles {
 			m.scenarios = append(m.scenarios, tfScenario{name: base, vars: vals})
+		} else {
+			m.droppedScenarios++
 		}
 	}
 	for dir, files := range auto {
@@ -1148,6 +1203,7 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 	budget := tfMaxScenarios
 	skipped := 0
 	for _, dir := range dirs {
+		skipped += ws.modules[dir].droppedScenarios
 		for _, sc := range ws.modules[dir].scenarios {
 			if budget <= 0 {
 				// A scenario the cap refused is work that was NOT done. It is reported as a coverage gap
