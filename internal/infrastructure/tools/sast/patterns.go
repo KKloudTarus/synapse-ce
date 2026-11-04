@@ -579,24 +579,39 @@ func skipCommentPlaceholderOrLabelSecret(line string) bool {
 	if skipCommentOrPlaceholderSecret(line) {
 		return true
 	}
-	m := credentialAssignmentRe.FindStringSubmatch(line)
-	if m == nil {
+	// A line can carry more than one assignment, and the exclusions describe ONE of them. Reading only
+	// the first let an unrelated endpoint beside a real credential suppress the finding, so every
+	// credential-shaped assignment on the line is judged and the line is skipped only when none of them
+	// is a credential.
+	matches := credentialAssignmentRe.FindAllStringSubmatch(line, -1)
+	if matches == nil {
 		return false
 	}
-	ident := strings.ToLower(m[1])
+	for _, m := range matches {
+		if !assignmentIsLabelOrEndpoint(m[1], m[2]) {
+			return false
+		}
+	}
+	return true
+}
+
+// assignmentIsLabelOrEndpoint reports whether one assignment names a concept or an endpoint rather than
+// embedding a credential.
+func assignmentIsLabelOrEndpoint(identifier, value string) bool {
+	ident := strings.ToLower(identifier)
 	for _, marker := range labelIdentifierMarkers {
 		if strings.Contains(ident, marker) {
 			return true
 		}
 	}
-	if versionedLabelValueRe.MatchString(m[2]) {
+	if versionedLabelValueRe.MatchString(value) {
 		return true
 	}
 	// A secret-like key is not evidence on its own: an endpoint mapping such as
 	// `secrets_manager_host = "secretsmanager.ap-southeast-1.amazonaws.com"` names a service, it
 	// does not embed a credential (#1638). The value shape decides, so a real literal credential
 	// assigned to the same key in the same file still reports.
-	return endpointValueRe.MatchString(m[2])
+	return endpointValueRe.MatchString(value)
 }
 
 // endpointValueRe matches a value that is a hostname or a URL rather than a credential: dot

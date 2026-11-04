@@ -100,9 +100,9 @@ func evaluate(o ports.DASTObservation, endpoint string, allowed map[string]bool)
 	// excerpt was captured it has to look like a source map rather than an error page (#1638).
 	if strings.HasSuffix(path, ".map") && servedSuccessfully(o.Status) && (body == "" || looksSourceMap(body)) {
 		add("sensitive-public-artifact", "public_artifact", nil, "source_map_path")
-	} else if strings.Contains(path, "/.well-known/") && strings.Contains(body, "source") {
+	} else if strings.Contains(path, "/.well-known/") && servedSuccessfully(o.Status) && strings.Contains(body, "source") {
 		add("sensitive-public-artifact", "public_artifact", nil, "well_known_path", "body:source")
-	} else if strings.Contains(path, "/.well-known/") && strings.Contains(body, "private") {
+	} else if strings.Contains(path, "/.well-known/") && servedSuccessfully(o.Status) && strings.Contains(body, "private") {
 		add("sensitive-public-artifact", "public_artifact", nil, "well_known_path", "body:private")
 	}
 	if strings.Contains(body, "synapse-auth-weakness") {

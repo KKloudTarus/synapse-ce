@@ -12,6 +12,7 @@ package misconfig
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -375,7 +376,36 @@ func looksKubernetes(data []byte) bool {
 	if strings.Contains(t, "apiVersion:") && strings.Contains(t, "kind:") {
 		return true
 	}
-	return strings.Contains(t, `"apiVersion"`) && strings.Contains(t, `"kind"`)
+	if !strings.Contains(t, `"apiVersion"`) || !strings.Contains(t, `"kind"`) {
+		return false
+	}
+	// A JSON document is decided at its ROOT. An ARM deployment template carries both apiVersion and kind
+	// inside its resources, so a substring test claimed every such template as a Kubernetes manifest and
+	// handed it to a parser that then found no top-level kind and scanned nothing.
+	return looksKubernetesJSONRoot(data)
+}
+
+// looksKubernetesJSONRoot reports whether the document's own root declares a Kubernetes object, either
+// directly or as a List of them.
+func looksKubernetesJSONRoot(data []byte) bool {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return false
+	}
+	var apiVersion, kind string
+	if json.Unmarshal(root["apiVersion"], &apiVersion) != nil || apiVersion == "" {
+		return false
+	}
+	if json.Unmarshal(root["kind"], &kind) != nil || kind == "" {
+		return false
+	}
+	// An ARM template declares its own schema and contentVersion at the root; a Kubernetes object does not.
+	if _, arm := root["$schema"]; arm {
+		if _, versioned := root["contentVersion"]; versioned {
+			return false
+		}
+	}
+	return true
 }
 
 // looksCloudFormation is a cheap pre-filter for a CloudFormation template: it declares the format version

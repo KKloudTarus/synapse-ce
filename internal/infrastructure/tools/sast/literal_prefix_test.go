@@ -81,3 +81,37 @@ func TestEndpointHostnameIsNotACredential(t *testing.T) {
 		})
 	}
 }
+
+// A line can carry more than one assignment. Reading only the first let an unrelated endpoint beside a
+// real credential suppress the finding, so the exclusion is applied to every credential-shaped
+// assignment and the line is skipped only when none of them is a credential.
+func TestEndpointBesideACredentialDoesNotSuppressIt(t *testing.T) {
+	cred := syntheticValue(24)
+	for _, tc := range []struct {
+		name string
+		line string
+		want bool // want=true means the line is skipped, i.e. no finding
+	}{
+		{
+			name: "endpoint first, credential second",
+			line: `const host = "https://api.prod.internal"; const api_key = "` + cred + `";`,
+			want: false,
+		},
+		{
+			name: "credential first, endpoint second",
+			line: `const api_key = "` + cred + `"; const host = "https://api.prod.internal";`,
+			want: false,
+		},
+		{
+			name: "two endpoints only",
+			line: `const secret_host = "vault.prod.internal"; const secret_url = "https://vault.prod.internal/v1";`,
+			want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := skipCommentPlaceholderOrLabelSecret(tc.line); got != tc.want {
+				t.Fatalf("skip=%v want %v for %s", got, tc.want, tc.line)
+			}
+		})
+	}
+}

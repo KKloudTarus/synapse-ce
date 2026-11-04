@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 	"github.com/zclconf/go-cty/cty/function"
 	"github.com/zclconf/go-cty/cty/function/stdlib"
 
@@ -48,9 +49,89 @@ const (
 	tfMaxInlineLen = 512
 	// tfMaxValueDepth caps nesting inside one rewritten literal.
 	tfMaxValueDepth = 6
-	// tfMaxScenarios caps the number of extra, manually selected variable files evaluated per module.
+	// tfMaxScenarios caps the number of extra, manually selected variable-file scenarios evaluated across
+	// the whole workspace. Each one re-resolves every module, so the bound is on the workspace, not a
+	// per-directory count that would multiply.
 	tfMaxScenarios = 8
+	// tfMaxValueBytes caps a single resolved variable, input or local. A target controls its own
+	// configuration, so an expression it writes must not be able to grow a value without limit inside the
+	// scanner: a value over this size is not stored and stays unknown. Combined with the fixed function
+	// table, which contains no width- or count-driven expander, this bounds every allocation evaluation
+	// can be made to perform.
+	tfMaxValueBytes = 64 << 10
 )
+
+// tfValueWithinBudget reports whether v fits in budget bytes, walking only until the budget is exceeded so
+// a large value costs no more to reject than a small one does to accept.
+func tfValueWithinBudget(v cty.Value, budget int) bool {
+	_, ok := tfValueSize(v, budget)
+	return ok
+}
+
+func tfValueSize(v cty.Value, budget int) (int, bool) {
+	if !v.IsKnown() || v.IsNull() {
+		return 0, true
+	}
+	t := v.Type()
+	switch {
+	case t == cty.String:
+		n := len(v.AsString())
+		return n, n <= budget
+	case t == cty.Bool, t == cty.Number:
+		return 8, budget >= 8
+	case t.IsListType(), t.IsSetType(), t.IsTupleType(), t.IsObjectType(), t.IsMapType():
+		total := 0
+		for it := v.ElementIterator(); it.Next(); {
+			kv, ev := it.Element()
+			if kv.Type() == cty.String && kv.IsKnown() && !kv.IsNull() {
+				total += len(kv.AsString())
+			}
+			n, ok := tfValueSize(ev, budget-total)
+			total += n + 16
+			if !ok || total > budget {
+				return total, false
+			}
+		}
+		return total, total <= budget
+	}
+	return 0, true
+}
+
+// strContainsFunc is Terraform's strcontains: a substring test on two strings. The collection-membership
+// function it was bound to errors on strings, and a try() around it then took a fallback Terraform never
+// takes.
+var strContainsFunc = function.New(&function.Spec{
+	Params: []function.Parameter{
+		{Name: "str", Type: cty.String},
+		{Name: "substr", Type: cty.String},
+	},
+	Type: function.StaticReturnType(cty.Bool),
+	Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+		return cty.BoolVal(strings.Contains(args[0].AsString(), args[1].AsString())), nil
+	},
+})
+
+// toListFunc is Terraform's tolist: a genuine conversion to a list, including of an empty collection. The
+// coalesce-list function it was bound to rejects an empty input, which again diverted try() to a fallback.
+var toListFunc = function.New(&function.Spec{
+	Params: []function.Parameter{{Name: "v", Type: cty.DynamicPseudoType, AllowDynamicType: true, AllowNull: true}},
+	Type: func(args []cty.Value) (cty.Type, error) {
+		if t := args[0].Type(); t.IsTupleType() && t.Length() == 0 || t.IsSetType() && args[0].LengthInt() == 0 {
+			return cty.List(cty.String), nil
+		}
+		converted, err := convert.Convert(args[0], cty.List(cty.DynamicPseudoType))
+		if err != nil {
+			return cty.NilType, err
+		}
+		return converted.Type(), nil
+	},
+	Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
+		if retType.IsListType() && args[0].LengthInt() == 0 {
+			return cty.ListValEmpty(retType.ElementType()), nil
+		}
+		return convert.Convert(args[0], retType)
+	},
+})
 
 // tfSource is one parsed Terraform configuration file.
 type tfSource struct {
@@ -71,15 +152,19 @@ type tfModule struct {
 	fileVars map[string]cty.Value
 	// scenarios are manually selected variable files (`-var-file`), each evaluated as its own overlay.
 	scenarios []tfScenario
-	// inputs are the values a parent module call binds. A name bound to different values by different call
-	// sites is absent, because the module is then evaluated differently per instance.
-	inputs map[string]cty.Value
-	// inputConflict names the inputs that were dropped for that reason.
-	inputConflict map[string]bool
-	vars          map[string]cty.Value
-	locals        map[string]cty.Value
-	localAttrs    []*hclsyntax.Attribute
-	calls         []*hclsyntax.Block
+	// contributions are the inputs each parent call site binds, keyed by that site's identity. Keying by
+	// site is what separates one call whose value is refined across resolution rounds from two different
+	// calls that genuinely disagree: only the second is a conflict.
+	contributions map[string]map[string]cty.Value
+	// declaredVars names every `variable` block, whether or not a value was found for it. A declared
+	// variable with no value is UNKNOWN rather than absent, so an expression that reads it propagates
+	// uncertainty instead of behaving as though the variable did not exist.
+	declaredVars map[string]bool
+	vars         map[string]cty.Value
+	locals       map[string]cty.Value
+	localAttrs   []*hclsyntax.Attribute
+	calls        []*hclsyntax.Block
+	ctx          *hcl.EvalContext
 }
 
 // tfScenario is one manually selected variable file.
@@ -133,6 +218,11 @@ func tfVarFileRank(name string) (int, bool) {
 // tfFunctions is the pure, fixed function table expressions are evaluated against. Every entry is a value
 // transformation: none reads a file, a provider, the network, or the Terraform state, so evaluating an
 // expression can never have an effect outside the scan.
+//
+// No entry expands its output beyond the size of its inputs. format, formatlist and indent are deliberately
+// absent: their width and count parameters let a one-line configuration ask for an arbitrarily large string,
+// and that allocation happens inside the scanner before any limit on the rendered result could reject it.
+// An expression that calls one of them does not evaluate, so the attribute keeps its source text.
 func tfFunctions() map[string]function.Function {
 	return map[string]function.Function{
 		"abs":          stdlib.AbsoluteFunc,
@@ -147,9 +237,6 @@ func tfFunctions() map[string]function.Function {
 		"element":      stdlib.ElementFunc,
 		"flatten":      stdlib.FlattenFunc,
 		"floor":        stdlib.FloorFunc,
-		"format":       stdlib.FormatFunc,
-		"formatlist":   stdlib.FormatListFunc,
-		"indent":       stdlib.IndentFunc,
 		"join":         stdlib.JoinFunc,
 		"jsondecode":   stdlib.JSONDecodeFunc,
 		"jsonencode":   stdlib.JSONEncodeFunc,
@@ -165,9 +252,9 @@ func tfFunctions() map[string]function.Function {
 		"slice":        stdlib.SliceFunc,
 		"sort":         stdlib.SortFunc,
 		"split":        stdlib.SplitFunc,
-		"strcontains":  stdlib.ContainsFunc,
+		"strcontains":  strContainsFunc,
 		"title":        stdlib.TitleFunc,
-		"tolist":       stdlib.CoalesceListFunc,
+		"tolist":       toListFunc,
 		"trimspace":    stdlib.TrimSpaceFunc,
 		"try":          tryfunc.TryFunc,
 		"upper":        stdlib.UpperFunc,
@@ -227,6 +314,7 @@ func tfObject(m map[string]cty.Value) cty.Value {
 // blocks for the resolution rounds.
 func (m *tfModule) collectDeclarations() {
 	m.defaults = map[string]cty.Value{}
+	m.declaredVars = map[string]bool{}
 	empty := tfEvalContextFor(nil, nil)
 	for _, src := range m.sources {
 		body, ok := src.file.Body.(*hclsyntax.Body)
@@ -238,8 +326,9 @@ func (m *tfModule) collectDeclarations() {
 		for _, blk := range body.Blocks {
 			switch {
 			case blk.Type == "variable" && len(blk.Labels) == 1:
+				m.declaredVars[blk.Labels[0]] = true
 				if attr, ok := blk.Body.Attributes["default"]; ok {
-					if v, d := attr.Expr.Value(empty); !d.HasErrors() && v.IsWhollyKnown() {
+					if v, d := attr.Expr.Value(empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
 						m.defaults[blk.Labels[0]] = v
 					}
 				}
@@ -265,9 +354,13 @@ func (m *tfModule) collectJSONDeclarations(src *tfSource) {
 		if blk.Type != "variable" || len(blk.Labels) != 1 {
 			continue
 		}
+		if m.declaredVars == nil {
+			m.declaredVars = map[string]bool{}
+		}
+		m.declaredVars[blk.Labels[0]] = true
 		attrs, _ := blk.Body.JustAttributes()
 		if attr, ok := attrs["default"]; ok {
-			if v, d := attr.Expr.Value(empty); !d.HasErrors() && v.IsWhollyKnown() {
+			if v, d := attr.Expr.Value(empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
 				m.defaults[blk.Labels[0]] = v
 			}
 		}
@@ -292,7 +385,7 @@ var tfRootSchema = &hcl.BodySchema{
 // resolveVars applies Terraform's precedence: a parent module call's input beats an automatically loaded
 // variable file, which beats the module's own default.
 func (m *tfModule) resolveVars(extra map[string]cty.Value) map[string]cty.Value {
-	out := make(map[string]cty.Value, len(m.defaults)+len(m.fileVars)+len(m.inputs)+len(extra))
+	out := make(map[string]cty.Value, len(m.defaults)+len(m.fileVars)+len(extra))
 	for k, v := range m.defaults {
 		out[k] = v
 	}
@@ -302,14 +395,38 @@ func (m *tfModule) resolveVars(extra map[string]cty.Value) map[string]cty.Value 
 	for k, v := range extra {
 		out[k] = v
 	}
-	for k, v := range m.inputs {
+	inputs, conflict := m.effectiveInputs()
+	for k, v := range inputs {
 		out[k] = v
 	}
-	// A variable a parent binds inconsistently across call sites has no single effective value.
-	for k := range m.inputConflict {
+	// A variable that DIFFERENT call sites bind differently has no single effective value.
+	for k := range conflict {
 		delete(out, k)
 	}
 	return out
+}
+
+// effectiveInputs reduces the per-call-site contributions to one value per name, and names those that
+// distinct sites disagree about.
+func (m *tfModule) effectiveInputs() (map[string]cty.Value, map[string]bool) {
+	out := map[string]cty.Value{}
+	conflict := map[string]bool{}
+	sites := make([]string, 0, len(m.contributions))
+	for site := range m.contributions {
+		sites = append(sites, site)
+	}
+	sort.Strings(sites)
+	for _, site := range sites {
+		for k, v := range m.contributions[site] {
+			prev, seen := out[k]
+			if seen && !prev.RawEquals(v) {
+				conflict[k] = true
+				continue
+			}
+			out[k] = v
+		}
+	}
+	return out, conflict
 }
 
 // tfResolveLocals evaluates local values by repeated substitution. A local that still fails to evaluate
@@ -319,13 +436,23 @@ func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) ma
 	locals := map[string]cty.Value{}
 	for round := 0; round < tfMaxEvalRounds; round++ {
 		progress := false
-		ctx := tfEvalContextFor(vars, locals)
+		// A local that is declared but not resolved YET is unknown, not missing. Presenting it as missing
+		// let try() take a fallback on the first round and froze that answer, because the local was then
+		// recorded as resolved and never revisited.
+		view := make(map[string]cty.Value, len(attrs))
+		for _, attr := range attrs {
+			view[attr.Name] = cty.DynamicVal
+		}
+		for k, v := range locals {
+			view[k] = v
+		}
+		ctx := tfEvalContextFor(vars, view)
 		for _, attr := range attrs {
 			if _, done := locals[attr.Name]; done {
 				continue
 			}
 			v, d := attr.Expr.Value(ctx)
-			if d.HasErrors() || !v.IsWhollyKnown() {
+			if d.HasErrors() || !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
 				continue
 			}
 			locals[attr.Name] = v
@@ -343,7 +470,30 @@ func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) ma
 func (m *tfModule) evaluate(extra map[string]cty.Value) *hcl.EvalContext {
 	m.vars = m.resolveVars(extra)
 	m.locals = tfResolveLocals(m.localAttrs, m.vars)
-	return m.withPolicyData(tfEvalContextFor(m.vars, m.locals))
+	varView, localView := m.unknownAwareView()
+	m.ctx = m.withPolicyData(tfEvalContextFor(varView, localView))
+	return m.ctx
+}
+
+// unknownAwareView presents every declared variable and local, with the ones that did not resolve marked
+// unknown. An expression reading one then yields an unknown value rather than an error, so uncertainty
+// propagates through try() and the conditional instead of being mistaken for an absent name.
+func (m *tfModule) unknownAwareView() (vars, locals map[string]cty.Value) {
+	vars = make(map[string]cty.Value, len(m.declaredVars)+len(m.vars))
+	for name := range m.declaredVars {
+		vars[name] = cty.DynamicVal
+	}
+	for k, v := range m.vars {
+		vars[k] = v
+	}
+	locals = make(map[string]cty.Value, len(m.localAttrs)+len(m.locals))
+	for _, attr := range m.localAttrs {
+		locals[attr.Name] = cty.DynamicVal
+	}
+	for k, v := range m.locals {
+		locals[k] = v
+	}
+	return vars, locals
 }
 
 // moduleCallInputs evaluates one `module` block's input attributes in the PARENT's context and returns the
@@ -373,7 +523,7 @@ func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inpu
 			continue
 		}
 		v, d := attr.Expr.Value(ctx)
-		if d.HasErrors() || !v.IsWhollyKnown() {
+		if d.HasErrors() || !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
 			continue
 		}
 		inputs[name] = v
@@ -381,21 +531,14 @@ func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inpu
 	return child, inputs, true
 }
 
-// bindInputs records one call site's inputs on the child module, marking a name whose value disagrees with
-// an earlier call site as conflicting rather than picking one.
-func (m *tfModule) bindInputs(inputs map[string]cty.Value) {
-	if m.inputs == nil {
-		m.inputs = map[string]cty.Value{}
-		m.inputConflict = map[string]bool{}
+// bindInputsFrom records one call site's inputs on the child module, REPLACING whatever that same site
+// contributed in an earlier resolution round. A value refined as the parent's own variables settle is the
+// same binding becoming accurate, not a second opinion; only a different site disagreeing is a conflict.
+func (m *tfModule) bindInputsFrom(site string, inputs map[string]cty.Value) {
+	if m.contributions == nil {
+		m.contributions = map[string]map[string]cty.Value{}
 	}
-	for k, v := range inputs {
-		prev, seen := m.inputs[k]
-		if seen && !prev.RawEquals(v) {
-			m.inputConflict[k] = true
-			continue
-		}
-		m.inputs[k] = v
-	}
+	m.contributions[site] = inputs
 }
 
 // tfRenderValue writes a known cty value as the HCL literal the rules will read. It refuses anything that
@@ -776,32 +919,49 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 	for _, m := range ws.modules {
 		m.collectDeclarations()
 	}
-	// Each round resolves one more level of the module tree: a parent's own variables settle, its calls bind
-	// the children's inputs, and the next round evaluates those children.
+	ws.resolveAll(nil)
+	return ws
+}
+
+// sortedDirs lists the workspace's module directories in a stable order.
+func (ws *tfWorkspace) sortedDirs() []string {
 	dirs := make([]string, 0, len(ws.modules))
 	for dir := range ws.modules {
 		dirs = append(dirs, dir)
 	}
 	sort.Strings(dirs)
+	return dirs
+}
+
+// resolveAll resolves every module in the workspace under one configuration, where extra optionally layers
+// a manually selected variable file onto the named directory. Each round resolves one more level of the
+// module tree: a parent's own variables settle, its calls bind the children's inputs, and the next round
+// evaluates those children. Resolving the WHOLE workspace per configuration is what carries a variable-file
+// scenario down a module edge; resolving only the directory that owns the file left every descendant on the
+// default binding.
+func (ws *tfWorkspace) resolveAll(extra map[string]map[string]cty.Value) {
+	dirs := ws.sortedDirs()
+	for _, dir := range dirs {
+		ws.modules[dir].contributions = map[string]map[string]cty.Value{}
+	}
 	for round := 0; round < tfMaxEvalRounds; round++ {
 		for _, dir := range dirs {
 			m := ws.modules[dir]
-			m.evaluate(nil)
-			for _, blk := range m.calls {
+			m.evaluate(extra[dir])
+			for i, blk := range m.calls {
 				child, inputs, ok := m.moduleCallInputs(blk)
 				if !ok {
 					continue
 				}
 				if cm, exists := ws.modules[child]; exists {
-					cm.bindInputs(inputs)
+					cm.bindInputsFrom(fmt.Sprintf("%s#%d", m.dir, i), inputs)
 				}
 			}
 		}
 	}
 	for _, dir := range dirs {
-		ws.modules[dir].evaluate(nil)
+		ws.modules[dir].evaluate(extra[dir])
 	}
-	return ws
 }
 
 // scanWorkspace returns the findings for every Terraform file in the tree, plus the attributes evaluation
@@ -810,21 +970,21 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
 	var out []ports.MisconfigRawFinding
 	var unresolved []string
-	dirs := make([]string, 0, len(ws.modules))
-	for dir := range ws.modules {
-		dirs = append(dirs, dir)
-	}
-	sort.Strings(dirs)
+	seen := map[string]bool{}
+	dirs := ws.sortedDirs()
 	for _, dir := range dirs {
 		m := ws.modules[dir]
 		sort.Slice(m.sources, func(i, j int) bool { return m.sources[i].rel < m.sources[j].rel })
-		seen := map[string]bool{}
-		collect := func(ctx *hcl.EvalContext, record bool) {
+	}
+	// scanPass scans every module under the configuration already resolved into each module's context.
+	scanPass := func(record bool) {
+		for _, dir := range dirs {
+			m := ws.modules[dir]
 			var facts tfBucketFacts
 			var batch []ports.MisconfigRawFinding
 			// Policy documents are assessed as statements, not as lines. The spans they occupy are kept so
 			// the line rules do not report the same wildcard tokens under weaker reasoning.
-			sites, policyUnresolved, spans := tfCollectPolicySites(m, ctx)
+			sites, policyUnresolved, spans := tfCollectPolicySites(m, m.ctx)
 			for _, site := range sites {
 				spans.add(site.file, site.line, site.endLine)
 				batch = append(batch, site.assess()...)
@@ -833,7 +993,7 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
 				unresolved = append(unresolved, policyUnresolved...)
 			}
 			for _, src := range m.sources {
-				text, un := lowerTFSource(src, ctx)
+				text, un := lowerTFSource(src, m.ctx)
 				if record {
 					unresolved = append(unresolved, un...)
 				}
@@ -848,10 +1008,23 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
 				out = append(out, f)
 			}
 		}
-		collect(m.evaluate(nil), true)
-		for _, sc := range m.scenarios {
-			collect(m.evaluate(sc.vars), false)
+	}
+	scanPass(true)
+	// Every manually selected variable file is a configuration an operator applies, so each is resolved as
+	// its own whole-workspace pass and the findings are unioned. The bound is on the workspace.
+	budget := tfMaxScenarios
+	for _, dir := range dirs {
+		for _, sc := range ws.modules[dir].scenarios {
+			if budget <= 0 {
+				break
+			}
+			budget--
+			ws.resolveAll(map[string]map[string]cty.Value{dir: sc.vars})
+			scanPass(false)
 		}
+	}
+	if budget < tfMaxScenarios {
+		ws.resolveAll(nil) // leave the workspace on its default configuration
 	}
 	for _, f := range ws.raw {
 		var facts tfBucketFacts

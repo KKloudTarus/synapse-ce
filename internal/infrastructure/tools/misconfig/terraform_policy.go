@@ -235,18 +235,59 @@ var resourceScopingKeys = map[string]bool{
 	"aws:resourcetag":      true,
 }
 
-// positiveMatchOperators restrict a value to a set. A negated operator (StringNotEquals) excludes members
-// rather than naming the allowed ones, and a null check says only whether the key is present.
-func positiveMatchOperator(op string) bool {
-	l := strings.ToLower(strings.TrimPrefix(strings.ToLower(op), "forallvalues:"))
-	l = strings.TrimPrefix(l, "foranyvalue:")
-	switch l {
-	case "stringequals", "stringequalsignorecase", "stringlike",
-		"arnequals", "arnlike", "bool", "numericequals", "ipaddress",
-		"dateequals", "binaryequals", "stringequalsifexists", "arnlikeifexists":
+// operatorKind is how far an operator can be trusted to narrow a statement.
+type operatorKind int
+
+const (
+	// operatorIneffective cannot establish a restriction at all: a negated operator excludes members
+	// rather than naming the allowed ones, and a null check says only whether the key is present.
+	operatorIneffective operatorKind = iota
+	// operatorConditional narrows the statement ONLY when the key is present in the request. AWS evaluates
+	// an ...IfExists operator as true when the key is absent, and a ForAllValues set test as true for an
+	// absent or empty key. A caller that does not carry the key is therefore ALLOWED, so on its own such a
+	// condition restricts nobody: aws:SourceAccount, for instance, is absent on an ordinary direct or
+	// anonymous request. It narrows the statement only alongside a requirement that the key be present.
+	operatorConditional
+	// operatorGuaranteed narrows the statement whatever the caller supplies.
+	operatorGuaranteed
+)
+
+// patternOperator reports whether the operator treats its values as wildcard PATTERNS rather than as
+// literals. For those, one alternative of "*" matches every value, so the alternatives beside it cannot
+// establish a restriction.
+func patternOperator(op string) bool {
+	switch strings.ToLower(operatorBase(op)) {
+	case "stringlike", "arnlike", "stringlikeifexists", "arnlikeifexists":
 		return true
 	}
 	return false
+}
+
+// operatorBase strips the set qualifier from an operator, keeping the qualifier's own meaning for the
+// caller to apply separately.
+func operatorBase(op string) string {
+	l := strings.ToLower(op)
+	for _, prefix := range []string{"forallvalues:", "foranyvalue:"} {
+		l = strings.TrimPrefix(l, prefix)
+	}
+	return l
+}
+
+func classifyOperator(op string) operatorKind {
+	l := strings.ToLower(op)
+	qualified := strings.HasPrefix(l, "forallvalues:")
+	base := operatorBase(op)
+	ifExists := strings.HasSuffix(base, "ifexists")
+	switch strings.TrimSuffix(base, "ifexists") {
+	case "stringequals", "stringequalsignorecase", "stringlike",
+		"arnequals", "arnlike", "bool", "numericequals", "ipaddress",
+		"dateequals", "binaryequals":
+		if ifExists || qualified {
+			return operatorConditional
+		}
+		return operatorGuaranteed
+	}
+	return operatorIneffective
 }
 
 // restriction is what a statement's conditions were found to do.
@@ -266,7 +307,8 @@ func assessConditions(conds []policyCondition, keys map[string]bool) (restrictio
 	var effective []string
 	for _, c := range conds {
 		key := strings.ToLower(c.key)
-		if !positiveMatchOperator(c.operator) {
+		kind := classifyOperator(c.operator)
+		if kind == operatorIneffective {
 			continue
 		}
 		scoping := keys[key]
@@ -274,10 +316,23 @@ func assessConditions(conds []policyCondition, keys map[string]bool) (restrictio
 		if !scoping && !network {
 			continue
 		}
-		if c.unreadable || len(c.values) == 0 || tfAllWildcard(c.values) {
+		// An unreadable value, no value at all, or a wildcard alternative leaves the condition unable to
+		// name the allowed set. For a pattern operator a single "*" alternative matches everything, so the
+		// specific values beside it restrict nothing.
+		wildcard := tfAllWildcard(c.values)
+		if patternOperator(c.operator) {
+			wildcard = tfAnyWildcard(c.values)
+		}
+		if c.unreadable || len(c.values) == 0 || wildcard {
 			if best < restrictionUnknown {
 				best = restrictionUnknown
 			}
+			continue
+		}
+		// An operator that holds when the key is ABSENT allows every caller that does not carry the key, so
+		// on its own it narrows nothing. It restricts only when another condition requires the key to be
+		// present.
+		if kind == operatorConditional && !requiresKeyPresent(conds, c.key) {
 			continue
 		}
 		level := restrictionCaller
@@ -290,6 +345,34 @@ func assessConditions(conds []policyCondition, keys map[string]bool) (restrictio
 		effective = append(effective, c.operator+" on "+c.key)
 	}
 	return best, effective
+}
+
+// requiresKeyPresent reports whether some condition requires key to exist in the request. AWS expresses
+// that as a Null check whose value is false, and it is what turns an otherwise absent-key-permissive
+// operator into a real restriction.
+func requiresKeyPresent(conds []policyCondition, key string) bool {
+	for _, c := range conds {
+		if !strings.EqualFold(c.operator, "Null") || !strings.EqualFold(c.key, key) {
+			continue
+		}
+		for _, v := range c.values {
+			if strings.EqualFold(v, "false") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// tfAnyWildcard reports whether ANY alternative matches everything. Alternatives are ORed, so one such
+// value makes the whole condition unrestrictive.
+func tfAnyWildcard(vals []string) bool {
+	for _, v := range vals {
+		if v == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 func tfAllWildcard(vals []string) bool {
@@ -467,6 +550,16 @@ func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) cty.Value {
 // read with a missing element would be assessed as something the operator did not write.
 func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocument, bool) {
 	doc := policyDocument{Version: "2012-10-17"}
+	// The provider MERGES source_policy_documents and override_policy_documents into the rendered .json,
+	// with its own Sid precedence. Reading only the direct statement blocks would publish a partial
+	// document as the resolved one, and a public grant contributed by a merged document would vanish from
+	// both this assessment and the literal fallback. Composition is outside the supported contract, so the
+	// document is left unresolved and the line rules keep it.
+	for _, name := range []string{"source_policy_documents", "override_policy_documents", "source_json", "override_json"} {
+		if _, composed := body.Attributes[name]; composed {
+			return doc, false
+		}
+	}
 	str := func(b *hclsyntax.Body, name string) (string, bool, bool) {
 		attr, ok := b.Attributes[name]
 		if !ok {

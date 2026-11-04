@@ -140,3 +140,27 @@ func TestProofVersionsStayVerifiable(t *testing.T) {
 		t.Fatalf("a current artifact proof recording an unserved response must fail verification")
 	}
 }
+
+// A well-known path that was NOT served is not a published artifact. Emitting the finding anyway produced
+// a version-2 proof the verifier rejects as recording an unserved response, and the consumer treats an
+// unverifiable proof as a fatal error after the approved action has already been spent. firedChecks
+// verifies every emitted proof, so this case also guards the emitter against drifting from the verifier.
+func TestWellKnownArtifactRequiresAServedResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		o    ports.DASTObservation
+		want bool
+	}{
+		{"private body, not found", observed("https://app.test/.well-known/private", 404, true, "private"), false},
+		{"private body, served", observed("https://app.test/.well-known/private", 200, true, "private"), true},
+		{"source body, not found", observed("https://app.test/.well-known/source", 404, true, "source"), false},
+		{"source body, served", observed("https://app.test/.well-known/source", 200, true, "source"), true},
+		{"private body, gone", observed("https://app.test/.well-known/private", 410, true, "private"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firedChecks(t, tc.o)["sensitive-public-artifact"]; got != tc.want {
+				t.Fatalf("public-artifact reported=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}

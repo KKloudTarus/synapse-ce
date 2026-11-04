@@ -20,18 +20,33 @@ A module is a directory, which is the unit of variable scope. Values resolve fro
 3. the inputs a parent `module` block binds, which override everything above.
 
 A `*.tfvars` file Terraform loads only when it is named with `-var-file` is not applied
-silently. Each such file is evaluated as its own scenario, and the findings of every
-scenario are unioned, because each is a configuration an operator applies. At most eight
-scenarios per module are evaluated.
+silently. Each such file is evaluated as its own scenario: the WHOLE workspace is resolved
+again under it, so the scenario's bindings travel down every module edge, and the findings
+of every scenario are unioned, because each is a configuration an operator applies. At most
+eight scenarios are evaluated across the workspace.
 
-Locals resolve by repeated substitution. Module inputs propagate down the tree. Both are
-bounded at eight rounds: a configuration that needs more is left unresolved rather than
-iterated to a fixpoint.
+Locals resolve by repeated substitution. A local that is declared but not resolved yet is
+UNKNOWN rather than missing, so an expression reading it propagates uncertainty instead of
+taking a `try` fallback that Terraform would not take. Module inputs propagate down the
+tree, recorded per call site: one site refining its value across rounds is the same binding
+becoming accurate, and only two different sites disagreeing leaves the input without a
+single value. Both are bounded at eight rounds: a configuration that needs more is left
+unresolved rather than iterated to a fixpoint.
 
 Functions are a fixed, pure allowlist (`concat`, `slice`, `merge`, `jsonencode`,
-`lookup`, `format`, and the other value transformations). None reads a file, a provider,
-the network, or the Terraform state, so evaluating a target's configuration can have no
-effect outside the scan.
+`lookup`, and the other value transformations). None reads a file, a provider, the
+network, or the Terraform state, so evaluating a target's configuration can have no effect
+outside the scan.
+
+No listed function expands its output beyond the size of its inputs. `format`, `formatlist`
+and `indent` are deliberately absent: their width and count parameters let a one-line
+configuration ask for an arbitrarily large string, and that allocation happens while the
+function runs, before any limit on the result could reject it. An expression calling one of
+them does not evaluate, so its attribute keeps its source text.
+
+A single resolved variable, module input or local is capped at 64 KiB. A value over that
+size is not stored and stays unknown, so a chain of transformations cannot grow a value
+without limit inside the scanner.
 
 ## Terraform: what stays unknown
 
@@ -64,7 +79,10 @@ kind of policy the carrying attribute establishes:
 | Service control | `aws_organizations_policy.content` | a boundary, never a grant |
 
 `jsonencode({...})`, a heredoc JSON document, and a referenced
-`data "aws_iam_policy_document"` are all read. A document a referencing resource carries
+`data "aws_iam_policy_document"` are all read. A document that composes others through
+`source_policy_documents` or `override_policy_documents` is left unresolved and keeps its
+literal detection: the provider merges those with its own precedence, so reading only the
+direct statements would publish a partial document as the resolved one. A document a referencing resource carries
 is assessed once, at the resource; a document no recognised resource consumes keeps its
 literal line rules, because it attaches to nothing this scanner can establish.
 
@@ -86,6 +104,13 @@ literal line rules, because it attaches to nothing this scanner can establish.
 - A condition whose value this scan cannot establish leaves the statement UNKNOWN. The
   finding is reported at medium with the reason stated, never dropped as safe and never
   claimed as public.
+- An `...IfExists` operator, and a `ForAllValues:` set test, both evaluate true when the
+  key is absent from the request, so a caller that does not carry the key is allowed and
+  the condition narrows nobody. It counts as a restriction only alongside a `Null` check
+  requiring that key to be present.
+- Condition values are alternatives, ORed together. For a pattern operator such as
+  `StringLike` or `ArnLike`, one `"*"` alternative matches everything, so the specific
+  values beside it establish no restriction.
 - A VPC endpoint policy is an additional boundary, not an independent grant. An
   unconstrained one is reported at medium, and the description says it does not by itself
   grant access to the target service.
@@ -110,7 +135,9 @@ A trust policy's `Resource` element is not used by AWS and is not assessed.
 
 A Kubernetes resource is the resource it declares, in whichever syntax declared it. A
 manifest authored as JSON is parsed and assessed exactly as its YAML equivalent is, and
-produces the same findings.
+produces the same findings. A JSON document is classified at its ROOT: an ARM deployment
+template carries `apiVersion` and `kind` inside its resources, and claiming it as a
+Kubernetes manifest on that basis sent it to a parser that scanned nothing.
 
 Helm charts and Kustomize overlays carry their security-relevant values in templates and
 patches, so they have to be rendered before the Kubernetes rules can read them. Rendering
