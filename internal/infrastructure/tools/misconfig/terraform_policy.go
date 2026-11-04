@@ -316,17 +316,22 @@ func assessConditions(conds []policyCondition, keys map[string]bool) (restrictio
 		if !scoping && !network {
 			continue
 		}
-		// An unreadable value, no value at all, or a wildcard alternative leaves the condition unable to
-		// name the allowed set. For a pattern operator a single "*" alternative matches everything, so the
-		// specific values beside it restrict nothing.
+		// A value this scan could not read leaves the condition genuinely uncertain.
+		if c.unreadable || len(c.values) == 0 {
+			if best < restrictionUnknown {
+				best = restrictionUnknown
+			}
+			continue
+		}
+		// A match-everything value is KNOWN, and what it is known to do is match everyone. For a pattern
+		// operator a single "*" alternative suffices, because alternatives are ORed. That is an
+		// ineffective restriction, not an unresolved one: the statement stays as open as it was written
+		// and the other ANDed conditions are still assessed.
 		wildcard := tfAllWildcard(c.values)
 		if patternOperator(c.operator) {
 			wildcard = tfAnyWildcard(c.values)
 		}
-		if c.unreadable || len(c.values) == 0 || wildcard {
-			if best < restrictionUnknown {
-				best = restrictionUnknown
-			}
+		if wildcard {
 			continue
 		}
 		// An operator that holds when the key is ABSENT allows every caller that does not carry the key, so
@@ -355,10 +360,21 @@ func requiresKeyPresent(conds []policyCondition, key string) bool {
 		if !strings.EqualFold(c.operator, "Null") || !strings.EqualFold(c.key, key) {
 			continue
 		}
+		// Alternatives are ORed, so a "true" alternative beside the "false" one permits the key to be
+		// ABSENT, which is the state in which the IfExists operator succeeds anyway. Presence is
+		// established only when every readable alternative demands it.
+		if c.unreadable || len(c.values) == 0 {
+			continue
+		}
+		requires := true
 		for _, v := range c.values {
-			if strings.EqualFold(v, "false") {
-				return true
+			if !strings.EqualFold(v, "false") {
+				requires = false
+				break
 			}
+		}
+		if requires {
+			return true
 		}
 	}
 	return false
@@ -513,8 +529,9 @@ func (s tfPolicySite) assess() []ports.MisconfigRawFinding {
 // tfPolicyDocData renders every `data "aws_iam_policy_document"` block in the module as the JSON string its
 // `.json` attribute produces, so a resource that references one is assessed as the document it will carry.
 // A block whose values do not evaluate is skipped, leaving the reference unresolved.
-func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) cty.Value {
+func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) (cty.Value, map[string]bool) {
 	docs := map[string]cty.Value{}
+	assessable := map[string]bool{}
 	for _, src := range m.sources {
 		body, ok := src.file.Body.(*hclsyntax.Body)
 		if !ok {
@@ -526,6 +543,10 @@ func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) cty.Value {
 			}
 			doc, ok := policyDocFromHCL(blk.Body, ctx)
 			if !ok {
+				// The document is DECLARED; this scanner simply cannot render it. Binding it as unknown
+				// rather than leaving the name missing keeps a try() around it uncertain instead of
+				// letting the reference error send it to a fallback the provider would never produce.
+				docs[blk.Labels[1]] = cty.DynamicVal
 				continue
 			}
 			raw, err := json.Marshal(doc)
@@ -537,12 +558,13 @@ func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) cty.Value {
 				"minified_json": cty.StringVal(string(raw)),
 				"id":            cty.StringVal(blk.Labels[1]),
 			})
+			assessable[blk.Labels[1]] = true
 		}
 	}
 	if len(docs) == 0 {
-		return cty.NilVal
+		return cty.NilVal, assessable
 	}
-	return cty.ObjectVal(map[string]cty.Value{"aws_iam_policy_document": cty.ObjectVal(docs)})
+	return cty.ObjectVal(map[string]cty.Value{"aws_iam_policy_document": cty.ObjectVal(docs)}), assessable
 }
 
 // policyDocFromHCL converts an aws_iam_policy_document body into the same statement model the JSON form
@@ -688,6 +710,7 @@ func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocumen
 func tfCollectPolicySites(m *tfModule, ctx *hcl.EvalContext) (sites []tfPolicySite, unresolved []string, docSpans tfPolicySpans) {
 	docSpans = tfPolicySpans{}
 	consumed := map[string]bool{}
+	_, assessable := tfPolicyDocData(m, ctx)
 	for _, src := range m.sources {
 		body, ok := src.file.Body.(*hclsyntax.Body)
 		if !ok {
@@ -719,8 +742,12 @@ func tfCollectPolicySites(m *tfModule, ctx *hcl.EvalContext) (sites []tfPolicySi
 					unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s (%s)", src.rel, rng.Start.Line, name, kind))
 					continue
 				}
+				// Only a document this scanner RENDERED may lose its literal findings. A name that merely
+				// occurs in an expression which resolved through a fallback was not assessed here.
 				for _, ref := range policyDocumentRefs(attr.Expr) {
-					consumed[ref] = true
+					if assessable[ref] {
+						consumed[ref] = true
+					}
 				}
 				sites = append(sites, tfPolicySite{
 					file: src.rel, line: rng.Start.Line, res: blk.Labels[0], kind: kind, doc: doc,

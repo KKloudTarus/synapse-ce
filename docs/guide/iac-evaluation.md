@@ -23,7 +23,9 @@ A `*.tfvars` file Terraform loads only when it is named with `-var-file` is not 
 silently. Each such file is evaluated as its own scenario: the WHOLE workspace is resolved
 again under it, so the scenario's bindings travel down every module edge, and the findings
 of every scenario are unioned, because each is a configuration an operator applies. At most
-eight scenarios are evaluated across the workspace.
+eight scenarios are evaluated across the workspace, and any beyond that are reported as a
+coverage gap so `--require-complete` rejects the run rather than passing work that was
+never done.
 
 Locals resolve by repeated substitution. A local that is declared but not resolved yet is
 UNKNOWN rather than missing, so an expression reading it propagates uncertainty instead of
@@ -38,15 +40,22 @@ Functions are a fixed, pure allowlist (`concat`, `slice`, `merge`, `jsonencode`,
 network, or the Terraform state, so evaluating a target's configuration can have no effect
 outside the scan.
 
-No listed function expands its output beyond the size of its inputs. `format`, `formatlist`
-and `indent` are deliberately absent: their width and count parameters let a one-line
-configuration ask for an arbitrarily large string, and that allocation happens while the
-function runs, before any limit on the result could reject it. An expression calling one of
-them does not evaluate, so its attribute keeps its source text.
+`format`, `formatlist` and `indent` are absent: their width and count parameters let a
+one-line configuration ask for an arbitrarily large string.
 
-A single resolved variable, module input or local is capped at 64 KiB. A value over that
-size is not stored and stays unknown, so a chain of transformations cannot grow a value
-without limit inside the scanner.
+Every remaining function is wrapped so the projected size of its result is checked from the
+arguments BEFORE it runs. The check has to come first: a predicate on the finished value
+arrives after the allocation it exists to prevent, and wrapping the call in `length()` hides
+the intermediate entirely. `join` is bounded by `separator x (n-1) + items`, because the
+separator repeats between every pair; `split` and `jsonencode` carry their own expansion
+factors; everything else cannot exceed the sum of its inputs. A refused call is an ordinary
+expression error, so the attribute stays unknown and is reported as unresolved.
+
+Two further bounds apply. A single resolved variable, module input or local is capped at
+64 KiB and is not stored above that. One expression may read at most 64 variable or local
+references, so a template or comprehension cannot chain an unbounded number of
+budget-sized operands. A configuration past either bound is left unresolved rather than
+evaluated.
 
 ## Terraform: what stays unknown
 
@@ -82,7 +91,10 @@ kind of policy the carrying attribute establishes:
 `data "aws_iam_policy_document"` are all read. A document that composes others through
 `source_policy_documents` or `override_policy_documents` is left unresolved and keeps its
 literal detection: the provider merges those with its own precedence, so reading only the
-direct statements would publish a partial document as the resolved one. A document a referencing resource carries
+direct statements would publish a partial document as the resolved one. Such a document is
+bound as UNKNOWN rather than left undefined, so a `try` around it stays uncertain instead
+of falling back to a value the provider would never produce, and only a document this
+scanner actually rendered suppresses its own literal findings. A document a referencing resource carries
 is assessed once, at the resource; a document no recognised resource consumes keeps its
 literal line rules, because it attaches to nothing this scanner can establish.
 
@@ -107,10 +119,12 @@ literal line rules, because it attaches to nothing this scanner can establish.
 - An `...IfExists` operator, and a `ForAllValues:` set test, both evaluate true when the
   key is absent from the request, so a caller that does not carry the key is allowed and
   the condition narrows nobody. It counts as a restriction only alongside a `Null` check
-  requiring that key to be present.
+  whose every alternative requires that key to be present: a `true` alternative beside the
+  `false` one permits the absent state again.
 - Condition values are alternatives, ORed together. For a pattern operator such as
   `StringLike` or `ArnLike`, one `"*"` alternative matches everything, so the specific
-  values beside it establish no restriction.
+  values beside it establish no restriction. That is a known ineffective restriction, not
+  an unresolved one, so the statement reports at its full severity.
 - A VPC endpoint policy is an additional boundary, not an independent grant. An
   unconstrained one is reported at medium, and the description says it does not by itself
   grant access to the target service.

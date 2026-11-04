@@ -1,6 +1,7 @@
 package misconfig
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -59,7 +60,100 @@ const (
 	// table, which contains no width- or count-driven expander, this bounds every allocation evaluation
 	// can be made to perform.
 	tfMaxValueBytes = 64 << 10
+	// tfMaxExprRefs caps how many variable or local references one expression may read. A template or a
+	// comprehension concatenates its operands, so without this an otherwise ordinary expression could
+	// chain thousands of budget-sized values together in a single evaluation.
+	tfMaxExprRefs = 64
 )
+
+// errEvaluationBound refuses a call whose output cannot be shown to fit the budget BEFORE it runs. The
+// refusal reaches the caller as an ordinary expression error, so the attribute stays unknown and is
+// reported as unresolved rather than silently treated as absent.
+var errEvaluationBound = errors.New("refused: the projected result exceeds the evaluation budget")
+
+// boundedFunction wraps f so the projected output size is checked before f executes. Checking the stored
+// result afterwards is too late: the allocation the bound exists to prevent has already happened, and a
+// small final result (length(...) of a large intermediate) hides it entirely.
+func boundedFunction(name string, f function.Function) function.Function {
+	guard := func(args []cty.Value) error {
+		if projectedResultSize(name, args) > tfMaxValueBytes {
+			return errEvaluationBound
+		}
+		return nil
+	}
+	return function.New(&function.Spec{
+		Params:   f.Params(),
+		VarParam: f.VarParam(),
+		Type: func(args []cty.Value) (cty.Type, error) {
+			if err := guard(args); err != nil {
+				return cty.NilType, err
+			}
+			return f.ReturnTypeForValues(args)
+		},
+		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+			if err := guard(args); err != nil {
+				return cty.NilVal, err
+			}
+			return f.Call(args)
+		},
+	})
+}
+
+// projectedResultSize is a conservative upper bound on what a call will produce, computed from the
+// arguments alone. Anything not named here cannot produce more than the sum of its inputs.
+func projectedResultSize(name string, args []cty.Value) int {
+	total := 0
+	for _, a := range args {
+		total += measuredSize(a)
+	}
+	switch name {
+	case "join":
+		// The separator is repeated between every pair, which is how a small separator and a short list
+		// still multiply into a large string.
+		if len(args) == 2 {
+			sep := measuredSize(args[0])
+			if n := elementCount(args[1]); n > 1 {
+				return measuredSize(args[1]) + sep*(n-1)
+			}
+		}
+	case "split":
+		// Every character can become its own element, each carrying collection overhead.
+		if len(args) == 2 {
+			return measuredSize(args[1]) * 24
+		}
+	case "jsonencode":
+		// Escaping and punctuation can expand the rendering several times over.
+		return total*6 + 64
+	}
+	return total
+}
+
+// measuredSize is the byte size of v, saturating just past the budget so an oversized value costs no
+// more to measure than an acceptable one.
+func measuredSize(v cty.Value) int {
+	n, ok := tfValueSize(v, tfMaxValueBytes)
+	if !ok {
+		return tfMaxValueBytes + 1
+	}
+	return n
+}
+
+func elementCount(v cty.Value) int {
+	if !v.IsKnown() || v.IsNull() {
+		return 0
+	}
+	t := v.Type()
+	if !t.IsListType() && !t.IsSetType() && !t.IsTupleType() {
+		return 0
+	}
+	return v.LengthInt()
+}
+
+// tfEvaluable reports whether an expression is within the reference bound. One that is not stays unknown,
+// which keeps it out of the rules and into the unresolved report.
+func tfEvaluable(expr hcl.Expression) bool {
+	return len(expr.Variables()) <= tfMaxExprRefs
+}
 
 // tfValueWithinBudget reports whether v fits in budget bytes, walking only until the budget is exceeded so
 // a large value costs no more to reject than a small one does to accept.
@@ -116,7 +210,13 @@ var strContainsFunc = function.New(&function.Spec{
 var toListFunc = function.New(&function.Spec{
 	Params: []function.Parameter{{Name: "v", Type: cty.DynamicPseudoType, AllowDynamicType: true, AllowNull: true}},
 	Type: func(args []cty.Value) (cty.Type, error) {
-		if t := args[0].Type(); t.IsTupleType() && t.Length() == 0 || t.IsSetType() && args[0].LengthInt() == 0 {
+		// A null or unknown input has no length to inspect; Terraform's own conversion preserves null,
+		// so asking for one here turned a true expression into a function error and sent try() to a
+		// fallback.
+		if args[0].IsNull() || !args[0].IsKnown() {
+			return cty.List(cty.String), nil
+		}
+		if t := args[0].Type(); (t.IsTupleType() && t.Length() == 0) || ((t.IsSetType() || t.IsListType()) && args[0].LengthInt() == 0) {
 			return cty.List(cty.String), nil
 		}
 		converted, err := convert.Convert(args[0], cty.List(cty.DynamicPseudoType))
@@ -126,6 +226,12 @@ var toListFunc = function.New(&function.Spec{
 		return converted.Type(), nil
 	},
 	Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
+		if args[0].IsNull() {
+			return cty.NullVal(retType), nil
+		}
+		if !args[0].IsKnown() {
+			return cty.UnknownVal(retType), nil
+		}
 		if retType.IsListType() && args[0].LengthInt() == 0 {
 			return cty.ListValEmpty(retType.ElementType()), nil
 		}
@@ -224,6 +330,14 @@ func tfVarFileRank(name string) (int, bool) {
 // and that allocation happens inside the scanner before any limit on the rendered result could reject it.
 // An expression that calls one of them does not evaluate, so the attribute keeps its source text.
 func tfFunctions() map[string]function.Function {
+	bounded := map[string]function.Function{}
+	for name, f := range rawTFFunctions() {
+		bounded[name] = boundedFunction(name, f)
+	}
+	return bounded
+}
+
+func rawTFFunctions() map[string]function.Function {
 	return map[string]function.Function{
 		"abs":          stdlib.AbsoluteFunc,
 		"ceil":         stdlib.CeilFunc,
@@ -284,7 +398,7 @@ func tfEvalContextFor(vars, locals map[string]cty.Value) *hcl.EvalContext {
 // is assessed against the document it will carry. No other data source is bound: every other data.* read
 // stays unknown.
 func (m *tfModule) withPolicyData(ctx *hcl.EvalContext) *hcl.EvalContext {
-	data := tfPolicyDocData(m, ctx)
+	data, _ := tfPolicyDocData(m, ctx)
 	if data == cty.NilVal {
 		return ctx
 	}
@@ -451,6 +565,9 @@ func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) ma
 			if _, done := locals[attr.Name]; done {
 				continue
 			}
+			if !tfEvaluable(attr.Expr) {
+				continue
+			}
 			v, d := attr.Expr.Value(ctx)
 			if d.HasErrors() || !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
 				continue
@@ -469,23 +586,32 @@ func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) ma
 // layered on top, and returns the context its expressions are evaluated in.
 func (m *tfModule) evaluate(extra map[string]cty.Value) *hcl.EvalContext {
 	m.vars = m.resolveVars(extra)
-	m.locals = tfResolveLocals(m.localAttrs, m.vars)
+	// Locals are resolved against the SAME unknown-aware variable view the final attributes use. Handing
+	// local resolution the raw map let a declared variable with no value look absent, so try() resolved
+	// to its fallback and that answer was then stored; a later unknown-aware context cannot undo it.
+	m.locals = tfResolveLocals(m.localAttrs, m.unknownAwareVars())
 	varView, localView := m.unknownAwareView()
 	m.ctx = m.withPolicyData(tfEvalContextFor(varView, localView))
 	return m.ctx
 }
 
-// unknownAwareView presents every declared variable and local, with the ones that did not resolve marked
-// unknown. An expression reading one then yields an unknown value rather than an error, so uncertainty
-// propagates through try() and the conditional instead of being mistaken for an absent name.
-func (m *tfModule) unknownAwareView() (vars, locals map[string]cty.Value) {
-	vars = make(map[string]cty.Value, len(m.declaredVars)+len(m.vars))
+// unknownAwareVars presents every declared variable, with the ones that did not resolve marked unknown.
+func (m *tfModule) unknownAwareVars() map[string]cty.Value {
+	vars := make(map[string]cty.Value, len(m.declaredVars)+len(m.vars))
 	for name := range m.declaredVars {
 		vars[name] = cty.DynamicVal
 	}
 	for k, v := range m.vars {
 		vars[k] = v
 	}
+	return vars
+}
+
+// unknownAwareView presents every declared variable and local, with the ones that did not resolve marked
+// unknown. An expression reading one then yields an unknown value rather than an error, so uncertainty
+// propagates through try() and the conditional instead of being mistaken for an absent name.
+func (m *tfModule) unknownAwareView() (vars, locals map[string]cty.Value) {
+	vars = m.unknownAwareVars()
 	locals = make(map[string]cty.Value, len(m.localAttrs)+len(m.locals))
 	for _, attr := range m.localAttrs {
 		locals[attr.Name] = cty.DynamicVal
@@ -520,6 +646,9 @@ func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inpu
 	for name, attr := range blk.Body.Attributes {
 		switch name {
 		case "source", "version", "providers", "count", "for_each", "depends_on":
+			continue
+		}
+		if !tfEvaluable(attr.Expr) {
 			continue
 		}
 		v, d := attr.Expr.Value(ctx)
@@ -666,6 +795,10 @@ func lowerTFSource(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 				continue
 			}
 			source := string(src.data[rng.Start.Byte:rng.End.Byte])
+			if !tfEvaluable(attr.Expr) {
+				unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s (reference bound)", src.rel, rng.Start.Line, attr.Name))
+				continue
+			}
 			v, diags := attr.Expr.Value(ctx)
 			if diags.HasErrors() || !v.IsWhollyKnown() {
 				if carriesValues && len(attr.Expr.Variables()) > 0 {
@@ -967,7 +1100,7 @@ func (ws *tfWorkspace) resolveAll(extra map[string]map[string]cty.Value) {
 // scanWorkspace returns the findings for every Terraform file in the tree, plus the attributes evaluation
 // could not resolve. A module that carries manually selected variable files is also evaluated under each
 // of them, because each is a configuration an operator applies; the findings are unioned, never averaged.
-func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
+func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, int) {
 	var out []ports.MisconfigRawFinding
 	var unresolved []string
 	seen := map[string]bool{}
@@ -1013,10 +1146,14 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
 	// Every manually selected variable file is a configuration an operator applies, so each is resolved as
 	// its own whole-workspace pass and the findings are unioned. The bound is on the workspace.
 	budget := tfMaxScenarios
+	skipped := 0
 	for _, dir := range dirs {
 		for _, sc := range ws.modules[dir].scenarios {
 			if budget <= 0 {
-				break
+				// A scenario the cap refused is work that was NOT done. It is reported as a coverage gap
+				// rather than passing silently, because the configuration it describes was never scanned.
+				skipped++
+				continue
 			}
 			budget--
 			ws.resolveAll(map[string]map[string]cty.Value{dir: sc.vars})
@@ -1030,5 +1167,5 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string) {
 		var facts tfBucketFacts
 		out = append(out, facts.apply(scanTerraformText(f.rel, string(f.data), &facts, nil))...)
 	}
-	return out, unresolved
+	return out, unresolved, skipped
 }

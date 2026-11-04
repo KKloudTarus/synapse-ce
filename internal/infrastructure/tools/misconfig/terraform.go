@@ -221,7 +221,7 @@ func tfAttributeLiteral(body string, re *regexp.Regexp) (string, bool) {
 // own variable defaults and locals are resolved before the rules run; nothing outside the file is read.
 func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 	ws := buildTFWorkspace([]tfInputFile{{rel: rel, data: data}}, nil)
-	out, _ := ws.scanWorkspace()
+	out, _, _ := ws.scanWorkspace()
 	return out
 }
 

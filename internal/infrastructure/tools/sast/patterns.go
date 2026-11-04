@@ -580,20 +580,26 @@ func skipCommentPlaceholderOrLabelSecret(line string) bool {
 		return true
 	}
 	// A line can carry more than one assignment, and the exclusions describe ONE of them. Reading only
-	// the first let an unrelated endpoint beside a real credential suppress the finding, so every
-	// credential-shaped assignment on the line is judged and the line is skipped only when none of them
-	// is a credential.
-	matches := credentialAssignmentRe.FindAllStringSubmatch(line, -1)
-	if matches == nil {
-		return false
-	}
-	for _, m := range matches {
+	// the first let an unrelated endpoint beside a real credential suppress the finding. Only the
+	// assignments whose identifier the credential rule itself keys on are judged, so an ordinary
+	// neighbour such as `region = "us-east-1"` neither suppresses a credential nor invalidates an
+	// endpoint exclusion.
+	var judged int
+	for _, m := range credentialAssignmentRe.FindAllStringSubmatch(line, -1) {
+		if !credentialIdentifierRe.MatchString(m[1]) {
+			continue
+		}
+		judged++
 		if !assignmentIsLabelOrEndpoint(m[1], m[2]) {
 			return false
 		}
 	}
-	return true
+	return judged > 0
 }
+
+// credentialIdentifierRe is the identifier vocabulary the hardcoded-credential rule keys on. The
+// exclusions describe those assignments and no others.
+var credentialIdentifierRe = regexp.MustCompile(`(?i)(?:password|passwd|pwd|api[_-]?key|secret|access[_-]?token|auth[_-]?token)`)
 
 // assignmentIsLabelOrEndpoint reports whether one assignment names a concept or an endpoint rather than
 // embedding a credential.

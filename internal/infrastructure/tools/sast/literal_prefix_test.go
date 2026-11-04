@@ -115,3 +115,36 @@ func TestEndpointBesideACredentialDoesNotSuppressIt(t *testing.T) {
 		})
 	}
 }
+
+// An ordinary neighbour that the credential rule never keys on must not invalidate the endpoint
+// exclusion beside it. Judging every quoted assignment on the line turned a harmless region constant
+// into evidence that the endpoint was a hardcoded credential.
+func TestBenignNeighbourDoesNotInvalidateAnEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line string
+		want bool // want=true means the line is skipped, i.e. no finding
+	}{
+		{
+			name: "endpoint with a benign region constant",
+			line: `const secret_url = "https://api.prod.internal"; const region = "us-east-1";`,
+			want: true,
+		},
+		{
+			name: "endpoint with a benign bucket name",
+			line: `const secret_host = "vault.prod.internal"; const bucket = "company-artifacts";`,
+			want: true,
+		},
+		{
+			name: "a real credential beside a benign constant still reports",
+			line: `const api_key = "` + syntheticValue(24) + `"; const region = "us-east-1";`,
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := skipCommentPlaceholderOrLabelSecret(tc.line); got != tc.want {
+				t.Fatalf("skip=%v want %v for %s", got, tc.want, tc.line)
+			}
+		})
+	}
+}

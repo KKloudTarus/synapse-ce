@@ -309,8 +309,11 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	}
 	// Second Terraform pass: parse every module, resolve its variables, locals and module inputs within the
 	// bounded contract, and scan the normalized source in which each attribute carries its effective value.
-	tfFindings, tfUnresolved := buildTFWorkspace(tfConfigs, tfVarFiles).scanWorkspace()
+	tfFindings, tfUnresolved, tfSkippedScenarios := buildTFWorkspace(tfConfigs, tfVarFiles).scanWorkspace()
 	out = append(out, tfFindings...)
+	if tfSkippedScenarios > 0 {
+		noteUnassessed(tfSkippedScenarios, "the Terraform variable-file scenario budget was reached, so those configurations were not evaluated")
+	}
 	out = append(out, kubernetes.findings...)
 	out = append(out, networkPolicyFindings(kubernetes)...)
 	out = append(out, secretReaderFindings(kubernetes)...)

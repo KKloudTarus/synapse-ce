@@ -2,6 +2,7 @@ package misconfig
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/zclconf/go-cty/cty"
 
@@ -170,7 +171,10 @@ func TestWildcardAlternativeDoesNotRestrict(t *testing.T) {
   })
 }
 `})
-	policyFinding(t, fs, "terraform-wildcard-principal")
+	f := policyFinding(t, fs, "terraform-wildcard-principal")
+	if f.Severity != shared.SeverityHigh {
+		t.Fatalf("a known match-everything alternative leaves the grant unrestricted, so it is high: got %v (%s)", f.Severity, f.Description)
+	}
 }
 
 // A single specific ARN with no wildcard alternative still restricts, so the fix does not report every
@@ -359,6 +363,11 @@ func TestStringAndListFunctionsUseTerraformSemantics(t *testing.T) {
 
 // scanReport is scan() with the report, for the capability assertions.
 func scanReport(t *testing.T, files map[string]string) (findings []string, unresolved []string) {
+	findings, unresolved, _, _ = scanReportFull(t, files)
+	return findings, unresolved
+}
+
+func scanReportFull(t *testing.T, files map[string]string) (findings []string, unresolved []string, unassessed int, reasons []string) {
 	t.Helper()
 	root := t.TempDir()
 	for name, body := range files {
@@ -377,7 +386,7 @@ func scanReport(t *testing.T, files map[string]string) (findings []string, unres
 	for _, f := range report.Findings {
 		findings = append(findings, f.RuleID)
 	}
-	return findings, report.UnresolvedInputs
+	return findings, report.UnresolvedInputs, report.UnassessedInputs, report.UnassessedReasons
 }
 
 // An attribute whose expansion was refused is reported as unresolved rather than passing as evaluated.
@@ -399,5 +408,207 @@ resource "aws_ebs_volume" "v" {
 	}
 	if !found {
 		t.Fatalf("the unevaluated attribute must be reported, got %v", unresolved)
+	}
+}
+
+// join repeats its separator between every pair, so a separator and a list that each fit the stored-value
+// budget still multiply into a far larger string. The bound has to be enforced BEFORE the call runs: a
+// predicate on the completed result arrives after the allocation it exists to prevent, and wrapping the
+// call in length() hides the intermediate entirely. This measures the allocation rather than the finding.
+func TestJoinIsRefusedBeforeItAllocates(t *testing.T) {
+	join := tfFunctions()["join"]
+	separator := cty.StringVal(strings.Repeat("s", 16<<10))
+	pieces := make([]cty.Value, 512)
+	for i := range pieces {
+		pieces[i] = cty.StringVal("y")
+	}
+	args := []cty.Value{separator, cty.ListVal(pieces)}
+	projected := 512 * (16 << 10)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := join.Call(args)
+	runtime.ReadMemStats(&after)
+
+	if err == nil {
+		t.Fatal("a call whose projected result exceeds the budget must be refused")
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > uint64(projected/8) {
+		t.Fatalf("the refusal allocated %d bytes; the unbounded call would build about %d", allocated, projected)
+	}
+	// The same arguments below the budget still work, so the bound refuses size rather than the function.
+	small, err := join.Call([]cty.Value{cty.StringVal("-"), cty.ListVal([]cty.Value{cty.StringVal("a"), cty.StringVal("b")})})
+	if err != nil {
+		t.Fatalf("an ordinary join must still evaluate: %v", err)
+	}
+	if small.AsString() != "a-b" {
+		t.Fatalf("join produced %q", small.AsString())
+	}
+}
+
+// An expression reading more references than the bound allows is not evaluated, so a template cannot
+// chain an unbounded number of budget-sized operands in one go.
+func TestExpressionReferenceBoundIsEnforced(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("locals {\n  seed = \"abc\"\n  joined = \"")
+	for i := 0; i <= tfMaxExprRefs; i++ {
+		b.WriteString("${local.seed}")
+	}
+	b.WriteString("\"\n}\n")
+	b.WriteString(`resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = local.joined == ""
+}
+`)
+	got := ruleIDs(scan(t, map[string]string{"main.tf": b.String()}))
+	if _, ok := got["terraform-encryption-disabled"]; ok {
+		t.Fatalf("an expression past the reference bound must not resolve, got %v", keys(got))
+	}
+}
+
+// A Null guard whose alternatives permit the key to be ABSENT does not require presence, and the absent
+// state is exactly the one in which the IfExists operator succeeds anyway.
+func TestNullAlternativesPermittingAbsenceDoNotRestrict(t *testing.T) {
+	fs := scan(t, map[string]string{"main.tf": `resource "aws_s3_bucket_policy" "p" {
+  bucket = "b"
+  policy = jsonencode({
+    Statement = [{
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "arn:aws:s3:::b/*"
+      Condition = {
+        StringEqualsIfExists = { "aws:SourceAccount" = "123456789012" }
+        Null                 = { "aws:SourceAccount" = ["false", "true"] }
+      }
+    }]
+  })
+}
+`})
+	f := policyFinding(t, fs, "terraform-wildcard-principal")
+	if f.Severity != shared.SeverityHigh {
+		t.Fatalf("alternatives permitting absence establish no presence requirement: got %v (%s)", f.Severity, f.Description)
+	}
+}
+
+// A document this scanner cannot render is DECLARED, not missing. Leaving the name unbound let a try()
+// around it resolve to a fallback the provider never produces, and that fallback then consumed the data
+// block's literal coverage.
+func TestComposedDocumentThroughTryKeepsItsLiteralFinding(t *testing.T) {
+	got := ruleIDs(scan(t, map[string]string{"main.tf": `data "aws_iam_policy_document" "combined" {
+  override_policy_documents = [jsonencode({
+    Statement = [{
+      Sid       = "PublicRead"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "arn:aws:s3:::b/*"
+    }]
+  })]
+  statement {
+    sid       = "InternalRead"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::b/*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::123456789012:role/app"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "p" {
+  bucket = "b"
+  policy = try(data.aws_iam_policy_document.combined.json, jsonencode({
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::123456789012:role/app" }
+      Action    = "s3:GetObject"
+      Resource  = "arn:aws:s3:::b/*"
+    }]
+  }))
+}
+`}))
+	if _, ok := got["terraform-wildcard-principal"]; !ok {
+		t.Fatalf("the public override must keep its literal finding, got %v", keys(got))
+	}
+}
+
+// A scenario the cap refuses is work that was not done, so it is reported as a coverage gap rather than
+// passing silently.
+func TestSkippedScenariosAreReportedAsACoverageGap(t *testing.T) {
+	files := map[string]string{}
+	for _, dir := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"} {
+		files[dir+"/main.tf"] = `variable "enc" {
+  default = true
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.enc
+}
+`
+		value := "true"
+		if dir == "i" {
+			value = "false"
+		}
+		files[dir+"/prod.tfvars"] = "enc = " + value + "\n"
+	}
+	_, _, unassessed, reasons := scanReportFull(t, files)
+	if unassessed == 0 {
+		t.Fatal("a scenario the budget refused must be reported as unassessed")
+	}
+	var named bool
+	for _, r := range reasons {
+		if strings.Contains(r, "scenario budget") {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("the reason must name the budget, got %v", reasons)
+	}
+}
+
+// A declared variable with no value is unknown during LOCAL resolution too. Handing locals the raw map
+// let try() see it as absent and store a resolved false, which no later context could undo.
+func TestUnresolvedVariableDoesNotBecomeAFallbackValue(t *testing.T) {
+	findings, unresolved := scanReport(t, map[string]string{"main.tf": `variable "enc" {}
+locals {
+  secure = try(var.enc, false)
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = local.secure
+}
+`})
+	for _, id := range findings {
+		if id == "terraform-encryption-disabled" {
+			t.Fatal("an unresolved variable must not be invented as false")
+		}
+	}
+	var reported bool
+	for _, u := range unresolved {
+		if strings.Contains(u, "encrypted") {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("the dependent attribute must be reported unresolved, got %v", unresolved)
+	}
+}
+
+// Terraform's conversion preserves null, so tolist(null) is null rather than a function error that sends
+// try() to a fallback.
+func TestToListPreservesNull(t *testing.T) {
+	got := ruleIDs(scan(t, map[string]string{"main.tf": `resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = try(tolist(null) == null, false)
+}
+`}))
+	if _, ok := got["terraform-encryption-disabled"]; ok {
+		t.Fatalf("tolist(null) is null, so the expression is true, got %v", keys(got))
 	}
 }
