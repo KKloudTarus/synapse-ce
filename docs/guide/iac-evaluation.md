@@ -73,6 +73,21 @@ this way are left unresolved and reported, which costs coverage on a construct t
 appears in a minority of attributes and removes the only path from source text to unbounded
 work.
 
+Admission runs at one boundary that every evaluation passes through: resource and module
+attributes, variable defaults, variable files, and policy documents, in native syntax and in
+JSON. A `.tf.json` attribute needs its own inspection, because it carries no syntax tree:
+the JSON library parses each string as a native template at evaluation time, so the kind of
+the wrapper says nothing about what running it will do. Arrays and objects are walked to
+their leaves, including an interpolated object key, and each leaf string is read back
+verbatim and parsed as the template it is about to become. An expression whose shape this
+walk does not recognise is refused rather than admitted.
+
+A `.tf.json` attribute that does not resolve is rendered with its name and an unresolved
+marker rather than omitted. Omitting it would state something different from what the
+scanner knows: a rule that asks whether `encrypted` is set would read the gap as an
+operator who left encryption at the default, which is a finding about the target rather
+than about an expression nobody evaluated.
+
 ## Terraform: what stays unknown
 
 Everything else is unknown: a `data` source other than `aws_iam_policy_document`, another

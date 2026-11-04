@@ -66,6 +66,16 @@ const (
 	// comprehension concatenates its operands, so without this an otherwise ordinary expression could
 	// chain thousands of budget-sized values together in a single evaluation.
 	tfMaxExprRefs = 64
+	// tfMaxAdmissionDepth bounds the admission walk itself over a JSON configuration, whose arrays and
+	// objects nest to whatever depth the target wrote. A structure deeper than this is refused rather than
+	// descended, so inspecting an expression cannot cost more than evaluating it would have.
+	tfMaxAdmissionDepth = 32
+	// tfUnresolvedAttr is what a .tf.json attribute renders as when its value is not known. Dropping the
+	// attribute would be read by the rules as an attribute the configuration never set, which is a
+	// different claim: "the operator left encryption at the default" rather than "this scanner did not
+	// resolve the value". The name stays visible and the value is a token no rule can match against a
+	// literal, so presence checks see it and value checks do not fire.
+	tfUnresolvedAttr = "unresolved"
 )
 
 // boundedFunction wraps f so the projected output size is checked before f executes. Checking the stored
@@ -176,10 +186,73 @@ func tfEvaluable(expr hcl.Expression) bool {
 	if len(expr.Variables()) > tfMaxExprRefs {
 		return false
 	}
-	node, ok := expr.(hclsyntax.Expression)
-	if !ok {
+	return tfBoundedExpr(expr, 0)
+}
+
+// tfEval is the one place a target-controlled expression is evaluated. Admission runs first, so every
+// surface the scanner reads, native attributes, .tf.json attributes, variable defaults, variable files and
+// policy documents, is held to the same contract; a check added at one call site leaves the others open.
+//
+// A refused expression yields an UNKNOWN value and no diagnostic. An error is what Terraform raises for a
+// broken configuration, and try(expr, fallback) is right to answer one with the fallback, which would
+// print this scanner's own limit as a verdict about the target.
+func tfEval(expr hcl.Expression, ctx *hcl.EvalContext) (cty.Value, hcl.Diagnostics) {
+	if !tfEvaluable(expr) {
+		return cty.DynamicVal, nil
+	}
+	return expr.Value(ctx)
+}
+
+// tfBoundedExpr walks an expression of either syntax.
+//
+// A .tf.json attribute carries no AST of its own. hcl/json parses each string as a native template at
+// Value() time, so the wrapper's type says nothing about what evaluating it will run, and admitting an
+// expression because it is not hclsyntax.Expression admits every loop a JSON configuration can write.
+// Containers are walked through the exported accessors, which expose an interpolated object key as well
+// as its value, and each leaf is read back with a NIL context, which hcl/json defines as "return the
+// string verbatim, do not interpolate", then parsed as the template it is about to become.
+func tfBoundedExpr(expr hcl.Expression, depth int) bool {
+	if depth > tfMaxAdmissionDepth {
+		return false
+	}
+	if node, ok := expr.(hclsyntax.Expression); ok {
+		return tfBoundedSyntax(node)
+	}
+	if items, diags := hcl.ExprList(expr); !diags.HasErrors() {
+		for _, item := range items {
+			if !tfBoundedExpr(item, depth+1) {
+				return false
+			}
+		}
 		return true
 	}
+	if pairs, diags := hcl.ExprMap(expr); !diags.HasErrors() {
+		for _, pair := range pairs {
+			if !tfBoundedExpr(pair.Key, depth+1) || !tfBoundedExpr(pair.Value, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	raw, diags := expr.Value(nil)
+	if diags.HasErrors() || !raw.IsKnown() || raw.IsNull() {
+		return false
+	}
+	if raw.Type() != cty.String {
+		// A number or a bool is a literal with nothing to run. Anything else is a shape this walk does
+		// not understand, and an expression nobody inspected is not admitted.
+		return raw.Type().IsPrimitiveType()
+	}
+	rng := expr.Range()
+	tmpl, diags := hclsyntax.ParseTemplate([]byte(raw.AsString()), rng.Filename, rng.Start)
+	if diags.HasErrors() {
+		return false
+	}
+	return tfBoundedSyntax(tmpl)
+}
+
+// tfBoundedSyntax refuses the native constructs whose cost is set at runtime rather than by the source.
+func tfBoundedSyntax(node hclsyntax.Expression) bool {
 	bounded := true
 	hclsyntax.VisitAll(node, func(n hclsyntax.Node) hcl.Diagnostics {
 		switch n.(type) {
@@ -495,7 +568,7 @@ func (m *tfModule) collectDeclarations() {
 			case blk.Type == "variable" && len(blk.Labels) == 1:
 				m.declaredVars[blk.Labels[0]] = true
 				if attr, ok := blk.Body.Attributes["default"]; ok {
-					if v, d := attr.Expr.Value(empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
+					if v, d := tfEval(attr.Expr, empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
 						m.defaults[blk.Labels[0]] = v
 					}
 				}
@@ -527,7 +600,7 @@ func (m *tfModule) collectJSONDeclarations(src *tfSource) {
 		m.declaredVars[blk.Labels[0]] = true
 		attrs, _ := blk.Body.JustAttributes()
 		if attr, ok := attrs["default"]; ok {
-			if v, d := attr.Expr.Value(empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
+			if v, d := tfEval(attr.Expr, empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
 				m.defaults[blk.Labels[0]] = v
 			}
 		}
@@ -618,10 +691,7 @@ func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) ma
 			if _, done := locals[attr.Name]; done {
 				continue
 			}
-			if !tfEvaluable(attr.Expr) {
-				continue
-			}
-			v, d := attr.Expr.Value(ctx)
+			v, d := tfEval(attr.Expr, ctx)
 			if d.HasErrors() || !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
 				continue
 			}
@@ -683,7 +753,7 @@ func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inpu
 		return "", nil, false
 	}
 	ctx := m.evalContext()
-	sv, d := srcAttr.Expr.Value(ctx)
+	sv, d := tfEval(srcAttr.Expr, ctx)
 	if d.HasErrors() || !sv.IsWhollyKnown() || sv.Type() != cty.String {
 		return "", nil, false
 	}
@@ -701,10 +771,7 @@ func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inpu
 		case "source", "version", "providers", "count", "for_each", "depends_on":
 			continue
 		}
-		if !tfEvaluable(attr.Expr) {
-			continue
-		}
-		v, d := attr.Expr.Value(ctx)
+		v, d := tfEval(attr.Expr, ctx)
 		if d.HasErrors() || !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
 			continue
 		}
@@ -852,7 +919,7 @@ func lowerTFSource(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 				unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s (reference bound)", src.rel, rng.Start.Line, attr.Name))
 				continue
 			}
-			v, diags := attr.Expr.Value(ctx)
+			v, diags := tfEval(attr.Expr, ctx)
 			if diags.HasErrors() || !v.IsWhollyKnown() {
 				if carriesValues && len(attr.Expr.Variables()) > 0 {
 					unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s", src.rel, rng.Start.Line, attr.Name))
@@ -923,16 +990,24 @@ func renderTFJSON(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 		last := at
 		for _, n := range names {
 			attr := attrs[n]
-			v, diags := attr.Expr.Value(ctx)
-			if diags.HasErrors() || !v.IsWhollyKnown() {
-				unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s", src.rel, attr.Range.Start.Line, n))
-				continue
-			}
 			line := attr.Range.Start.Line
 			if line <= at {
 				line = at + 1
 			}
-			if used := r.emitValue(n, v, line); used > last {
+			v, diags := tfEval(attr.Expr, ctx)
+			rendered := false
+			if !diags.HasErrors() && v.IsWhollyKnown() {
+				used, ok := r.emitValue(n, v, line)
+				rendered = ok
+				if ok && used > last {
+					last = used
+				}
+			}
+			if rendered {
+				continue
+			}
+			unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s", src.rel, attr.Range.Start.Line, n))
+			if used := r.put(line, n+" = "+tfUnresolvedAttr); used > last {
 				last = used
 			}
 		}
@@ -966,7 +1041,7 @@ func (w *tfLineWriter) put(line int, text string) int {
 
 // emitValue writes one attribute. An object becomes a nested block and a list of objects becomes repeated
 // blocks, so a JSON `"ingress": {"cidr_blocks": [...]}` reads to the rules exactly as the HCL form does.
-func (w *tfLineWriter) emitValue(name string, v cty.Value, line int) int {
+func (w *tfLineWriter) emitValue(name string, v cty.Value, line int) (int, bool) {
 	t := v.Type()
 	switch {
 	case !v.IsNull() && (t.IsObjectType() || t.IsMapType()):
@@ -974,24 +1049,26 @@ func (w *tfLineWriter) emitValue(name string, v cty.Value, line int) int {
 		last := at
 		for it := v.ElementIterator(); it.Next(); {
 			kv, ev := it.Element()
-			if used := w.emitValue(kv.AsString(), ev, last+1); used > last {
+			if used, ok := w.emitValue(kv.AsString(), ev, last+1); ok && used > last {
 				last = used
 			}
 		}
-		return w.put(last+1, "}")
+		return w.put(last+1, "}"), true
 	case !v.IsNull() && (t.IsTupleType() || t.IsListType() || t.IsSetType()) && tfAllObjects(v):
 		last := line
 		for it := v.ElementIterator(); it.Next(); {
 			_, ev := it.Element()
-			last = w.emitValue(name, ev, last)
+			if used, ok := w.emitValue(name, ev, last); ok {
+				last = used
+			}
 		}
-		return last
+		return last, true
 	}
 	text, ok := tfRenderValue(v)
 	if !ok {
-		return line - 1
+		return line - 1, false
 	}
-	return w.put(line, name+" = "+text)
+	return w.put(line, name+" = "+text), true
 }
 
 func tfAllObjects(v cty.Value) bool {
@@ -1072,7 +1149,7 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 		attrs, _ := src.file.Body.JustAttributes()
 		empty := tfEvalContextFor(nil, nil)
 		for name, attr := range attrs {
-			if v, d := attr.Expr.Value(empty); !d.HasErrors() && v.IsWhollyKnown() {
+			if v, d := tfEval(attr.Expr, empty); !d.HasErrors() && v.IsWhollyKnown() {
 				vals[name] = v
 			}
 		}

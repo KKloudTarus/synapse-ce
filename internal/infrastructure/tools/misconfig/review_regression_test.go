@@ -2,6 +2,7 @@ package misconfig
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 
@@ -777,4 +778,193 @@ resource "aws_ebs_volume" "v" {
 	if !reported {
 		t.Fatalf("the dependent attribute must be reported unresolved, got %v", unresolved)
 	}
+}
+
+// jsonLoopFixture writes a .tf.json workspace whose attribute value is the expression under test. The
+// loop is 16 x 16 over a 512-byte seed: small enough that no bound on individual function calls sees
+// anything unusual, large enough that running it materializes 128 KiB per evaluation.
+func jsonLoopFixture(t *testing.T, attrs map[string]any) map[string]string {
+	t.Helper()
+	items := make([]string, 16)
+	for i := range items {
+		items[i] = fmt.Sprint(i)
+	}
+	body := map[string]any{"availability_zone": "us-east-1a", "size": 1}
+	for k, v := range attrs {
+		body[k] = v
+	}
+	doc, err := json.Marshal(map[string]any{
+		"resource": map[string]any{"aws_ebs_volume": map[string]any{"v": body}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{
+		"locals.tf":    "locals {\n seed = \"" + strings.Repeat("a", 512) + "\"\n items = [" + strings.Join(items, ",") + "]\n}\n",
+		"main.tf.json": string(doc),
+	}
+}
+
+const jsonTemplateLoop = `%{ for i in local.items }%{ for j in local.items }${local.seed}%{ endfor }%{ endfor }`
+
+// A .tf.json attribute carries no AST of its own: hcl/json parses the string as a native template at
+// Value() time. Admitting it because its type is not hclsyntax.Expression ran every loop a JSON
+// configuration could write, on the one file format the native guard could not see.
+func TestJSONTemplateLoopIsRefused(t *testing.T) {
+	cases := map[string]any{
+		"scalar attribute": `${"` + jsonTemplateLoop + `" != ""}`,
+		"array element":    []any{`${"` + jsonTemplateLoop + `" != ""}`},
+		"object value":     map[string]any{"note": jsonTemplateLoop},
+	}
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			findings, unresolved := scanReport(t, jsonLoopFixture(t, map[string]any{"encrypted": value}))
+			runtime.ReadMemStats(&after)
+
+			var reported bool
+			for _, u := range unresolved {
+				if strings.Contains(u, "encrypted") {
+					reported = true
+				}
+			}
+			if !reported {
+				t.Fatalf("a refused JSON expression must be reported unresolved, got %v", unresolved)
+			}
+			for _, id := range findings {
+				if id == "terraform-encryption-disabled" {
+					t.Fatal("a refused expression must not resolve to a value")
+				}
+			}
+			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 8<<20 {
+				t.Fatalf("the scan allocated %d bytes, so the loop body ran", allocated)
+			}
+		})
+	}
+}
+
+// An object key is an expression too in JSON configurations, and hcl/json evaluates it in interpolation
+// mode. Walking only values left that surface evaluating whatever the target wrote.
+func TestJSONInterpolatedObjectKeyIsRefused(t *testing.T) {
+	files := jsonLoopFixture(t, map[string]any{
+		"tags": map[string]any{`${"` + jsonTemplateLoop + `" != "" ? "a" : "b"}`: "x"},
+	})
+	_, unresolved := scanReport(t, files)
+	var reported bool
+	for _, u := range unresolved {
+		if strings.Contains(u, "tags") {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("a loop in an object key must refuse the attribute, got %v", unresolved)
+	}
+}
+
+// Dropping an unresolved attribute from the rendered HCL changes the claim. The rules read an absent
+// attribute as a value the operator never set, which is a finding about the target rather than about
+// what this scanner resolved.
+func TestUnresolvedJSONAttributeStaysPresent(t *testing.T) {
+	got := ruleIDs(scan(t, jsonLoopFixture(t, map[string]any{
+		"encrypted": `${"` + jsonTemplateLoop + `" != ""}`,
+	})))
+	if _, ok := got["terraform-ebs-unencrypted"]; ok {
+		t.Fatalf("an unresolved attribute must not be reported as an absent one, got %v", keys(got))
+	}
+}
+
+// The admission must not refuse ordinary JSON configurations, which carry no loop at all.
+func TestOrdinaryJSONAttributesStillResolve(t *testing.T) {
+	files := jsonLoopFixture(t, map[string]any{"encrypted": "${local.on}"})
+	files["locals.tf"] = "locals {\n on = false\n}\n"
+	got := ruleIDs(scan(t, files))
+	if _, ok := got["terraform-encryption-disabled"]; !ok {
+		t.Fatalf("a JSON attribute resolving through a local must still report, got %v", keys(got))
+	}
+}
+
+// Admission at one call site is not admission. A loop reaches the evaluator through a variable default,
+// a variable file and a policy document just as it does through a resource attribute.
+func TestLoopIsRefusedAtEveryEvaluationSurface(t *testing.T) {
+	seed := strings.Repeat("a", 512)
+	loop := `join("", [for i in range(16) : join("", [for j in range(16) : "` + seed + `"])])`
+
+	t.Run("variable default", func(t *testing.T) {
+		got := ruleIDs(scan(t, map[string]string{"main.tf": `variable "pad" {
+  default = ` + loop + `
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = length(var.pad) == 0
+}
+`}))
+		if _, ok := got["terraform-encryption-disabled"]; ok {
+			t.Fatalf("a loop in a variable default must be refused, got %v", keys(got))
+		}
+	})
+
+	t.Run("json variable default", func(t *testing.T) {
+		doc, err := json.Marshal(map[string]any{
+			"variable": map[string]any{"pad": map[string]any{"default": jsonTemplateLoop}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		files := jsonLoopFixture(t, map[string]any{"encrypted": "${length(var.pad) == 0}"})
+		files["vars.tf.json"] = string(doc)
+		_, unresolved := scanReport(t, files)
+		var reported bool
+		for _, u := range unresolved {
+			if strings.Contains(u, "encrypted") {
+				reported = true
+			}
+		}
+		if !reported {
+			t.Fatalf("a default nobody resolved must leave the attribute unresolved, got %v", unresolved)
+		}
+	})
+
+	t.Run("variable file", func(t *testing.T) {
+		got := ruleIDs(scan(t, map[string]string{
+			"main.tf": `variable "pad" {
+  default = "off"
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.pad == "on"
+}
+`,
+			"terraform.tfvars": "pad = " + loop + "\n",
+		}))
+		if _, ok := got["terraform-encryption-disabled"]; !ok {
+			t.Fatalf("a refused variable file leaves the declared default in force, got %v", keys(got))
+		}
+	})
+
+	t.Run("policy document", func(t *testing.T) {
+		findings, _ := scanReport(t, map[string]string{"main.tf": `locals {
+  items = [0, 1]
+}
+data "aws_iam_policy_document" "d" {
+  statement {
+    effect    = "Allow"
+    actions   = [for i in local.items : "s3:GetObject"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+  }
+}
+`})
+		for _, id := range findings {
+			if id == "terraform-encryption-disabled" {
+				t.Fatalf("unexpected finding %s", id)
+			}
+		}
+	})
 }

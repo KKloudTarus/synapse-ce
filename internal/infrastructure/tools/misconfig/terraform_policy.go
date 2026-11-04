@@ -587,7 +587,7 @@ func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocumen
 		if !ok {
 			return "", false, true
 		}
-		v, d := attr.Expr.Value(ctx)
+		v, d := tfEval(attr.Expr, ctx)
 		if d.HasErrors() || !v.IsWhollyKnown() || v.IsNull() || v.Type() != cty.String {
 			return "", false, false
 		}
@@ -598,7 +598,7 @@ func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocumen
 		if !ok {
 			return nil, false, true
 		}
-		v, d := attr.Expr.Value(ctx)
+		v, d := tfEval(attr.Expr, ctx)
 		if d.HasErrors() || !v.IsWhollyKnown() || v.IsNull() {
 			return nil, false, false
 		}
@@ -731,7 +731,7 @@ func tfCollectPolicySites(m *tfModule, ctx *hcl.EvalContext) (sites []tfPolicySi
 				}
 				rng := attr.SrcRange
 				var raw []byte
-				if v, d := attr.Expr.Value(ctx); !d.HasErrors() && v.IsWhollyKnown() && !v.IsNull() && v.Type() == cty.String {
+				if v, d := tfEval(attr.Expr, ctx); !d.HasErrors() && v.IsWhollyKnown() && !v.IsNull() && v.Type() == cty.String {
 					raw = []byte(v.AsString())
 				} else if partial, ok := policyJSONFromExpr(attr.Expr, ctx); ok {
 					raw = partial
@@ -836,7 +836,7 @@ func policyAnyFromExpr(expr hclsyntax.Expression, ctx *hcl.EvalContext) (any, bo
 	case *hclsyntax.ObjectConsExpr:
 		out := map[string]any{}
 		for _, item := range e.Items {
-			kv, d := item.KeyExpr.Value(ctx)
+			kv, d := tfEval(item.KeyExpr, ctx)
 			if d.HasErrors() || !kv.IsWhollyKnown() || kv.IsNull() || kv.Type() != cty.String {
 				return nil, false
 			}
@@ -858,7 +858,7 @@ func policyAnyFromExpr(expr hclsyntax.Expression, ctx *hcl.EvalContext) (any, bo
 		}
 		return out, true
 	}
-	v, d := expr.Value(ctx)
+	v, d := tfEval(expr, ctx)
 	if d.HasErrors() || !v.IsWhollyKnown() {
 		return policyUnresolvedToken, true
 	}
