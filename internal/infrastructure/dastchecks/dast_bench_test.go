@@ -29,45 +29,77 @@ const sts = "strict-transport-security: max-age=31536000"
 var dastCorpus = []dastCase{
 	{
 		name:        "missing-security-header",
-		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/sh", Status: 200, BodySHA256: hash64(), Headers: []string{"content-type: text/html"}},
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/sh", Status: 200, BodySHA256: hash64(), HeadersCaptured: true, Headers: []string{"content-type: text/html"}},
 		expectCheck: "security-headers",
 	},
 	{
 		name:        "insecure-cookie",
-		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/cookie", Status: 200, BodySHA256: hash64(), Headers: []string{sts, "set-cookie: sid=abc123"}},
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/cookie", Status: 200, BodySHA256: hash64(), HeadersCaptured: true, Headers: []string{sts, "set-cookie: sid=abc123"}},
 		expectCheck: "cookie-security-flags",
 	},
 	{
 		name:        "source-map-artifact",
-		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/app/main.js.map", Status: 200, BodySHA256: hash64(), Headers: []string{sts}},
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/app/main.js.map", Status: 200, BodySHA256: hash64(), BodyExcerpt: `{"version":3,"sources":["src/app.ts"],"mappings":"AAAA"}`, HeadersCaptured: true, Headers: []string{sts}},
 		expectCheck: "sensitive-public-artifact",
 	},
 	{
 		name:        "auth-weakness-marker",
-		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/login", Status: 200, BodySHA256: hash64(), BodyExcerpt: "config: synapse-auth-weakness enabled", Headers: []string{sts}},
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/login", Status: 200, BodySHA256: hash64(), BodyExcerpt: "config: synapse-auth-weakness enabled", HeadersCaptured: true, Headers: []string{sts}},
 		expectCheck: "auth-configured-weakness",
 	},
 	{
 		// Alternate artifact trigger: a /.well-known/ path whose body exposes a "source" marker (not the .map path).
 		name:        "well-known-artifact",
-		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/.well-known/app", Status: 200, BodySHA256: hash64(), BodyExcerpt: "map source exposed", Headers: []string{sts}},
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/.well-known/app", Status: 200, BodySHA256: hash64(), BodyExcerpt: "map source exposed", HeadersCaptured: true, Headers: []string{sts}},
 		expectCheck: "sensitive-public-artifact",
 	},
 	{
 		// Alternate auth-weakness trigger: the configured header marker (not the body marker).
 		name:        "auth-weakness-header",
-		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/hdr", Status: 200, BodySHA256: hash64(), BodyExcerpt: "ok", Headers: []string{sts, "x-synapse-auth-weakness: on"}},
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/hdr", Status: 200, BodySHA256: hash64(), BodyExcerpt: "ok", HeadersCaptured: true, Headers: []string{sts, "x-synapse-auth-weakness: on"}},
 		expectCheck: "auth-configured-weakness",
 	},
 	// Clean cases: a full secure-header set (STS + a hardened cookie), and a headerless API response.
 	{
 		name:        "clean-secure-headers-and-cookie",
-		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/ok", Status: 200, BodySHA256: hash64(), BodyExcerpt: "hello", Headers: []string{sts, "set-cookie: sid=abc123; Secure; HttpOnly; SameSite=Strict"}},
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/ok", Status: 200, BodySHA256: hash64(), BodyExcerpt: "hello", HeadersCaptured: true, Headers: []string{sts, "set-cookie: sid=abc123; Secure; HttpOnly; SameSite=Strict"}},
 		expectCheck: "",
 	},
+	// Not a clean case: no header was captured, so no header verdict is available for this endpoint.
+	// It trips nothing, and that absence is unassessed evidence rather than a secure response (#1638).
 	{
-		name:        "clean-no-headers",
+		name:        "unassessed-no-headers-captured",
 		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/api", Status: 200, BodySHA256: hash64(), BodyExcerpt: "{}", Headers: nil},
+		expectCheck: "",
+	},
+	// Captured headers that carry no HSTS: an observed missing header, not missing evidence.
+	{
+		name:        "missing-security-header-empty-captured-set",
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/bare", Status: 200, BodySHA256: hash64(), BodyExcerpt: "{}", HeadersCaptured: true, Headers: nil},
+		expectCheck: "security-headers",
+	},
+	// A cookie whose VALUE spells the attribute names: the attributes are still missing.
+	{
+		name:        "cookie-value-spells-the-flags",
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/cookie-value", Status: 200, BodySHA256: hash64(), HeadersCaptured: true, Headers: []string{sts, "set-cookie: sid=secure-httponly-samesite"}},
+		expectCheck: "cookie-security-flags",
+	},
+	// A cookie that is missing only Secure, with the other two attributes present.
+	{
+		name:        "cookie-missing-only-secure",
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/cookie-secure", Status: 200, BodySHA256: hash64(), HeadersCaptured: true, Headers: []string{sts, "set-cookie: sid=abc123; HttpOnly; SameSite=Strict"}},
+		expectCheck: "cookie-security-flags",
+	},
+	// A source-map path the server does not serve: an absent artifact is not a published one.
+	{
+		name:        "source-map-path-not-found",
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/missing.js.map", Status: 404, BodySHA256: hash64(), BodyExcerpt: "not found", HeadersCaptured: true, Headers: []string{sts}},
+		expectCheck: "",
+	},
+	// A source-map path serving an HTML error page with 200: still not a published source map.
+	{
+		name:        "source-map-path-serving-html",
+		obs:         ports.DASTObservation{Method: "GET", URL: "https://app.test/spa.js.map", Status: 200, BodySHA256: hash64(), BodyExcerpt: "<!doctype html><html><body>app</body></html>", HeadersCaptured: true, Headers: []string{sts}},
 		expectCheck: "",
 	},
 }

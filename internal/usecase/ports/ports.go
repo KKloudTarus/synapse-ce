@@ -1640,6 +1640,30 @@ type InstalledPackageCataloger interface {
 	CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom.Component, error)
 }
 
+// InstalledCatalogReport is the bounded output of an installed-package catalog: the components it found
+// plus what it did not cover. A cataloger that stops at a file or component cap returns a real inventory of
+// part of the image, and the difference between that and a complete one decides whether a scan may call its
+// inventory authoritative.
+type InstalledCatalogReport struct {
+	Components []sbom.Component
+	// Truncated reports that a bound stopped the catalog before it covered the rootfs.
+	Truncated bool
+	// TruncationReasons holds the distinct bounds that were reached, so the warning names what was hit.
+	TruncationReasons []string
+	// Unreadable counts the rootfs entries the walk could not read. Each one is a package that may exist and
+	// was never examined.
+	Unreadable int
+}
+
+// InstalledPackageCatalogReporter is the reporting form of InstalledPackageCataloger: the same components
+// plus the bounds and unreadable inputs that make the catalog a lower bound. A cataloger that does not
+// implement it is treated as completeness-unknown, which is why CatalogInstalled remains the interface the
+// service requires.
+type InstalledPackageCatalogReporter interface {
+	InstalledPackageCataloger
+	CatalogInstalledReport(ctx context.Context, rootfsDir string) (InstalledCatalogReport, error)
+}
+
 // Completeness signals how trustworthy a scan's results are: whether dependency
 // versions were actually resolved. Scanning source WITHOUT a lockfile yields
 // unresolved versions, so a "0 vulnerabilities" result must NOT be read as clean.
@@ -1706,6 +1730,19 @@ type SBOMWarningReporter interface {
 // supplies the pure producerVersion string. It preserves SBOM.Raw (which is json:"-") so a cache hit still
 // hands a downstream detector (Grype) the EXACT original document, not a lossy reconstruction. Best-effort:
 // an empty producerVersion, an uncomputable key, or any cache error is a silent miss, NEVER a scan failure.
+// SBOMProducerIdentity reports which producer will generate the SBOM, and under which
+// output-affecting version, BEFORE any generation runs. A cache key built from the provenance map
+// cannot do this: that map is stamped with the generator's version only after a successful
+// generation, so a cache lookup made before it would read the same key for every producer and hand
+// one producer's inventory to another (#1638).
+//
+// An implementation returns an error when the identity cannot be established, for example when the
+// selected external binary is absent. The caller must then skip the cache rather than reuse an
+// inventory it cannot attribute.
+type SBOMProducerIdentity interface {
+	SBOMProducerIdentity(ctx context.Context) (string, error)
+}
+
 type SBOMCache interface {
 	// Load returns the cached SBOM for (dir, producerVersion) when present + fresh; ok=false on a miss.
 	Load(ctx context.Context, dir, producerVersion string) (*sbom.SBOM, bool, error)
@@ -2431,6 +2468,17 @@ type MisconfigScanReport struct {
 	// ChartRenderReasons holds up to a few distinct failure reasons, so the warning tells the reader what to
 	// fix (run `helm dependency build`, give the chart a name) rather than only that something failed.
 	ChartRenderReasons []string
+	// UnresolvedInputs names the configuration attributes whose effective value the scanner could not
+	// establish within its bounded evaluation contract, as "file:line: attribute". These are the places a
+	// rule saw source text rather than a value, so a clean result there means "not evaluated", not "secure".
+	UnresolvedInputs []string
+	// UnassessedInputs counts the inputs a rendering or parsing capability could not evaluate at all: a
+	// Kustomize overlay left unrendered because the capability is off, absent, or failed. The raw manifests
+	// behind such an input are still scanned, so this is a coverage gap rather than a lost scan.
+	UnassessedInputs int
+	// UnassessedReasons holds up to a few distinct reasons for UnassessedInputs, so a reader learns what to
+	// enable rather than only that something was skipped.
+	UnassessedReasons []string
 }
 
 // MisconfigReporter is the reporting form of MisconfigScanner: it returns the same findings plus what the

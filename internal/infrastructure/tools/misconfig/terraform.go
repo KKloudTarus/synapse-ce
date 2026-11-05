@@ -1,6 +1,7 @@
 package misconfig
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -37,14 +38,32 @@ var (
 	// network security rule says direction = "Outbound". Without reading it, an allow-all egress rule
 	// written that way was reported as an open INGRESS rule, at high severity instead of medium.
 	tfDirectionAttr = regexp.MustCompile(`(?i)^(?:type|direction)\s*=\s*"(egress|ingress|outbound|inbound)"`)
+	// tfEgressBool is aws_network_acl_rule's direction, declared as a bool rather than a string.
+	tfEgressBool = regexp.MustCompile(`(?i)^egress\s*=\s*(true|false)\b`)
+	// tfRuleAction is the allow/deny decision a network rule carries: rule_action on an AWS network ACL,
+	// access on an Azure network security rule, action on a GCP firewall policy rule. A rule that DENIES a
+	// range is the opposite of exposing it, so the open-CIDR predicates read this before reporting.
+	tfRuleAction = regexp.MustCompile(`(?i)^(?:rule_action|access|action)\s*=\s*"(allow|deny)"`)
+	// tfFirewallDecision is google_compute_firewall's allow/deny sub-block, which carries the same decision
+	// as a block name rather than an attribute.
+	tfFirewallDecision = regexp.MustCompile(`^(allow|deny)\s*\{`)
+	// tfBucketAttr reads the bucket an S3 hardening resource protects.
+	tfBucketAttr    = regexp.MustCompile(`^bucket\s*=\s*(.+)$`)
+	tfBucketRefName = regexp.MustCompile(`^aws_s3_bucket\.([A-Za-z0-9_-]+)\.(?:id|bucket|arn)$`)
+	tfQuotedValue   = regexp.MustCompile(`^"([^"]*)"$`)
 	tfSubBlockOpen  = regexp.MustCompile(`^(ingress|egress)\b`)
-	tfIAMWildcard   = regexp.MustCompile(`(?i)("Action"\s*:\s*"\*"|actions\s*=\s*\[\s*"\*"\s*\])`)
-	tfSecretAttr    = regexp.MustCompile(`(?i)\b(password|secret|secret_key|access_key|private_key|api_key|token)\s*=\s*"([^"]+)"`)
+	// The wildcard forms a policy can be written in: JSON string, JSON array, the HCL object syntax
+	// jsonencode takes, and the aws_iam_policy_document attribute. A line-level match is the fallback for a
+	// document terraform_policy.go could not evaluate, so it has to recognise every supported spelling.
+	tfIAMWildcard = regexp.MustCompile(`(?i)("Action"\s*:\s*"\*"|"Action"\s*:\s*\[\s*"\*"\s*\]|\bAction\s*=\s*"\*"|\bAction\s*=\s*\[\s*"\*"\s*\]|actions\s*=\s*\[\s*"\*"\s*\])`)
+	tfSecretAttr  = regexp.MustCompile(`(?i)\b(password|secret|secret_key|access_key|private_key|api_key|token)\s*=\s*"([^"]+)"`)
 
 	// authz — public access / over-broad grants (some case-sensitive to separate IAM "Principal" from
 	// the lower-case `principal` attribute on aws_lambda_permission).
-	tfResourceWildcard  = regexp.MustCompile(`("Resource"\s*:\s*"\*"|\bResource\s*=\s*"\*"|\bresources\s*=\s*\[\s*"\*"\s*\])`)
-	tfWildcardPrincipal = regexp.MustCompile(`("Principal"\s*:\s*"?\*|\bPrincipal\s*=\s*"\*"|\bPrincipal"?\s*[:=]\s*\{[^}]*\*|\bidentifiers\s*=\s*\[\s*"\*"\s*\])`)
+	tfResourceWildcard = regexp.MustCompile(`("Resource"\s*:\s*"\*"|"Resource"\s*:\s*\[\s*"\*"\s*\]|\bResource\s*=\s*"\*"|\bResource\s*=\s*\[\s*"\*"\s*\]|\bresources\s*=\s*\[\s*"\*"\s*\])`)
+	// The object form requires the WHOLE value to be the wildcard. An ARN that merely contains one
+	// (arn:aws:iam::123456789012:role/app-*) names a scoped set of roles, not every principal.
+	tfWildcardPrincipal = regexp.MustCompile(`("Principal"\s*:\s*"?\*|\bPrincipal\s*=\s*"\*"|\bPrincipal"?\s*[:=]\s*\{[^}]*"\*"|\bidentifiers\s*=\s*\[\s*"\*"\s*\])`)
 	tfLambdaPublic      = regexp.MustCompile(`\bprincipal\s*=\s*"\*"`)
 	tfApiNoAuth         = regexp.MustCompile(`\bauthorization\s*=\s*"NONE"`)
 	tfAzureContainerPub = regexp.MustCompile(`\bcontainer_access_type\s*=\s*"(blob|container)"`)
@@ -75,19 +94,143 @@ var (
 	tfRegistryModule = regexp.MustCompile(`^[0-9A-Za-z._-]+/[0-9A-Za-z._-]+/[0-9A-Za-z._-]+(//.+)?$`)
 )
 
-// scanTerraform runs the owned Terraform checks over one .tf file with no variable resolution.
-func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
-	return scanTerraformResolved(rel, data, nil)
+// tfBucketFacts binds S3 hardening resources to the bucket they protect. Terraform provider v4+ moved
+// versioning out of aws_s3_bucket into its own aws_s3_bucket_versioning resource, so a bucket that omits an
+// inline versioning block is not necessarily unversioned. The association is per bucket: an Enabled
+// versioning resource that names one bucket says nothing about the other buckets in the same module.
+type tfBucketFacts struct {
+	// pending maps "file|line" of a bucket-origin no-versioning finding to that bucket's key.
+	pending map[string]string
+	// aliases maps a literal bucket name to the bucket's key, so a versioning resource that names the bucket
+	// by its literal name rather than by reference still resolves.
+	aliases map[string]string
+	// covered holds the keys an Enabled versioning resource protects, and names the literal bucket names it
+	// protects when the reference resolved to a name rather than to a resource.
+	covered map[string]bool
+	// unbound counts Enabled versioning resources whose bucket reference did not resolve.
+	unbound int
+	// buckets is every bucket key seen, in declaration order.
+	buckets []string
 }
 
-// scanTerraformResolved runs the owned Terraform checks over one .tf file, substituting each var./local.
-// reference with its resolved literal from `resolved` before the rules run, so a misconfiguration expressed
-// through a variable (a public CIDR, encryption disabled) is caught where a literal-only match would miss
-// it. A nil/empty map makes substitution a no-op, so the single-file entry point is unchanged. Resolution
-// is conservative: `resolved` holds only UNAMBIGUOUS literals (a variable whose sources disagree is absent),
-// so substitution can only add a true positive, never manufacture one from a guessed value.
-func scanTerraformResolved(rel string, data []byte, resolved map[string]string) []ports.MisconfigRawFinding {
-	lines := strings.Split(string(data), "\n")
+func (f *tfBucketFacts) init() {
+	if f.pending == nil {
+		f.pending, f.aliases, f.covered = map[string]string{}, map[string]string{}, map[string]bool{}
+	}
+}
+
+// noteBucket records one aws_s3_bucket and the no-versioning finding it produced, if any.
+func (f *tfBucketFacts) noteBucket(name, body string, findings []ports.MisconfigRawFinding) {
+	f.init()
+	key := "aws_s3_bucket." + name
+	f.buckets = append(f.buckets, key)
+	if lit, ok := tfAttributeLiteral(body, tfBucketAttr); ok {
+		if m := tfQuotedValue.FindStringSubmatch(lit); m != nil {
+			f.aliases[m[1]] = key
+		}
+	}
+	for _, fi := range findings {
+		if fi.RuleID == "terraform-s3-no-versioning" {
+			f.pending[fmt.Sprintf("%s|%d", fi.File, fi.Line)] = key
+		}
+	}
+}
+
+// noteVersioning records one Enabled aws_s3_bucket_versioning resource and the bucket it names.
+func (f *tfBucketFacts) noteVersioning(body string) {
+	f.init()
+	lit, ok := tfAttributeLiteral(body, tfBucketAttr)
+	if !ok {
+		f.unbound++
+		return
+	}
+	if m := tfBucketRefName.FindStringSubmatch(lit); m != nil {
+		f.covered["aws_s3_bucket."+m[1]] = true
+		return
+	}
+	if m := tfQuotedValue.FindStringSubmatch(lit); m != nil {
+		f.covered["name:"+m[1]] = true
+		return
+	}
+	f.unbound++
+}
+
+// apply drops the no-versioning finding of each bucket an Enabled versioning resource actually protects.
+// A versioning resource whose bucket reference did not resolve suppresses nothing unless the module holds a
+// single bucket, because suppressing across unrelated buckets is how a real unversioned bucket disappears.
+func (f *tfBucketFacts) apply(in []ports.MisconfigRawFinding) []ports.MisconfigRawFinding {
+	f.init()
+	if len(f.covered) == 0 && f.unbound == 0 {
+		return in
+	}
+	soleBucket := ""
+	if f.unbound > 0 && len(f.buckets) == 1 {
+		soleBucket = f.buckets[0]
+	}
+	out := in[:0]
+	for _, fi := range in {
+		key, isBucketOrigin := f.pending[fmt.Sprintf("%s|%d", fi.File, fi.Line)]
+		if isBucketOrigin && fi.RuleID == "terraform-s3-no-versioning" {
+			if f.covered[key] || key == soleBucket {
+				continue
+			}
+			for lit, bucket := range f.aliases {
+				if bucket == key && f.covered["name:"+lit] {
+					key = ""
+					break
+				}
+			}
+			if key == "" {
+				continue
+			}
+		}
+		out = append(out, fi)
+	}
+	return out
+}
+
+// tfDropStructurallyAssessed removes the line-level policy rules inside a document that was already read as
+// statements. Outside such a span the line rules still run, so a policy this scan could not evaluate keeps
+// its literal detection rather than disappearing.
+func tfDropStructurallyAssessed(in []ports.MisconfigRawFinding, spans tfPolicySpans, rel string, line int) []ports.MisconfigRawFinding {
+	if spans == nil || !spans.covers(rel, line) {
+		return in
+	}
+	out := in[:0]
+	for _, f := range in {
+		switch f.RuleID {
+		case "terraform-iam-wildcard", "terraform-iam-wildcard-resource", "terraform-wildcard-principal":
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// tfAttributeLiteral returns the right-hand side of the first line of body matching re.
+func tfAttributeLiteral(body string, re *regexp.Regexp) (string, bool) {
+	for _, line := range strings.Split(body, "\n") {
+		if m := re.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			return strings.TrimSpace(m[1]), true
+		}
+	}
+	return "", false
+}
+
+// scanTerraform runs the owned Terraform checks over one .tf file on its own. The file is parsed and its
+// own variable defaults and locals are resolved before the rules run; nothing outside the file is read.
+func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
+	ws := buildTFWorkspace([]tfInputFile{{rel: rel, data: data}}, nil)
+	out, _, _ := ws.scanWorkspace()
+	return out
+}
+
+// scanTerraformText runs the owned Terraform checks over one file's NORMALIZED source: the text produced by
+// lowerTFSource, in which every attribute whose value could be evaluated carries that value instead of its
+// source spelling, with the original line numbering intact. A file that did not parse is passed through
+// unchanged, so a syntax error degrades to literal matching rather than to no scan at all.
+func scanTerraformText(rel, text string, facts *tfBucketFacts, policySpans tfPolicySpans) []ports.MisconfigRawFinding {
+	lines := strings.Split(text, "\n")
 	var out []ports.MisconfigRawFinding
 
 	type frame struct {
@@ -98,7 +241,10 @@ func scanTerraformResolved(rel string, data []byte, resolved map[string]string) 
 	}
 	var stack []*frame
 	depth := 0
-	sawEnabledVersioning := false
+	if facts == nil {
+		facts = &tfBucketFacts{}
+	}
+	facts.init()
 	// subBlock tracks the innermost ingress/egress sub-block so an open CIDR can be attributed to the
 	// right direction; subOpenDepth is the brace depth at which it opened, used to clear it on close.
 	subBlock := ""
@@ -117,9 +263,6 @@ func scanTerraformResolved(rel string, data []byte, resolved map[string]string) 
 	for i, raw := range lines {
 		line := stripHCLComment(raw)
 		trimmed := strings.TrimSpace(line)
-		// Substitute resolved var./local. references so the rules see the effective literal value. Applied
-		// after comment stripping and before any rule so both line- and block-level checks use it.
-		trimmed = substituteTFVars(trimmed, resolved)
 		if m := tfResourceOpen.FindStringSubmatch(trimmed); m != nil {
 			stack = append(stack, &frame{typ: m[1], name: m[2], depth: depth, start: i + 1})
 		}
@@ -144,11 +287,12 @@ func scanTerraformResolved(rel string, data []byte, resolved map[string]string) 
 		}
 		// The enclosing block's direction attribute is only read when an open CIDR is actually on the line,
 		// so the block walk costs nothing on the overwhelming majority of lines.
-		blockDir := ""
-		if cidrAttr != "" && tfOpenCIDR.MatchString(trimmed) && len(braceStack) > 0 {
+		blockDir, blockAction := "", ""
+		if len(braceStack) > 0 && ((cidrAttr != "" && tfOpenCIDR.MatchString(trimmed)) || tfAzureNsgOpen.MatchString(trimmed)) {
 			blockDir = tfBlockDirection(lines, braceStack[len(braceStack)-1])
+			blockAction = tfBlockAction(lines, braceStack[len(braceStack)-1])
 		}
-		out = append(out, tfLineRules(rel, i+1, trimmed, curType, subBlock, cidrAttr, blockDir)...)
+		out = append(out, tfDropStructurallyAssessed(tfLineRules(rel, i+1, trimmed, curType, subBlock, cidrAttr, blockDir, blockAction), policySpans, rel, i+1)...)
 		for n := strings.Count(line, "{"); n > 0; n-- {
 			braceStack = append(braceStack, i)
 		}
@@ -175,31 +319,18 @@ func scanTerraformResolved(rel string, data []byte, resolved map[string]string) 
 			if strings.HasPrefix(f.typ, "module:") {
 				out = append(out, tfModuleRules(rel, f.start, f.body.String())...)
 			} else {
-				out = append(out, tfBlockRules(rel, f.typ, f.start, f.body.String())...) // block-level missing-setting rules
-			}
-			if f.typ == "aws_s3_bucket_versioning" && strings.Contains(f.body.String(), `"Enabled"`) {
-				sawEnabledVersioning = true
+				blockFindings := tfBlockRules(rel, f.typ, f.start, f.body.String()) // block-level missing-setting rules
+				switch f.typ {
+				case "aws_s3_bucket":
+					facts.noteBucket(f.name, f.body.String(), blockFindings)
+				case "aws_s3_bucket_versioning":
+					if strings.Contains(f.body.String(), `"Enabled"`) {
+						facts.noteVersioning(f.body.String())
+					}
+				}
+				out = append(out, blockFindings...)
 			}
 		}
-	}
-	// Provider v4+ manages versioning in a separate aws_s3_bucket_versioning resource, so an aws_s3_bucket
-	// block legitimately omits an inline versioning block. When the file has an Enabled versioning resource,
-	// drop the bucket-origin "no versioning" finding to avoid a false positive on the modern split style.
-	if sawEnabledVersioning {
-		out = filterOutBucketVersioning(out)
-	}
-	return out
-}
-
-// filterOutBucketVersioning removes terraform-s3-no-versioning findings that originate from an
-// aws_s3_bucket block (as opposed to an aws_s3_bucket_versioning resource).
-func filterOutBucketVersioning(in []ports.MisconfigRawFinding) []ports.MisconfigRawFinding {
-	out := in[:0]
-	for _, f := range in {
-		if f.RuleID == "terraform-s3-no-versioning" && f.Resource == "Terraform aws_s3_bucket" {
-			continue
-		}
-		out = append(out, f)
 	}
 	return out
 }
@@ -403,13 +534,20 @@ func tfBlockDirection(lines []string, start int) string {
 	for i := start; i < len(lines); i++ {
 		line := stripHCLComment(lines[i])
 		if i > start {
-			if m := tfDirectionAttr.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			trimmed := strings.TrimSpace(line)
+			if m := tfDirectionAttr.FindStringSubmatch(trimmed); m != nil {
 				switch strings.ToLower(m[1]) {
 				case "egress", "outbound":
 					return "egress"
 				case "ingress", "inbound":
 					return "ingress"
 				}
+			}
+			if m := tfEgressBool.FindStringSubmatch(trimmed); m != nil {
+				if strings.EqualFold(m[1], "true") {
+					return "egress"
+				}
+				return "ingress"
 			}
 		}
 		depth += strings.Count(line, "{") - strings.Count(line, "}")
@@ -420,7 +558,32 @@ func tfBlockDirection(lines []string, start int) string {
 	return ""
 }
 
-func tfLineRules(rel string, line int, text, resType, subBlock, cidrAttr, blockDir string) []ports.MisconfigRawFinding {
+// tfBlockAction returns the allow/deny decision the block opened on line start declares, or "" when it
+// declares none. A network rule that DENIES a range restricts access rather than granting it, so an
+// exposure finding must not be produced from its CIDR. The walk stops at the brace that closes the block,
+// so a neighbouring rule's decision can never be read by mistake.
+func tfBlockAction(lines []string, start int) string {
+	depth := 0
+	for i := start; i < len(lines); i++ {
+		line := stripHCLComment(lines[i])
+		if i > start {
+			trimmed := strings.TrimSpace(line)
+			if m := tfRuleAction.FindStringSubmatch(trimmed); m != nil {
+				return strings.ToLower(m[1])
+			}
+			if m := tfFirewallDecision.FindStringSubmatch(trimmed); m != nil {
+				return strings.ToLower(m[1])
+			}
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		if i > start && depth <= 0 {
+			return "" // the block closed without declaring a decision
+		}
+	}
+	return ""
+}
+
+func tfLineRules(rel string, line int, text, resType, subBlock, cidrAttr, blockDir, blockAction string) []ports.MisconfigRawFinding {
 	var out []ports.MisconfigRawFinding
 	add := func(rule, title string, sev shared.Severity, desc string) {
 		res := "Terraform"
@@ -452,7 +615,7 @@ func tfLineRules(rel string, line int, text, resType, subBlock, cidrAttr, blockD
 	// cidrAttr is the gate: the literal has to be the value assigned to an allowing range attribute.
 	// The attribute name is stronger evidence than the resource type ever was, so it replaces the old
 	// security_group/firewall/ingress type check, which also missed Azure's azurerm_network_security_rule.
-	if cidrAttr != "" && tfOpenCIDR.MatchString(text) {
+	if cidrAttr != "" && tfOpenCIDR.MatchString(text) && blockAction != "deny" {
 		// Direction comes from the sub-block, the block's own type/direction attribute, the resource type,
 		// or the CIDR attribute itself: GCP's destination_ranges and Azure's destination_address_prefix are
 		// egress by name. An explicit attribute wins over the resource type, because that is the shape
@@ -513,7 +676,7 @@ func tfLineRules(rel string, line int, text, resType, subBlock, cidrAttr, blockD
 		add("terraform-eks-public-endpoint", "EKS API endpoint publicly accessible", shared.SeverityMedium,
 			"The EKS cluster sets endpoint_public_access = true, so the Kubernetes API server is reachable from the internet. Disable public access, or restrict it with public_access_cidrs and enable private access.")
 	}
-	if tfAzureNsgOpen.MatchString(text) {
+	if tfAzureNsgOpen.MatchString(text) && blockAction != "deny" {
 		add("terraform-azure-nsg-open", "Network security rule open to the whole internet", shared.SeverityHigh,
 			"An Azure network security rule sets source_address_prefix to \"*\" or 0.0.0.0/0, exposing the port to the entire internet. Restrict the source to the specific address ranges that need access.")
 	}
@@ -685,200 +848,4 @@ func stripHCLBlockComments(body string) string {
 		out.WriteByte(c)
 	}
 	return out.String()
-}
-
-// --- Variable resolution (D6.4) ---
-
-var (
-	tfVariableRe = regexp.MustCompile(`^variable\s+"([A-Za-z_][A-Za-z0-9_-]*)"\s*\{`)
-	tfLocalsRe   = regexp.MustCompile(`^locals\s*\{`)
-	// A conservative literal RHS: a double-quoted string, a bool, or a number. Anything else (an
-	// expression, a reference, a list, a heredoc) is not a resolvable literal and is skipped.
-	tfLiteralRe = regexp.MustCompile(`^("(?:[^"\\]|\\.)*"|true|false|-?\d+(?:\.\d+)?)\s*$`)
-	tfAssignRe  = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(.+)$`)
-)
-
-// substituteTFVars replaces each var./local. reference for which resolved holds a literal with that
-// literal, so the rules see the effective value. It substitutes ONLY in a reference context: an unquoted
-// reference (cidr = var.cidr) or one inside a ${...} interpolation ("${var.cidr}"). A reference-looking
-// token inside a plain string literal ("var.cidr") is NOT a reference and is left untouched, so it cannot
-// manufacture a finding. Unresolved references are left as-is. A nil/empty map is a no-op.
-func substituteTFVars(text string, resolved map[string]string) string {
-	if len(resolved) == 0 {
-		return text
-	}
-	var b strings.Builder
-	inStr := false // inside a double-quoted string
-	interp := 0    // ${...} nesting depth inside the current string
-	for i := 0; i < len(text); {
-		c := text[i]
-		switch {
-		case c == '"' && !tfEscaped(text, i):
-			inStr = !inStr
-			b.WriteByte(c)
-			i++
-			continue
-		case inStr && c == '$' && i+1 < len(text) && text[i+1] == '{':
-			interp++
-			b.WriteString("${")
-			i += 2
-			continue
-		case inStr && interp > 0 && c == '}':
-			interp--
-			b.WriteByte(c)
-			i++
-			continue
-		}
-		// A reference is substitutable only when unquoted, or inside an interpolation, and only when it is a
-		// standalone var./local. reference: a preceding '.' (module.var.cidr, data.x.var.y) or a trailing '.'
-		// (a nested attribute access) means it is part of a longer traversal, not the variable itself.
-		leftOK := i == 0 || (text[i-1] != '.' && !isTFIdentByte(text[i-1]))
-		if (!inStr || interp > 0) && leftOK {
-			if ref := matchTFRef(text[i:]); ref != "" {
-				end := i + len(ref)
-				rightOK := end >= len(text) || (text[end] != '.' && !isTFIdentByte(text[end]))
-				if lit, ok := resolved[ref]; ok && rightOK {
-					b.WriteString(lit)
-					i = end
-					continue
-				}
-			}
-		}
-		b.WriteByte(c)
-		i++
-	}
-	return b.String()
-}
-
-// matchTFRef returns the leading `var.NAME` / `local.NAME` reference in s, or "" if s does not start with
-// one.
-func matchTFRef(s string) string {
-	var prefix int
-	switch {
-	case strings.HasPrefix(s, "var."):
-		prefix = len("var.")
-	case strings.HasPrefix(s, "local."):
-		prefix = len("local.")
-	default:
-		return ""
-	}
-	j := prefix
-	for j < len(s) && isTFIdentByte(s[j]) {
-		j++
-	}
-	if j == prefix { // "var." with no name
-		return ""
-	}
-	return s[:j]
-}
-
-// isTFIdentByte reports whether b can continue a Terraform name. It includes '-' because HCL variable and
-// local names allow hyphens (and the collectors store them with hyphens), so matchTFRef must consume the
-// WHOLE name: matching only the prefix of `var.cidr-block` as `var.cidr` would substitute the wrong value.
-func isTFIdentByte(b byte) bool {
-	return b == '_' || b == '-' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
-}
-
-// tfEscaped reports whether the character at index i is escaped, i.e. preceded by an ODD number of
-// consecutive backslashes. A quote after `\\` (an escaped backslash) is NOT escaped and does close a string.
-func tfEscaped(s string, i int) bool {
-	n := 0
-	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
-		n++
-	}
-	return n%2 == 1
-}
-
-// tfValueSet accumulates, per var./local. name, the distinct literal values seen across a workspace's .tf
-// and .tfvars files. A name with exactly one distinct literal resolves; a name whose sources disagree stays
-// ambiguous and is never substituted, so a wrong value can never produce a false positive.
-type tfValueSet map[string]map[string]bool
-
-func newTFValueSet() tfValueSet { return tfValueSet{} }
-
-func (s tfValueSet) add(key, literal string) {
-	if s[key] == nil {
-		s[key] = map[string]bool{}
-	}
-	s[key][literal] = true
-}
-
-// resolve returns the unambiguous subset: only names with a single distinct literal.
-func (s tfValueSet) resolve() map[string]string {
-	out := make(map[string]string, len(s))
-	for key, lits := range s {
-		if len(lits) == 1 {
-			for lit := range lits {
-				out[key] = lit
-			}
-		}
-	}
-	return out
-}
-
-// collectTFDefinitions parses a .tf file's `variable "x" { default = <lit> }` and `locals { y = <lit> }`
-// literal definitions into the set. It tracks brace depth to know whether an assignment sits inside a
-// variable default, a locals block, or elsewhere (which is ignored).
-func collectTFDefinitions(data []byte, set tfValueSet) {
-	depth := 0
-	inLocals := false
-	localsDepth := 0
-	curVar := ""
-	varDepth := 0
-	for _, raw := range strings.Split(string(data), "\n") {
-		line := stripHCLComment(raw)
-		trimmed := strings.TrimSpace(line)
-		if m := tfVariableRe.FindStringSubmatch(trimmed); m != nil {
-			curVar, varDepth = m[1], depth
-		} else if tfLocalsRe.MatchString(trimmed) {
-			inLocals, localsDepth = true, depth
-		} else if curVar != "" && depth == varDepth+1 {
-			// The variable's scalar default sits directly in the variable block; a `default` key nested one
-			// level deeper (an object attribute) is not the variable's value and must not be collected.
-			if key, rhs, ok := tfAssignKV(trimmed); ok && key == "default" && tfLiteralRe.MatchString(rhs) {
-				set.add("var."+curVar, rhs)
-			}
-		} else if inLocals && depth == localsDepth+1 {
-			if key, rhs, ok := tfAssignKV(trimmed); ok && tfLiteralRe.MatchString(rhs) {
-				set.add("local."+key, rhs)
-			}
-		}
-		depth += strings.Count(line, "{") - strings.Count(line, "}")
-		if depth < 0 {
-			depth = 0
-		}
-		if curVar != "" && depth <= varDepth {
-			curVar = ""
-		}
-		if inLocals && depth <= localsDepth {
-			inLocals = false
-		}
-	}
-}
-
-// collectTFVarsFile parses a .tfvars file's top-level `name = <lit>` assignments into the set as var.name.
-func collectTFVarsFile(data []byte, set tfValueSet) {
-	depth := 0
-	for _, raw := range strings.Split(string(data), "\n") {
-		line := stripHCLComment(raw)
-		trimmed := strings.TrimSpace(line)
-		if depth == 0 {
-			if key, rhs, ok := tfAssignKV(trimmed); ok && tfLiteralRe.MatchString(rhs) {
-				set.add("var."+key, rhs)
-			}
-		}
-		depth += strings.Count(line, "{") - strings.Count(line, "}")
-		if depth < 0 {
-			depth = 0
-		}
-	}
-}
-
-// tfAssignKV splits a `key = value` line, returning the key and the trimmed RHS.
-func tfAssignKV(line string) (key, value string, ok bool) {
-	m := tfAssignRe.FindStringSubmatch(line)
-	if m == nil {
-		return "", "", false
-	}
-	return m[1], strings.TrimSpace(m[2]), true
 }

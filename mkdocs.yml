@@ -100,6 +100,7 @@ nav:
   - Integrate:
       - CLI: cli.md
       - Scan coverage: scan-coverage.md
+      - Infrastructure-as-code evaluation: iac-evaluation.md
       - MCP integration: mcp-integration.md
       - CI/CD integrations: integrations.md
       - Ticketing foundation: ticketing-foundation.md

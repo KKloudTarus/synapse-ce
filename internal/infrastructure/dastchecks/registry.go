@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastcheck"
@@ -79,13 +80,15 @@ func evaluate(o ports.DASTObservation, endpoint string, allowed map[string]bool)
 			results = append(results, newFinding(id, endpoint, o, signature, proofHeaders, predicateTokens...))
 		}
 	}
-	if len(headers) > 0 && !hasPrefix(headers, "strict-transport-security") {
+	// A missing header is only observable when this observation captured headers at all. Without
+	// that distinction an observation with no captured evidence reads as a secure response (#1638).
+	if o.HeadersCaptured && !hasPrefix(headers, "strict-transport-security") {
 		add("security-headers", "missing:strict-transport-security", nil)
 	}
 	for _, header := range headers {
 		if strings.HasPrefix(header, "set-cookie:") {
-			flags := strings.ToLower(header)
-			if !strings.Contains(flags, "secure") || !strings.Contains(flags, "httponly") || !strings.Contains(flags, "samesite=") {
+			attrs := cookieAttributes(header)
+			if !attrs["secure"] || !attrs["httponly"] || !attrs["samesite"] {
 				add("cookie-security-flags", "missing_cookie_flag", []string{"set-cookie"})
 				break
 			}
@@ -93,11 +96,13 @@ func evaluate(o ports.DASTObservation, endpoint string, allowed map[string]bool)
 	}
 	path := strings.ToLower(mustPath(endpoint))
 	body := strings.ToLower(o.BodyExcerpt)
-	if strings.HasSuffix(path, ".map") {
+	// A path alone is not a published artifact. The response has to have served it, and when an
+	// excerpt was captured it has to look like a source map rather than an error page (#1638).
+	if strings.HasSuffix(path, ".map") && servedSuccessfully(o.Status) && (body == "" || looksSourceMap(body)) {
 		add("sensitive-public-artifact", "public_artifact", nil, "source_map_path")
-	} else if strings.Contains(path, "/.well-known/") && strings.Contains(body, "source") {
+	} else if strings.Contains(path, "/.well-known/") && servedSuccessfully(o.Status) && strings.Contains(body, "source") {
 		add("sensitive-public-artifact", "public_artifact", nil, "well_known_path", "body:source")
-	} else if strings.Contains(path, "/.well-known/") && strings.Contains(body, "private") {
+	} else if strings.Contains(path, "/.well-known/") && servedSuccessfully(o.Status) && strings.Contains(body, "private") {
 		add("sensitive-public-artifact", "public_artifact", nil, "well_known_path", "body:private")
 	}
 	if strings.Contains(body, "synapse-auth-weakness") {
@@ -108,15 +113,60 @@ func evaluate(o ports.DASTObservation, endpoint string, allowed map[string]bool)
 	return results
 }
 
+// cookieAttributes reads the attributes of one recorded Set-Cookie header.
+//
+// It accepts both shapes the pipeline produces: the raw header, whose first segment is the
+// name=value pair, and the redacted form the helper stores, which is the attribute names alone. A
+// segment counts as an attribute only when its key is one, so a cookie NAMED "secure" or whose
+// VALUE contains "secure" can never stand in for the Secure attribute, which is what the previous
+// whole-header substring search allowed.
+func cookieAttributes(header string) map[string]bool {
+	_, payload, found := strings.Cut(header, ":")
+	if !found {
+		return nil
+	}
+	attrs := map[string]bool{}
+	for _, part := range strings.Split(payload, ";") {
+		key, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(part)), "=")
+		switch strings.TrimSpace(key) {
+		case "secure", "httponly", "samesite":
+			attrs[strings.TrimSpace(key)] = true
+		}
+	}
+	return attrs
+}
+
+// servedSuccessfully reports whether the response actually delivered the resource. A 404 for a
+// .map path is the server saying the artifact is absent.
+func servedSuccessfully(status int) bool { return status >= 200 && status < 300 }
+
+// looksSourceMap checks the captured excerpt for the source-map document shape, so an HTML error
+// page served with 200 at a .map path is not reported as a published source map.
+func looksSourceMap(body string) bool {
+	return strings.Contains(body, `"mappings"`) || strings.Contains(body, `"sources"`) || strings.Contains(body, `"sourcesContent"`)
+}
+
+// proofVersion is the current closed-proof contract. Version 2 carries the corrected cookie,
+// artifact-evidence and header-capture predicates and binds HeadersCaptured into the hash. Version
+// 1 proofs stay verifiable against their own recorded content (#1638).
+const proofVersion = 2
+
 func newFinding(id, endpoint string, o ports.DASTObservation, signature string, headers []string, predicateTokens ...string) ports.DASTFinding {
-	proof := ports.DASTProof{CheckID: id, Version: 1, NormalizedEndpoint: endpoint, Observation: ports.DASTClosedObservation{
+	return newVersionedFinding(proofVersion, id, endpoint, o, signature, headers, predicateTokens...)
+}
+
+func newVersionedFinding(version int, id, endpoint string, o ports.DASTObservation, signature string, headers []string, predicateTokens ...string) ports.DASTFinding {
+	proof := ports.DASTProof{CheckID: id, Version: version, NormalizedEndpoint: endpoint, Observation: ports.DASTClosedObservation{
 		Method: strings.ToUpper(o.Method), Status: o.Status, BodySHA256: o.BodySHA256,
-		Headers: headers, Signature: signature, PredicateTokens: predicateTokens,
+		Headers: headers, HeadersCaptured: o.HeadersCaptured, Signature: signature, PredicateTokens: predicateTokens,
 	}}
 	raw := proof.CheckID + "\n" + proof.NormalizedEndpoint + "\n" + proof.Observation.Method + "\n" + fmt.Sprint(proof.Observation.Status) + "\n" + proof.Observation.BodySHA256 + "\n" + strings.Join(proof.Observation.Headers, ",") + "\n" + proof.Observation.Signature + "\n" + strings.Join(proof.Observation.PredicateTokens, ",")
+	if version >= 2 {
+		raw += "\n" + strconv.FormatBool(proof.Observation.HeadersCaptured)
+	}
 	hash := sha256.Sum256([]byte(raw))
 	proof.Hash = hex.EncodeToString(hash[:])
-	return ports.DASTFinding{CheckID: id, CWE: checkCWE(id), Version: 1, Endpoint: endpoint, Proof: proof}
+	return ports.DASTFinding{CheckID: id, CWE: checkCWE(id), Version: version, Endpoint: endpoint, Proof: proof}
 }
 
 func checkCWE(id string) string {
@@ -129,7 +179,7 @@ func checkCWE(id string) string {
 }
 
 func (e *Evaluator) VerifyProof(p ports.DASTProof) error {
-	if !e.dastcheckID(p.CheckID) || checkCWE(p.CheckID) == "" || p.Version != 1 || p.NormalizedEndpoint == "" || p.Observation.Method == "" || p.Observation.Status < 100 || p.Observation.Status > 599 || len(p.Observation.BodySHA256) != 64 {
+	if !e.dastcheckID(p.CheckID) || checkCWE(p.CheckID) == "" || p.Version < 1 || p.Version > proofVersion || p.NormalizedEndpoint == "" || p.Observation.Method == "" || p.Observation.Status < 100 || p.Observation.Status > 599 || len(p.Observation.BodySHA256) != 64 {
 		return fmt.Errorf("%w: invalid closed DAST proof", shared.ErrValidation)
 	}
 	for _, token := range p.Observation.PredicateTokens {
@@ -142,15 +192,27 @@ func (e *Evaluator) VerifyProof(p ports.DASTProof) error {
 		if p.Observation.Signature != "missing:strict-transport-security" || len(p.Observation.Headers) != 0 || len(p.Observation.PredicateTokens) != 0 {
 			return fmt.Errorf("%w: DAST security-header predicate did not match", shared.ErrValidation)
 		}
+		// A corrected proof states that headers were captured; otherwise the finding claims a
+		// missing header from evidence that was never collected.
+		if p.Version >= 2 && !p.Observation.HeadersCaptured {
+			return fmt.Errorf("%w: DAST header proof records no captured headers", shared.ErrValidation)
+		}
 	case "cookie-security-flags":
 		if p.Observation.Signature != "missing_cookie_flag" || len(p.Observation.Headers) != 1 || p.Observation.Headers[0] != "set-cookie" || len(p.Observation.PredicateTokens) != 0 {
 			return fmt.Errorf("%w: DAST cookie predicate did not match", shared.ErrValidation)
 		}
 	case "sensitive-public-artifact":
 		path := strings.ToLower(mustPath(p.NormalizedEndpoint))
-		valid := len(p.Observation.Headers) == 0 && p.Observation.Signature == "public_artifact" && (len(p.Observation.PredicateTokens) == 1 && p.Observation.PredicateTokens[0] == "source_map_path" && strings.HasSuffix(path, ".map") || len(p.Observation.PredicateTokens) == 2 && p.Observation.PredicateTokens[0] == "well_known_path" && strings.Contains(path, "/.well-known/") && (p.Observation.PredicateTokens[1] == "body:source" || p.Observation.PredicateTokens[1] == "body:private"))
+		sourceMap := len(p.Observation.PredicateTokens) == 1 && p.Observation.PredicateTokens[0] == "source_map_path" && strings.HasSuffix(path, ".map")
+		wellKnown := len(p.Observation.PredicateTokens) == 2 && p.Observation.PredicateTokens[0] == "well_known_path" && strings.Contains(path, "/.well-known/") && (p.Observation.PredicateTokens[1] == "body:source" || p.Observation.PredicateTokens[1] == "body:private")
+		valid := len(p.Observation.Headers) == 0 && p.Observation.Signature == "public_artifact" && (sourceMap || wellKnown)
 		if !valid {
 			return fmt.Errorf("%w: DAST artifact predicate did not match", shared.ErrValidation)
+		}
+		// A published artifact has to have been served. The status is already recorded, so a
+		// corrected proof is checked against it rather than against the path alone.
+		if p.Version >= 2 && !servedSuccessfully(p.Observation.Status) {
+			return fmt.Errorf("%w: DAST artifact proof records an unserved response", shared.ErrValidation)
 		}
 	case "auth-configured-weakness":
 		if p.Observation.Signature != "configured_auth_weakness" || len(p.Observation.Headers) != 0 || len(p.Observation.PredicateTokens) != 1 || p.Observation.PredicateTokens[0] != "body:synapse-auth-weakness" && p.Observation.PredicateTokens[0] != "header:x-synapse-auth-weakness" {
@@ -159,7 +221,7 @@ func (e *Evaluator) VerifyProof(p ports.DASTProof) error {
 	default:
 		return fmt.Errorf("%w: unsupported DAST proof check", shared.ErrValidation)
 	}
-	want := newFinding(p.CheckID, p.NormalizedEndpoint, ports.DASTObservation{Method: p.Observation.Method, Status: p.Observation.Status, BodySHA256: p.Observation.BodySHA256}, p.Observation.Signature, p.Observation.Headers, p.Observation.PredicateTokens...).Proof.Hash
+	want := newVersionedFinding(p.Version, p.CheckID, p.NormalizedEndpoint, ports.DASTObservation{Method: p.Observation.Method, Status: p.Observation.Status, BodySHA256: p.Observation.BodySHA256, HeadersCaptured: p.Observation.HeadersCaptured}, p.Observation.Signature, p.Observation.Headers, p.Observation.PredicateTokens...).Proof.Hash
 	if p.Hash != want {
 		return fmt.Errorf("%w: closed DAST proof hash mismatch", shared.ErrValidation)
 	}

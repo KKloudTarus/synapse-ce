@@ -231,7 +231,7 @@ func (r *helperRunner) request(ctx context.Context, method, rawURL string) (port
 	return ports.DASTObservation{
 		Method: method, URL: proofURL(rawURL), Status: response.StatusCode,
 		BodySHA256: hex.EncodeToString(hash[:]), BodyBytes: len(body), BodyTruncated: truncated,
-		BodyExcerpt: redactExcerpt(body), Headers: redactHeaders(response.Header),
+		BodyExcerpt: redactExcerpt(body), Headers: redactHeaders(response.Header), HeadersCaptured: true,
 	}, nil
 }
 

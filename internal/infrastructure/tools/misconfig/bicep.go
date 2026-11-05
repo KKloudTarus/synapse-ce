@@ -484,7 +484,7 @@ func (p *bicepParser) readIdent() string {
 // consumeString consumes a single-quoted Bicep string starting at the current `'`, honoring `\` escapes,
 // and returns its content with each `${...}` interpolation replaced by an internal marker so the caller
 // can tell an interpolated (dynamic) string from a plain literal. The opening and closing quotes are
-// consumed. Multi-line strings (''' ... ''') are consumed but reported as interpolated (dynamic).
+// consumed. Multi-line strings (”' ... ”') are consumed but reported as interpolated (dynamic).
 func (p *bicepParser) consumeString() (string, bool) {
 	if p.peek() != '\'' {
 		return "", false

@@ -34,6 +34,37 @@ with a summary on stderr, read from these outcomes rather than from warning text
 required engine that did not complete, its execution and reason, the engines excluded on
 purpose, and the source warnings in full.
 
+## Infrastructure-as-code capability gaps
+
+The `iac` engine reports partial coverage when a capability could not evaluate its input,
+separately from whether the engine executed. A Helm chart that was not rendered is
+reported as `unrendered_charts`; a Kustomize overlay that was not rendered is reported as
+`analysis_incomplete` with the unassessed input count. Both cases carry a reason naming
+what to enable, and the raw manifests behind them are still scanned, so the findings that
+were available remain. Execution completing never implies that every input was assessed.
+
+[Infrastructure-as-code evaluation](iac-evaluation.md) states the full contract, including
+the Terraform constructs that are evaluated and the ones that stay unresolved.
+
+## Installed-package catalog bounds
+
+The owned installed-package catalog walks a materialized image root filesystem under a
+file cap and a component cap. Reaching either returns the packages found so far and
+reports the catalog as a lower bound, naming the bound that was reached; entries the walk
+could not read are counted the same way. Both clear the inventory's confidence, mark the
+`inventory` engine's coverage partial with `analysis_incomplete`, and add a source
+warning. The components that were cataloged are kept and still match advisories.
+
+## Semantic engine selection
+
+Selection and availability are separate facts. The configured flags are the selection, and
+whether a process could build the adapter is recorded against it, so an engine that was
+asked for and could not run reports `unavailable` with required coverage rather than
+`not_selected`. An entry point that does not support a capability at all reports
+`not_applicable`; the CLI does this for the semantic taint engines, which run in
+`synapse-api` and `synapse-worker`. [CLI](cli.md#engines-the-cli-does-not-run) lists the
+contract per entry point.
+
 ## Compatibility and rollout
 
 Native scan-run schema v2 stores canonical engine outcomes in the lane record that is

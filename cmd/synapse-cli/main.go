@@ -1775,6 +1775,22 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		sca.SetJVMReachability(jvmreach.New())
 	}
 	sca.SetSourceEngineSelection(cfg.SASTEnabled && !image, cfg.SecretScanEnabled, cfg.MisconfigEnabled)
+	// Semantic taint is an API and worker capability. Its witnesses are gated judgments minted through the
+	// propose-verify-confirm lifecycle, which needs the judgment store this process does not have, and
+	// pattern evidence is not a substitute for semantic proof. Record the selection with Supported=false so
+	// the engine outcome states that this entry point does not run it, rather than reporting it as an engine
+	// nobody asked for, and say so once on stderr when the operator selected one.
+	sca.SetTaintSelection(scauc.TaintSelection{
+		Supported:  false,
+		Go:         cfg.TaintEnabled,
+		Python:     cfg.PythonTaintEnabled,
+		JavaScript: cfg.JsTaintEnabled,
+		Java:       cfg.JavaTaintEnabled,
+	})
+	if selected := selectedSemanticEngines(cfg); len(selected) > 0 {
+		fmt.Fprintf(os.Stderr, "synapse-cli: %s selected but NOT run here - semantic taint mints gated judgments and runs in synapse-api/synapse-worker; this scan reports those engines as not applicable\n",
+			strings.Join(selected, ", "))
+	}
 	if cfg.SASTEnabled && !image {
 		sca.SetSASTAnalyzer(sastAnalyzer()) // deterministic pattern-SAST (CI-friendly)
 	} else if cfg.SASTEnabled && image {
@@ -2478,4 +2494,25 @@ func countReachability(comps []sbom.Component) (referenced, unreferenced int) {
 		}
 	}
 	return referenced, unreferenced
+}
+
+// selectedSemanticEngines names the semantic taint engines the configuration selected, in a stable order.
+// The CLI does not run them; naming them is how an operator learns that this entry point will not, rather
+// than reading an outcome that says nobody asked.
+func selectedSemanticEngines(cfg config.Config) []string {
+	var out []string
+	for _, e := range []struct {
+		name string
+		on   bool
+	}{
+		{"taint_go", cfg.TaintEnabled},
+		{"taint_python", cfg.PythonTaintEnabled},
+		{"taint_javascript", cfg.JsTaintEnabled},
+		{"taint_java", cfg.JavaTaintEnabled},
+	} {
+		if e.on {
+			out = append(out, e.name)
+		}
+	}
+	return out
 }

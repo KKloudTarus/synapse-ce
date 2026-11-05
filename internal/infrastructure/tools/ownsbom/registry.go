@@ -66,9 +66,14 @@ type Registry struct {
 }
 
 var (
-	_ ports.SBOMGenerator       = (*Registry)(nil)
-	_ ports.SBOMWarningReporter = (*Registry)(nil)
+	_ ports.SBOMGenerator        = (*Registry)(nil)
+	_ ports.SBOMWarningReporter  = (*Registry)(nil)
+	_ ports.SBOMProducerIdentity = (*Registry)(nil)
 )
+
+// SBOMProducerIdentity reports the owned producer's identity. The parsers are compiled into this
+// binary, so the identity is known without running anything and never fails (#1638).
+func (r *Registry) SBOMProducerIdentity(context.Context) (string, error) { return ownsbomVersion, nil }
 
 // New builds a registry from the given parsers. Two parsers claiming the same marker is a configuration
 // error (ambiguous dispatch), not a silent last-wins. Markers are matched case-insensitively (a Gemfile

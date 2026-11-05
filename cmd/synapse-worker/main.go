@@ -1465,6 +1465,9 @@ func main() {
 // configureWorkerJudgmentScanners is the worker's production configuration gate.
 // The binding benchmark calls this same function with an in-memory judgment store.
 func configureWorkerJudgmentScanners(scaService *scauc.Service, cfg config.Config, sb *sandbox.Runner, newJudgmentService func() (*analysisuc.Service, error), auditLog ports.AuditLogger, clock ports.Clock, log *slog.Logger) error {
+	// Record what was selected before deciding what can be built, so a selection the worker cannot satisfy
+	// reaches the engine outcome as unavailable rather than disappearing into not_selected.
+	scacompose.RecordSemanticSelection(scaService, cfg)
 	if !(cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled || cfg.JVMReachabilityEnabled || cfg.GoBinaryReachabilityEnabled) || !cfg.JudgmentsEnabled {
 		return nil
 	}
