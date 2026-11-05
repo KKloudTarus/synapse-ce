@@ -19,6 +19,14 @@ A module is a directory, which is the unit of variable scope. Values resolve fro
    `*.auto.tfvars.json` in lexical order, each overriding the previous,
 3. the inputs a parent `module` block binds, which override everything above.
 
+An assignment at any of those levels that the evaluator refuses, or whose value is too large
+to keep, binds the name UNKNOWN at that level rather than dropping it. Dropping it would let
+the level below take over, so a variable file that overrides a `true` default with an
+expression nobody evaluated would read back as `true`, and an attribute depending on it would
+resolve to the value the operator overrode. Which way that lands is decided by the default:
+one direction hides a real misconfiguration, the other invents one. An assignment that Terraform
+itself rejects is different, and is left out, because it has no value at any level.
+
 A `*.tfvars` file Terraform loads only when it is named with `-var-file` is not applied
 silently. Each such file is evaluated as its own scenario: the WHOLE workspace is resolved
 again under it, so the scenario's bindings travel down every module edge, and the findings

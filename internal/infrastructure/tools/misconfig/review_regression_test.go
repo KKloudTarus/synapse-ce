@@ -928,7 +928,7 @@ resource "aws_ebs_volume" "v" {
 	})
 
 	t.Run("variable file", func(t *testing.T) {
-		got := ruleIDs(scan(t, map[string]string{
+		_, unresolved := scanReport(t, map[string]string{
 			"main.tf": `variable "pad" {
   default = "off"
 }
@@ -939,9 +939,15 @@ resource "aws_ebs_volume" "v" {
 }
 `,
 			"terraform.tfvars": "pad = " + loop + "\n",
-		}))
-		if _, ok := got["terraform-encryption-disabled"]; !ok {
-			t.Fatalf("a refused variable file leaves the declared default in force, got %v", keys(got))
+		})
+		var reported bool
+		for _, u := range unresolved {
+			if strings.Contains(u, "encrypted") {
+				reported = true
+			}
+		}
+		if !reported {
+			t.Fatalf("a refused override must leave the attribute unresolved, got %v", unresolved)
 		}
 	})
 
@@ -967,4 +973,117 @@ data "aws_iam_policy_document" "d" {
 			}
 		}
 	})
+}
+
+// A refused assignment is still an assignment. Dropping the name let the module default take its place,
+// and the attribute reading it resolved to the value the operator had overridden. Terraform 1.17.1's
+// providerless console returns the override for both expressions below, so the default is wrong in each
+// direction: with a true default the real false silently passes, and with a false default a finding is
+// invented. The scanner may refuse to evaluate the comprehension; it may not answer with the default.
+func TestRefusedOverrideDoesNotRestoreTheDefault(t *testing.T) {
+	volume := `resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.enc
+}
+`
+	declare := func(def bool) string {
+		return fmt.Sprintf("variable \"enc\" {\n  type    = bool\n  default = %t\n}\n", def)
+	}
+	for _, tc := range []struct {
+		name     string
+		def      bool
+		override string
+		refused  bool
+		want     bool // want the encryption-disabled finding
+	}{
+		{name: "refused override of a true default", def: true, override: "[for x in [false] : x][0]", refused: true},
+		{name: "refused override of a false default", def: false, override: "[for x in [true] : x][0]", refused: true},
+		{name: "literal false override", def: true, override: "false", want: true},
+		{name: "literal true override", def: false, override: "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings, unresolved := scanReport(t, map[string]string{
+				"main.tf":          declare(tc.def) + volume,
+				"terraform.tfvars": "enc = " + tc.override + "\n",
+			})
+			var got bool
+			for _, id := range findings {
+				if id == "terraform-encryption-disabled" {
+					got = true
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("finding = %v, want %v (findings %v)", got, tc.want, findings)
+			}
+			var reported bool
+			for _, u := range unresolved {
+				if strings.Contains(u, "encrypted") {
+					reported = true
+				}
+			}
+			if reported != tc.refused {
+				t.Fatalf("unresolved for encrypted = %v, want %v (%v)", reported, tc.refused, unresolved)
+			}
+		})
+	}
+}
+
+// A module call binds its child's variables, so a refused input must not fall through to the child's own
+// default any more than a refused tfvars assignment falls through to the module default.
+func TestRefusedModuleInputDoesNotRestoreTheChildDefault(t *testing.T) {
+	for _, def := range []bool{true, false} {
+		t.Run(fmt.Sprintf("child default %t", def), func(t *testing.T) {
+			_, unresolved := scanReport(t, map[string]string{
+				"main.tf": `module "child" {
+  source = "./child"
+  enc    = [for x in [` + fmt.Sprintf("%t", !def) + `] : x][0]
+}
+`,
+				"child/main.tf": fmt.Sprintf("variable \"enc\" {\n  type    = bool\n  default = %t\n}\n", def) + `resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.enc
+}
+`,
+			})
+			var reported bool
+			for _, u := range unresolved {
+				if strings.Contains(u, "encrypted") {
+					reported = true
+				}
+			}
+			if !reported {
+				t.Fatalf("a refused module input must leave the attribute unresolved, got %v", unresolved)
+			}
+		})
+	}
+}
+
+// Automatically loaded variable files apply in order, each overriding the previous. A refusal in the LAST
+// one has to overwrite the earlier known value, or precedence runs backwards.
+func TestRefusalInALaterVariableFileOverridesAnEarlierValue(t *testing.T) {
+	_, unresolved := scanReport(t, map[string]string{
+		"main.tf": `variable "enc" {
+  type    = bool
+  default = true
+}
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.enc
+}
+`,
+		"terraform.tfvars": "enc = true\n",
+		"z.auto.tfvars":    "enc = [for x in [false] : x][0]\n",
+	})
+	var reported bool
+	for _, u := range unresolved {
+		if strings.Contains(u, "encrypted") {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("the later file's refusal must overwrite the earlier value, got %v", unresolved)
+	}
 }

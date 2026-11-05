@@ -568,9 +568,8 @@ func (m *tfModule) collectDeclarations() {
 			case blk.Type == "variable" && len(blk.Labels) == 1:
 				m.declaredVars[blk.Labels[0]] = true
 				if attr, ok := blk.Body.Attributes["default"]; ok {
-					if v, d := tfEval(attr.Expr, empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
-						m.defaults[blk.Labels[0]] = v
-					}
+					v, d := tfEval(attr.Expr, empty)
+					tfBindOrUnknown(m.defaults, blk.Labels[0], v, d)
 				}
 			case blk.Type == "locals":
 				for _, attr := range blk.Body.Attributes {
@@ -600,9 +599,8 @@ func (m *tfModule) collectJSONDeclarations(src *tfSource) {
 		m.declaredVars[blk.Labels[0]] = true
 		attrs, _ := blk.Body.JustAttributes()
 		if attr, ok := attrs["default"]; ok {
-			if v, d := tfEval(attr.Expr, empty); !d.HasErrors() && v.IsWhollyKnown() && tfValueWithinBudget(v, tfMaxValueBytes) {
-				m.defaults[blk.Labels[0]] = v
-			}
+			v, d := tfEval(attr.Expr, empty)
+			tfBindOrUnknown(m.defaults, blk.Labels[0], v, d)
 		}
 	}
 }
@@ -620,6 +618,27 @@ var tfRootSchema = &hcl.BodySchema{
 		{Type: "locals"},
 		{Type: "terraform"},
 	},
+}
+
+// tfBindOrUnknown records name at the precedence level being read, even when its value is not usable.
+//
+// A refused or oversized assignment is still an assignment. Dropping the name lets a LOWER-precedence
+// value take its place, the module's own default or, for a module call, the child's default, and the
+// attribute reading it then resolves to a value the operator overrode. That converts "this scanner did
+// not resolve the override" into a confident verdict, in whichever direction the default happens to
+// point: the refused override that is really false silently passes, and the one that is really true
+// reports a finding the configuration does not have.
+//
+// An expression that FAILED rather than being refused is left out. That is a configuration Terraform
+// itself rejects, and it has no value at any precedence.
+func tfBindOrUnknown(into map[string]cty.Value, name string, v cty.Value, d hcl.Diagnostics) {
+	if d.HasErrors() {
+		return
+	}
+	if !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
+		v = cty.DynamicVal
+	}
+	into[name] = v
 }
 
 // resolveVars applies Terraform's precedence: a parent module call's input beats an automatically loaded
@@ -772,10 +791,7 @@ func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inpu
 			continue
 		}
 		v, d := tfEval(attr.Expr, ctx)
-		if d.HasErrors() || !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
-			continue
-		}
-		inputs[name] = v
+		tfBindOrUnknown(inputs, name, v, d)
 	}
 	return child, inputs, true
 }
@@ -1149,9 +1165,8 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 		attrs, _ := src.file.Body.JustAttributes()
 		empty := tfEvalContextFor(nil, nil)
 		for name, attr := range attrs {
-			if v, d := tfEval(attr.Expr, empty); !d.HasErrors() && v.IsWhollyKnown() {
-				vals[name] = v
-			}
+			v, d := tfEval(attr.Expr, empty)
+			tfBindOrUnknown(vals, name, v, d)
 		}
 		dir := path.Dir(f.rel)
 		m := moduleFor(dir)
