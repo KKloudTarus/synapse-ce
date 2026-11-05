@@ -106,8 +106,10 @@ An unknown attribute keeps its source text, so a rule can match only what was li
 written. Unknown values are never guessed, so evaluation can turn a missed finding into a
 reported one and can never invent one from a value Terraform would not produce.
 
-Each unresolved attribute is reported on the scan report as `file:line: attribute`. Treat
-those lines as not evaluated, not as evaluated and clean.
+Each unresolved attribute is reported on the scan report as `file:line: attribute`, including
+attributes unresolved only in a manually selected variable-file scenario. Identical entries
+across the base configuration and scenarios are reported once. Treat those lines as not
+evaluated, not as evaluated and clean.
 
 A file that does not parse is scanned as plain text with the literal rules, exactly as
 before HCL parsing was introduced. A syntax error degrades detection; it never removes it.

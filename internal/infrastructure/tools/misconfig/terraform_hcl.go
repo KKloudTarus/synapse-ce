@@ -3,6 +3,7 @@ package misconfig
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -138,7 +139,7 @@ func projectedResultSize(name string, args []cty.Value) int {
 			args[0].Type() == cty.String && args[1].Type() == cty.String {
 			input := args[1].AsString()
 			sep := args[0].AsString()
-			elements := 1
+			var elements int
 			if sep == "" {
 				elements = len(input)
 			} else {
@@ -254,14 +255,14 @@ func tfBoundedExpr(expr hcl.Expression, depth int) bool {
 // tfBoundedSyntax refuses the native constructs whose cost is set at runtime rather than by the source.
 func tfBoundedSyntax(node hclsyntax.Expression) bool {
 	bounded := true
-	hclsyntax.VisitAll(node, func(n hclsyntax.Node) hcl.Diagnostics {
+	diags := hclsyntax.VisitAll(node, func(n hclsyntax.Node) hcl.Diagnostics {
 		switch n.(type) {
 		case *hclsyntax.ForExpr, *hclsyntax.TemplateJoinExpr:
 			bounded = false
 		}
 		return nil
 	})
-	return bounded
+	return bounded && !diags.HasErrors()
 }
 
 // tfValueWithinBudget reports whether v fits in budget bytes, walking only until the budget is exceeded so
@@ -1257,7 +1258,7 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 		sort.Slice(m.sources, func(i, j int) bool { return m.sources[i].rel < m.sources[j].rel })
 	}
 	// scanPass scans every module under the configuration already resolved into each module's context.
-	scanPass := func(record bool) {
+	scanPass := func() {
 		for _, dir := range dirs {
 			m := ws.modules[dir]
 			var facts tfBucketFacts
@@ -1269,14 +1270,10 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 				spans.add(site.file, site.line, site.endLine)
 				batch = append(batch, site.assess()...)
 			}
-			if record {
-				unresolved = append(unresolved, policyUnresolved...)
-			}
+			unresolved = append(unresolved, policyUnresolved...)
 			for _, src := range m.sources {
 				text, un := lowerTFSource(src, m.ctx)
-				if record {
-					unresolved = append(unresolved, un...)
-				}
+				unresolved = append(unresolved, un...)
 				batch = append(batch, scanTerraformText(src.rel, text, &facts, spans)...)
 			}
 			for _, f := range facts.apply(batch) {
@@ -1289,7 +1286,7 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 			}
 		}
 	}
-	scanPass(true)
+	scanPass()
 	// Every manually selected variable file is a configuration an operator applies, so each is resolved as
 	// its own whole-workspace pass and the findings are unioned. The bound is on the workspace.
 	budget := tfMaxScenarios
@@ -1305,7 +1302,7 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 			}
 			budget--
 			ws.resolveAll(map[string]map[string]cty.Value{dir: sc.vars})
-			scanPass(false)
+			scanPass()
 		}
 	}
 	if budget < tfMaxScenarios {
@@ -1315,5 +1312,6 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 		var facts tfBucketFacts
 		out = append(out, facts.apply(scanTerraformText(f.rel, string(f.data), &facts, nil))...)
 	}
-	return out, unresolved, skipped
+	sort.Strings(unresolved)
+	return out, slices.Compact(unresolved), skipped
 }

@@ -1087,3 +1087,97 @@ resource "aws_ebs_volume" "v" {
 		t.Fatalf("the later file's refusal must overwrite the earlier value, got %v", unresolved)
 	}
 }
+
+func TestManualScenariosReportUnresolvedAttributes(t *testing.T) {
+	for _, child := range []bool{false, true} {
+		t.Run(fmt.Sprintf("child module %t", child), func(t *testing.T) {
+			main := `variable "enc" {
+  default = true
+}
+`
+			volume := `resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.enc
+}
+`
+			files := map[string]string{
+				"prod.tfvars": "enc = [for x in [false] : x][0]\n",
+			}
+			file := "main.tf"
+			if child {
+				files["main.tf"] = main + `module "child" {
+  source = "./child"
+  enc    = var.enc
+}
+`
+				file = "child/main.tf"
+				files[file] = main + volume
+			} else {
+				files[file] = main + volume
+			}
+			findings, unresolved, unassessed, _ := scanReportFull(t, files)
+			if !hasUnresolved(unresolved, file, "encrypted") {
+				t.Fatalf("manual scenario uncertainty must be reported, got %v", unresolved)
+			}
+			if unassessed != 0 {
+				t.Fatalf("an unresolved attribute is a warning, not a coverage gap: %d", unassessed)
+			}
+			for _, id := range findings {
+				if id == "terraform-encryption-disabled" {
+					t.Fatalf("an unresolved scenario must not invent an encryption verdict: %v", findings)
+				}
+			}
+			files["prod.tfvars"] = "enc = false\n"
+			literal, _ := scanReport(t, files)
+			var disabled bool
+			for _, id := range literal {
+				disabled = disabled || id == "terraform-encryption-disabled"
+			}
+			if !disabled {
+				t.Fatalf("a literal unsafe scenario must still report disabled encryption: %v", literal)
+			}
+		})
+	}
+}
+
+func TestManualScenariosDeduplicateUnresolvedAttributes(t *testing.T) {
+	_, unresolved := scanReport(t, map[string]string{
+		"main.tf": `variable "enc" {}
+variable "selected" { default = false }
+resource "aws_ebs_volume" "v" {
+  availability_zone = "us-east-1a"
+  size              = 1
+  encrypted         = var.enc
+}
+`,
+		"a.tfvars": "selected = true\n",
+		"b.tfvars": "selected = false\n",
+	})
+	if len(unresolved) != 1 || !hasUnresolved(unresolved, "main.tf", "encrypted") {
+		t.Fatalf("the same unresolved attribute across configurations must appear once: %v", unresolved)
+	}
+}
+
+func TestManualScenarioReportsUnreadablePolicy(t *testing.T) {
+	_, unresolved := scanReport(t, map[string]string{
+		"main.tf": `variable "selected" { default = false }
+resource "aws_s3_bucket_policy" "b" {
+  bucket = "private"
+  policy = var.selected ? "{}" : jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::123456789012:role/app" }
+      Action    = "s3:GetObject"
+      Resource  = "arn:aws:s3:::private/*"
+    }]
+  })
+}
+`,
+		"prod.tfvars": "selected = true\n",
+	})
+	if len(unresolved) != 1 || !strings.Contains(unresolved[0], ": policy") {
+		t.Fatalf("a policy unreadable only in a manual scenario must be reported: %v", unresolved)
+	}
+}
