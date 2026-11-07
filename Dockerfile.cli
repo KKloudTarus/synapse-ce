@@ -17,7 +17,7 @@
 # need a Linux host with bubblewrap and a JDK/Maven/Gradle, which a distroless image does not provide (that is
 # deploy/Dockerfile's `full` target).
 
-FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 ARG TARGETOS
 ARG TARGETARCH
 # VERSION is the release tag, embedded so `synapse-cli version` and every report's tool_versions match the
@@ -31,7 +31,15 @@ RUN CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
     -ldflags "-s -w -X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version=${VERSION}" \
     -o /out/synapse-cli ./cmd/synapse-cli
 
-FROM anchore/grype:v0.115.0 AS grype
+# grype/syft are rebuilt from their release tags with a patched golang.org/x/net: the published
+# anchore images still ship x/net v0.61.0 (CVE-2026-78661) and grype pins brotli v1.2.0
+# (GO-2026-6888), which fail the CI image scan.
+FROM golang:1.27.3-alpine AS grype
+RUN apk add --no-cache git
+ARG GRYPE_VERSION=v0.121.2
+RUN git clone -q --depth 1 -b "$GRYPE_VERSION" https://github.com/anchore/grype /src \
+    && cd /src && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
+    && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GRYPE_VERSION#v}" -o /grype ./cmd/grype
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY internal/infrastructure/report/assets/LiberationSans-LICENSE.txt /usr/share/licenses/synapse-ce/LiberationSans-LICENSE.txt

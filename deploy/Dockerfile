@@ -10,7 +10,7 @@
 # linux/amd64. Its Kubernetes workload must also permit unprivileged user namespaces
 # for bubblewrap; it does not require privileged mode, SYS_ADMIN, or added capabilities.
 
-FROM golang:1.27.0-alpine AS build
+FROM golang:1.27.3-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -42,7 +42,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "$SYNAPSE_LDFLAGS" -o /out/synapse
 
 # The tree-sitter helper is CGO-linked, so build it against Debian glibc for the
 # Debian production runtime rather than copying an Alpine/musl-linked executable.
-FROM golang:1.27.0-trixie AS ast-build
+FROM golang:1.27.3-trixie AS ast-build
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 COPY go.mod go.sum ./
@@ -51,8 +51,22 @@ COPY . .
 RUN CGO_ENABLED=1 go build -trimpath -o /out/synapse-ast ./cmd/synapse-ast
 
 # Pinned SCA tools are copied as standalone binaries.
-FROM anchore/syft:v1.45.1 AS syft
-FROM anchore/grype:v0.115.0 AS grype
+# grype/syft are rebuilt from their release tags with a patched golang.org/x/net: the published
+# anchore images still ship x/net v0.61.0 (CVE-2026-78661) and grype pins brotli v1.2.0
+# (GO-2026-6888), which fail the CI image scan.
+FROM golang:1.27.3-alpine AS grype
+RUN apk add --no-cache git
+ARG GRYPE_VERSION=v0.121.2
+RUN git clone -q --depth 1 -b "$GRYPE_VERSION" https://github.com/anchore/grype /src \
+    && cd /src && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
+    && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GRYPE_VERSION#v}" -o /grype ./cmd/grype
+
+FROM golang:1.27.3-alpine AS syft
+RUN apk add --no-cache git
+ARG SYFT_VERSION=v1.57.0
+RUN git clone -q --depth 1 -b "$SYFT_VERSION" https://github.com/anchore/syft /src \
+    && cd /src && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
+    && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${SYFT_VERSION#v}" -o /syft ./cmd/syft
 
 # ---------------------------------------------------------------------------
 # target: full – batteries-included local-development SCA image.

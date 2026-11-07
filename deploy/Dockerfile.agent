@@ -16,7 +16,7 @@
 # compile time, so enabling runtime detection needs kernel capabilities from the pod spec rather than
 # anything added here.
 
-FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 ARG TARGETOS
 ARG TARGETARCH
 # VERSION is the release tag, embedded so the agent reports the release it is actually running in its
