@@ -15,7 +15,10 @@
 # natively once and only the nginx layer differs per architecture, which is what Dockerfile.cli does for Go.
 FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+# npm (not corepack) installs pnpm: it honors HTTP(S)_PROXY and NPM_CONFIG_REGISTRY (a mirror) on CI
+# networks where corepack's own fetch cannot reach registry.npmjs.org. pnpm reads the same settings.
+ARG NPM_CONFIG_REGISTRY
+RUN npm install -g pnpm@11.9.0
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --config.trustLockfile=true
 COPY web/ .
@@ -48,7 +51,11 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD wget -qO- http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1
 CMD ["pnpm", "dev", "--host", "0.0.0.0", "--port", "5173"]
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS production
+FROM nginxinc/nginx-unprivileged:1.30-alpine AS production
+# Pick up Alpine security fixes released after the base image was built; the base runs as nginx (101).
+USER root
+RUN apk upgrade --no-cache
+USER 101
 COPY --from=build /app/dist /usr/share/nginx/html
 # The base image ships nginx's sample default.conf, which serves a path only when it is a real file.
 # The dashboard is a single-page app, so without this every deep link answered nginx's own 404 on
@@ -62,5 +69,6 @@ EXPOSE 8080
 # provides in production. The SPA calls same-origin /api/... paths, so without this the dashboard
 # loads and every request 404s.
 FROM production AS compose
+USER 101
 COPY deploy/nginx/compose-dashboard.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080
