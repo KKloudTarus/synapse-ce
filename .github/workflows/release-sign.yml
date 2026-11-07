@@ -52,14 +52,16 @@ jobs:
       - name: Install syft (pinned, matches deploy/Dockerfile)
         run: |
           set -euo pipefail
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.45.1
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.57.0
           syft version
 
       - name: Resolve the tag
         id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          tag="${RELEASE_TAG}"
           test -n "${tag}"
           source_revision="$(git rev-parse HEAD)"
           tag_revision="$(git rev-list -n 1 "${tag}^{commit}")"

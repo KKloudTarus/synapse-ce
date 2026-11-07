@@ -49,8 +49,8 @@ jobs:
       - name: Install syft + grype (pinned, matches deploy/Dockerfile)
         run: |
           set -euo pipefail
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.45.1
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v0.115.0
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.57.0
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v0.121.2
           syft version && grype version
 
       - name: Build the scanner (fail if it cannot be built)
@@ -63,9 +63,10 @@ jobs:
       - name: Download release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          tag="${RELEASE_TAG}"
           test -n "${tag}"
           mkdir -p ./release-artifacts
           gh release download "${tag}" --dir ./release-artifacts
@@ -109,9 +110,10 @@ jobs:
       - name: Download + extract the Linux tarball, smoke-scan the packaged binary
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          tag="${RELEASE_TAG}"
           test -n "${tag}"
           mkdir -p ./tarball ./tarball/extract
           # goreleaser name_template is synapse_<ver>_Linux_<arch>.tar.gz; glob the arch string so this
