@@ -52,14 +52,16 @@ jobs:
       - name: Install syft (pinned, matches deploy/Dockerfile)
         run: |
           set -euo pipefail
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.45.1
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.57.0
           syft version
 
       - name: Resolve the tag
         id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          tag="${RELEASE_TAG}"
           test -n "${tag}"
           source_revision="$(git rev-parse HEAD)"
           tag_revision="$(git rev-list -n 1 "${tag}^{commit}")"
@@ -122,10 +124,11 @@ jobs:
       - name: Download the release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p ./artifacts
-          gh release download "${{ steps.tag.outputs.tag }}" --dir ./artifacts
+          gh release download "${RELEASE_TAG}" --dir ./artifacts
           # A retry downloads evidence produced by the previous attempt. Rebuild owned derived
           # files from the primary goreleaser assets so no stale signature/SBOM can enter the new
           # evidence manifest or make SHA256SUMS self-referential.
@@ -210,13 +213,16 @@ jobs:
           gpg --batch --verify SHA256SUMS.sig SHA256SUMS
 
       - name: Bind the complete asset set to this release revision
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          SOURCE_REVISION: ${{ steps.tag.outputs.source_revision }}
         run: |
           set -euo pipefail
           ./dist/synapse-release-evidence generate \
             --dir ./artifacts \
             --repository "${GITHUB_REPOSITORY}" \
-            --revision "${{ steps.tag.outputs.source_revision }}" \
-            --release "${{ steps.tag.outputs.tag }}"
+            --revision "${SOURCE_REVISION}" \
+            --release "${RELEASE_TAG}"
           gpg --batch --yes --pinentry-mode loopback --passphrase "${{ secrets.SYNAPSE_GPG_PASSPHRASE }}" \
             --local-user "${{ secrets.SYNAPSE_GPG_KEY_ID }}" --detach-sign \
             --output ./artifacts/release-evidence.json.sig ./artifacts/release-evidence.json
@@ -224,8 +230,8 @@ jobs:
           ./dist/synapse-release-evidence verify \
             --dir ./artifacts \
             --repository "${GITHUB_REPOSITORY}" \
-            --revision "${{ steps.tag.outputs.source_revision }}" \
-            --release "${{ steps.tag.outputs.tag }}"
+            --revision "${SOURCE_REVISION}" \
+            --release "${RELEASE_TAG}"
 
       # The gate that the negative workflow proves fails on an unsigned artifact. Running it here is the
       # point: the release cannot be published unless it passes.
@@ -240,14 +246,15 @@ jobs:
       - name: Upload the signatures, SBOMs, checksums and evidence manifest to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           # SHA256SUMS.sig is already matched by ./artifacts/*.sig; listing it again uploaded the same
           # asset twice in one invocation, and --clobber only replaces PRE-existing assets (not a
           # same-command duplicate), so the second upload 422'd "already exists". Let the *.sig glob
           # cover it; only SHA256SUMS (no extension) needs an explicit entry.
-          gh release upload "${{ steps.tag.outputs.tag }}" \
+          gh release upload "${RELEASE_TAG}" \
             ./artifacts/*.sig ./artifacts/*.sbom.json ./artifacts/SHA256SUMS \
             ./artifacts/release-evidence.json \
             --clobber
-          echo "release ${{ steps.tag.outputs.tag }} is signed and attested"
+          echo "release ${RELEASE_TAG} is signed and attested"

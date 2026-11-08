@@ -15,7 +15,10 @@
 # natively once and only the nginx layer differs per architecture, which is what Dockerfile.cli does for Go.
 FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+# npm (not corepack) installs pnpm: it honors HTTP(S)_PROXY and NPM_CONFIG_REGISTRY (a mirror) on CI
+# networks where corepack's own fetch cannot reach registry.npmjs.org. pnpm reads the same settings.
+ARG NPM_CONFIG_REGISTRY
+RUN npm install -g pnpm@11.9.0
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --config.trustLockfile=true
 COPY web/ .
@@ -48,7 +51,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD wget -qO- http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1
 CMD ["pnpm", "dev", "--host", "0.0.0.0", "--port", "5173"]
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS production
+# Built for linux/amd64 AND linux/arm64 by a job that installs no QEMU, so this stage carries no RUN:
+# a package upgrade runs on the TARGET platform and cannot be cross-compiled away. The base image tag
+# is the patch mechanism here; bump it to pick up Alpine fixes.
+FROM nginxinc/nginx-unprivileged:1.30-alpine AS production
 COPY --from=build /app/dist /usr/share/nginx/html
 # The base image ships nginx's sample default.conf, which serves a path only when it is a real file.
 # The dashboard is a single-page app, so without this every deep link answered nginx's own 404 on

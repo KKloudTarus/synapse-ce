@@ -12,3 +12,8 @@ packages:
 allowBuilds:
   esbuild: true
   msw: true
+
+# zod <4.6.6 can exhaust memory validating oversized constrained collections (CVE-2023-54404);
+# it arrives transitively through eslint-plugin-react-hooks.
+overrides:
+  zod: ">=4.6.6 <5"
