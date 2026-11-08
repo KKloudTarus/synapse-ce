@@ -1925,6 +1925,91 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/dast/proposals:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    post:
+      tags: [engagements, findings]
+      operationId: proposeAuthenticatedDASTScan
+      summary: Propose an authenticated DAST scan for human approval
+      description: >
+        Requires operate permission and an available scan workflow with operator-configured helper
+        policy. The intrusive proposal requires a genuine human decision via the existing approval
+        route; proposing it does not execute a scan. Supply vault references, never secret values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DASTScanRequest"}
+      responses:
+        "202":
+          description: Proposal and approval decision
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DASTScanProposal"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/engagements/{id}/dast/proposals/{aid}/run:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    - name: aid
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [engagements, findings]
+      operationId: runAuthenticatedDASTScan
+      summary: Queue an approved authenticated DAST scan
+      description: >
+        Requires operate permission, configured scan policy and durable queue. Submit the same
+        configuration bound to the proposal; the worker validates the binding and human approval
+        before execution. Acceptance only means the run was queued, not that it completed or was
+        approved. Poll the scan run route for its outcome.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DASTScanRequest"}
+      responses:
+        "202":
+          description: Durable scan run queued; no result is available yet
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DASTScanRun"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/engagements/{id}/dast/scans/runs/{rid}:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    - name: rid
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [engagements, findings]
+      operationId: getAuthenticatedDASTScanRun
+      summary: Get a durable authenticated DAST scan run
+      description: >
+        Requires view permission and a matching tenant and engagement. The result is read from
+        sealed evidence and its hash chain is verified. A queued or running run has no result;
+        failure before a real result has an error code and no fabricated result. An incomplete
+        result is not a clean scan and retains any proofs.
+      responses:
+        "200":
+          description: Authenticated scan run and, when available, its sealed result
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DASTScanRun"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/dast/runs/{rid}:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -11399,11 +11484,189 @@ components:
         items: {type: array, items: {$ref: '#/components/schemas/VulnerabilityReconcileDiff'}}
         next: {$ref: '#/components/schemas/VulnerabilityReconcileDiffCursor'}
 
-    DASTRun:
+    DASTScanRequest:
       type: object
-      required: [id, engagement_id, action_id, actor, status, started_at]
+      additionalProperties: false
+      required: [target, session]
+      description: >
+        Secret-free HTTP request shape, not the internal canonical queue configuration.
+        Unknown fields and secret placeholders are rejected. Zero limits use operator defaults;
+        supplied limits must not exceed operator ceilings.
+      properties:
+        target: {type: string, description: Absolute HTTP(S) target URL}
+        session:
+          type: object
+          additionalProperties: false
+          required: [scheme, credentials, login_request, success, check_request]
+          properties:
+            scheme: {type: string, enum: [form, basic, bearer, header, cookie]}
+            credentials:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [name, reference]
+                properties:
+                  name: {type: string}
+                  reference: {type: string, description: Engagement credential vault reference, never a secret value}
+                  field: {type: string, description: Optional vault field name}
+            login_request: {$ref: "#/components/schemas/DASTSessionRequest"}
+            success:
+              type: object
+              additionalProperties: false
+              description: At least one success signal is required.
+              properties:
+                status_code: {type: integer, minimum: 0, maximum: 999}
+                body_contains: {type: string}
+                header_present: {type: string}
+                cookie_present: {type: string}
+            check_request: {$ref: "#/components/schemas/DASTSessionRequest"}
+            deny_paths: {type: array, items: {type: string}}
+            max_reauth: {type: integer, minimum: 0}
+        crawler:
+          type: object
+          additionalProperties: false
+          properties:
+            seeds: {type: array, items: {$ref: "#/components/schemas/DASTSurfaceRequest"}}
+            robots: {type: string}
+            sitemaps: {type: array, items: {type: string}}
+            openapi: {type: array, items: {type: string}}
+            graphql: {type: array, items: {type: string}}
+            rate_per_sec: {type: integer, minimum: 0}
+            concurrency: {type: integer, minimum: 0}
+            max_depth: {type: integer, minimum: 0}
+            max_pages: {type: integer, minimum: 0}
+            max_requests: {type: integer, minimum: 0}
+            wall_clock: {type: string, description: Go duration such as 30s; empty selects the default}
+        selected_check_ids: {type: array, items: {type: string}}
+
+    DASTSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [method, path]
+      properties:
+        method: {type: string}
+        path: {type: string, description: Absolute clean URL path}
+
+    DASTSurfaceRequest:
+      type: object
+      properties:
+        Method: {type: string}
+        URL: {type: string}
+        ExecutionURL: {type: string}
+        Source: {type: string, enum: ["", seed, html, form, script, robots, sitemap, openapi, graphql]}
+
+    DASTScanProposal:
+      type: object
+      required: [action, decision]
+      properties:
+        action:
+          type: object
+          required: [ID, SessionID, EngagementID, Tool, Action, Target, Argv, EgressPreview, Risk, Rationale, ProposedAt]
+          properties:
+            ID: {type: string}
+            SessionID: {type: string}
+            EngagementID: {type: string}
+            Tool: {type: string}
+            Action: {type: string}
+            Target:
+              type: object
+              required: [Kind, Value]
+              properties:
+                Kind: {type: string}
+                Value: {type: string}
+            Argv: {type: array, items: {type: string}}
+            EgressPreview: {type: [array, "null"], items: {type: string}}
+            Risk: {type: string}
+            Rationale: {type: string}
+            ProposedAt: {type: string, format: date-time}
+        decision:
+          type: object
+          required: [ActionID, State, DecidedBy, Reason, DecidedAt]
+          properties:
+            ActionID: {type: string}
+            State: {type: string, enum: [pending, approved, denied, timeout, consumed]}
+            DecidedBy: {type: string}
+            Reason: {type: string}
+            DecidedAt: {type: string, format: date-time}
+
+    DASTScanRun:
+      type: object
+      required: [id, kind, engagement_id, action_id, actor, status, started_at]
       properties:
         id: {type: string}
+        kind: {type: string, enum: [authenticated_scan]}
+        engagement_id: {type: string}
+        action_id: {type: string}
+        actor: {type: string}
+        status: {type: string, enum: [queued, running, succeeded, incomplete, failed]}
+        evidence_id: {type: string, description: Sealed scan result evidence identifier}
+        error_code: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: [string, "null"], format: date-time}
+        result:
+          description: Present only when a real sealed result is available; incomplete is not a clean result.
+          anyOf:
+          - $ref: "#/components/schemas/DASTScanResult"
+          - type: "null"
+
+    DASTScanResult:
+      type: object
+      required: [config_sha256, surface, coverage, incomplete, proofs]
+      properties:
+        config_sha256: {type: string}
+        surface:
+          type: object
+          required: [Requests]
+          properties:
+            Requests: {type: [array, "null"], items: {$ref: "#/components/schemas/DASTSurfaceRequest"}}
+        coverage:
+          type: object
+          required: [Entries]
+          properties:
+            Entries:
+              type: [array, "null"]
+              items:
+                type: object
+                required: [Request, Status, Reason, Source]
+                properties:
+                  Request: {$ref: "#/components/schemas/DASTSurfaceRequest"}
+                  Status: {type: string, enum: [requested, skipped, out_of_scope, limited]}
+                  Reason: {type: string}
+                  Source: {type: string}
+        incomplete: {type: boolean}
+        reason: {type: string}
+        proofs:
+          type: [array, "null"]
+          items: {$ref: "#/components/schemas/DASTScanProof"}
+
+    DASTScanProof:
+      type: object
+      required: [check_id, version, normalized_endpoint, observation, hash]
+      properties:
+        check_id: {type: string}
+        version: {type: integer}
+        normalized_endpoint: {type: string}
+        hash: {type: string}
+        observation:
+          type: object
+          required: [method, status, body_sha256]
+          properties:
+            method: {type: string}
+            status: {type: integer}
+            body_sha256: {type: string}
+            headers: {type: array, items: {type: string}}
+            headers_captured: {type: boolean}
+            signature: {type: string}
+            predicate_tokens: {type: array, items: {type: string}}
+
+    DASTRun:
+      type: object
+      required: [id, kind, engagement_id, action_id, actor, status, started_at]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [verifier]}
         engagement_id: {type: string}
         action_id: {type: string, description: The consumed DAST approval the probe bound to}
         actor: {type: string}

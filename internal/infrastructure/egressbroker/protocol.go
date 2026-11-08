@@ -107,7 +107,7 @@ func validateRequest(req request) error {
 		if strings.TrimSpace(req.ExecutionKind) == "" || len(req.ExecutionKind) > 64 {
 			return errors.New("setup request requires an execution kind")
 		}
-		if strings.TrimSpace(req.ExecutionID) == "" || len(req.ExecutionID) > 200 {
+		if strings.TrimSpace(req.ExecutionID) == "" || len(req.ExecutionID) > ports.MaxEgressExecutionIDLength {
 			return errors.New("setup request requires an execution id")
 		}
 		if strings.TrimSpace(req.Grant) == "" || len(req.Grant) > 16*1024 {

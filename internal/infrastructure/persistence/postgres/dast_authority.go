@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -35,9 +36,12 @@ func (s *DASTRunStore) GetDASTRunAuthorization(ctx context.Context, tenant, runI
 func (s *DASTRunStore) readDASTAuthority(ctx context.Context, tx pgx.Tx, tenant, runID shared.ID) (out ports.DASTRunAuthorization, err error) {
 	var status, evidenceID string
 	var issued *time.Time
-	err = tx.QueryRow(ctx, `SELECT id,tenant_id,engagement_id,action_id,actor,status,verdict,http_status,evidence_id,error_code,started_at,finished_at,egress_grant_issued_at FROM dast_runs WHERE tenant_id=$1 AND id=$2`, tenant.String(), runID.String()).Scan(&out.Run.ID, &out.Run.TenantID, &out.Run.EngagementID, &out.Run.ActionID, &out.Run.Actor, &status, &out.Run.Verdict, &out.Run.HTTPStatus, &evidenceID, &out.Run.ErrorCode, &out.Run.StartedAt, &out.Run.FinishedAt, &issued)
+	err = tx.QueryRow(ctx, `SELECT id,tenant_id,engagement_id,action_id,actor,status,verdict,http_status,evidence_id,error_code,started_at,finished_at,egress_grant_issued_at,kind FROM dast_runs WHERE tenant_id=$1 AND id=$2`, tenant.String(), runID.String()).Scan(&out.Run.ID, &out.Run.TenantID, &out.Run.EngagementID, &out.Run.ActionID, &out.Run.Actor, &status, &out.Run.Verdict, &out.Run.HTTPStatus, &evidenceID, &out.Run.ErrorCode, &out.Run.StartedAt, &out.Run.FinishedAt, &issued, &out.Run.Kind)
 	if err != nil {
 		return out, dastAuthorityError(err, "run")
+	}
+	if out.Run.Kind != dastrun.KindVerifier {
+		return out, fmt.Errorf("%w: not a verifier run", shared.ErrForbidden)
 	}
 	out.Run.Status = dastrun.RunStatus(status)
 	out.Run.EvidenceID = shared.ID(evidenceID)
@@ -174,4 +178,103 @@ func (s *DASTRunStore) ClaimDASTRunGrant(ctx context.Context, expected ports.DAS
 		return fmt.Errorf("claim DAST grant: %w", err)
 	}
 	return nil
+}
+
+var _ ports.DASTScanRunStore = (*DASTRunStore)(nil)
+var _ ports.DASTScanAuthority = (*DASTRunStore)(nil)
+
+func (s *DASTRunStore) readDASTScanAuthority(ctx context.Context, tx pgx.Tx, e ports.DASTScanExecution, run dastrun.Run, job ports.DASTScanJob) (out ports.DASTScanAuthorization, err error) {
+	out.Run, out.Job, out.Execution = run, job, e
+	var issued *time.Time
+	if err = tx.QueryRow(ctx, `SELECT egress_grant_issued_at FROM dast_runs WHERE tenant_id=$1 AND id=$2`, e.TenantID.String(), e.RunID.String()).Scan(&issued); err != nil {
+		return out, dastAuthorityError(err, "run")
+	}
+	out.GrantIssued = issued != nil
+	bound := bindTenantTransaction(ctx, e.TenantID, tx)
+	out.Action, out.Decision, err = NewApprovalStore(s.pool).Get(bound, run.ActionID)
+	if err != nil {
+		return out, dastAuthorityError(err, "approval")
+	}
+	var owner *string
+	var argv, egress []byte
+	err = tx.QueryRow(ctx, `SELECT consumed_by_dast_run_id,argv,egress_preview FROM agent_approvals WHERE tenant_id=$1 AND action_id=$2`, e.TenantID.String(), run.ActionID.String()).Scan(&owner, &argv, &egress)
+	if err != nil {
+		return out, dastAuthorityError(err, "approval owner")
+	}
+	if json.Unmarshal(argv, &out.Action.Argv) != nil || json.Unmarshal(egress, &out.Action.EgressPreview) != nil {
+		return out, fmt.Errorf("%w: malformed approval", shared.ErrForbidden)
+	}
+	if owner != nil {
+		out.ConsumedBy = shared.ID(*owner)
+	}
+	out.Consumption, err = readDASTEvidence(ctx, tx, e.TenantID, run.EngagementID, ports.DASTConsumptionEvidenceID(e.RunID))
+	if err != nil {
+		return out, err
+	}
+	var consumed ports.DASTApprovalConsumption
+	if json.Unmarshal(out.Consumption.Content, &consumed) != nil || consumed.AdmissionID.IsZero() {
+		return out, fmt.Errorf("%w: malformed scan custody", shared.ErrForbidden)
+	}
+	out.Admission, err = readDASTEvidence(ctx, tx, e.TenantID, run.EngagementID, consumed.AdmissionID)
+	return out, err
+}
+
+func (s *DASTRunStore) GetDASTScanAuthorization(ctx context.Context, e ports.DASTScanExecution) (out ports.DASTScanAuthorization, err error) {
+	err = s.scanTransaction(ctx, e, true, func(c context.Context, tx pgx.Tx, run dastrun.Run, job ports.DASTScanJob) error {
+		out, err = s.readDASTScanAuthority(c, tx, e, run, job)
+		return err
+	})
+	if err != nil {
+		return ports.DASTScanAuthorization{}, err
+	}
+	return out, nil
+}
+
+func (s *DASTRunStore) ClaimDASTScanGrant(ctx context.Context, expected ports.DASTScanAuthorization, at time.Time, authorize func(context.Context) error) error {
+	if at.IsZero() || authorize == nil {
+		return fmt.Errorf("%w: grant time and authorization required", shared.ErrValidation)
+	}
+	e := expected.Execution
+	return s.scanTransaction(ctx, e, true, func(c context.Context, tx pgx.Tx, run dastrun.Run, job ports.DASTScanJob) error {
+		var locked string
+		for _, id := range []shared.ID{expected.Consumption.ID, expected.Admission.ID} {
+			if id.IsZero() {
+				return fmt.Errorf("%w: missing scan custody", shared.ErrForbidden)
+			}
+			if err := tx.QueryRow(c, `SELECT id FROM evidence WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3 FOR SHARE`, e.TenantID.String(), run.EngagementID.String(), id.String()).Scan(&locked); err != nil {
+				return dastAuthorityError(err, "custody")
+			}
+		}
+		actual, err := s.readDASTScanAuthority(c, tx, e, run, job)
+		if err != nil {
+			return err
+		}
+		if actual.GrantIssued || actual.ConsumedBy != e.RunID || actual.Decision.State != agent.ApprovalConsumed || !reflect.DeepEqual(actual, expected) {
+			return fmt.Errorf("%w: scan authority changed", shared.ErrForbidden)
+		}
+		if err = authorize(c); err != nil {
+			return err
+		}
+		if err = scanLeaseLive(c, tx, e); err != nil {
+			return err
+		}
+		after, err := s.readDASTScanAuthority(c, tx, e, run, job)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(after, actual) {
+			return fmt.Errorf("%w: scan authority changed during authorization", shared.ErrForbidden)
+		}
+		if err = scanLeaseLive(c, tx, e); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(c, `UPDATE dast_runs SET egress_grant_issued_at=$3 WHERE tenant_id=$1 AND id=$2 AND kind='authenticated_scan' AND status='running' AND egress_grant_issued_at IS NULL`, e.TenantID.String(), e.RunID.String(), at)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("%w: scan grant unavailable", shared.ErrForbidden)
+		}
+		return nil
+	})
 }

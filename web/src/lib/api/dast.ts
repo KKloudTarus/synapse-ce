@@ -4,8 +4,19 @@ import { req } from './client'
 // json tags (snake_case). Proposals have a lowercase envelope with PascalCase nested
 // action/decision fields; older envelopes and runner results use PascalCase.
 
+export interface DastSessionConfig {
+  scheme: 'form' | 'basic' | 'bearer' | 'header' | 'cookie'
+  credentials: { name: string; reference: string; field: string }[]
+  login_request: { method: string; path: string }
+  success: { status_code?: number; body_contains?: string; header_present?: string; cookie_present?: string }
+  check_request: { method: string; path: string }
+  deny_paths?: string[]
+  max_reauth?: number
+}
+
 export interface DastScanInput {
   target: string
+  session: DastSessionConfig
   ratePerSec?: number
   concurrency?: number
   maxDepth?: number
@@ -41,7 +52,7 @@ export interface DastDecision {
 
 export interface DastProof {
   checkId: string
-  version: string
+  version: number
   normalizedEndpoint: string
   hash: string
 }
@@ -53,6 +64,20 @@ export interface DastScanResult {
   requestCount: number
   coverageCount: number
   proofs: DastProof[]
+}
+
+export interface DastScanRun {
+  id: string
+  kind: 'authenticated_scan'
+  engagementId: string
+  actionId: string
+  actor: string
+  status: 'queued' | 'running' | 'succeeded' | 'incomplete' | 'failed'
+  evidenceId: string
+  errorCode: string
+  startedAt: string
+  finishedAt: string
+  result: DastScanResult | null
 }
 
 export interface DastRun {
@@ -128,26 +153,67 @@ function mapRun(raw: any): DastRun {
   }
 }
 
-function mapScanResult(raw: any): DastScanResult {
+function mapScanResult(data: Record<string, unknown>): DastScanResult {
+  const surface = data.surface as Record<string, unknown>
+  const coverage = data.coverage as Record<string, unknown>
+  const proofs = data.proofs == null ? [] : data.proofs
+  if (!Array.isArray(proofs) ||
+      (surface.Requests != null && !Array.isArray(surface.Requests)) ||
+      (coverage.Entries != null && !Array.isArray(coverage.Entries))) throw new Error('Invalid authenticated scan result')
   return {
-    digest: raw?.config_sha256 ?? '',
-    incomplete: Boolean(raw?.incomplete),
-    reason: raw?.reason ?? '',
-    requestCount: Array.isArray(raw?.surface?.Requests) ? raw.surface.Requests.length : 0,
-    coverageCount: Array.isArray(raw?.coverage?.Entries) ? raw.coverage.Entries.length : 0,
-    proofs: (Array.isArray(raw?.proofs) ? raw.proofs : []).map((p: any) => ({
-      checkId: p?.check_id ?? '',
-      version: p?.version ?? '',
-      normalizedEndpoint: p?.normalized_endpoint ?? '',
-      hash: p?.hash ?? '',
-    })),
+    digest: data.config_sha256 as string,
+    incomplete: data.incomplete as boolean,
+    reason: typeof data.reason === 'string' ? data.reason : '',
+    requestCount: Array.isArray(surface.Requests) ? surface.Requests.length : 0,
+    coverageCount: Array.isArray(coverage.Entries) ? coverage.Entries.length : 0,
+    proofs: proofs.map((value: unknown) => {
+      if (!value || typeof value !== 'object') throw new Error('Invalid authenticated scan proof')
+      const proof = value as Record<string, unknown>
+      if (typeof proof.check_id !== 'string' || typeof proof.version !== 'number' || !Number.isInteger(proof.version) ||
+          typeof proof.normalized_endpoint !== 'string' || typeof proof.hash !== 'string') throw new Error('Invalid authenticated scan proof')
+      return { checkId: proof.check_id, version: proof.version, normalizedEndpoint: proof.normalized_endpoint, hash: proof.hash }
+    }),
+  }
+}
+
+function mapScanRun(value: unknown): DastScanRun {
+  if (!value || typeof value !== 'object') throw new Error('Invalid authenticated scan run response')
+  const raw = value as Record<string, unknown>
+  const status = raw.status
+  if (raw.kind !== 'authenticated_scan' ||
+      (status !== 'queued' && status !== 'running' && status !== 'succeeded' && status !== 'incomplete' && status !== 'failed') ||
+      typeof raw.id !== 'string' || !raw.id || typeof raw.engagement_id !== 'string' || !raw.engagement_id ||
+      typeof raw.action_id !== 'string' || !raw.action_id || typeof raw.actor !== 'string') {
+    throw new Error('Invalid authenticated scan run response')
+  }
+  const terminalResult = status === 'succeeded' || status === 'incomplete'
+  const result = raw.result
+  let mappedResult: DastScanResult | null = null
+  if (terminalResult || (status === 'failed' && result != null)) {
+    if (!result || typeof result !== 'object') throw new Error('Invalid authenticated scan result')
+    const data = result as Record<string, unknown>
+    if (typeof data.config_sha256 !== 'string' || !data.config_sha256 ||
+        typeof data.incomplete !== 'boolean' || data.incomplete !== (status !== 'succeeded') ||
+        !data.surface || typeof data.surface !== 'object' || !data.coverage || typeof data.coverage !== 'object' ||
+        (data.proofs != null && !Array.isArray(data.proofs))) throw new Error('Invalid authenticated scan result')
+    mappedResult = mapScanResult(data)
+  } else if (status !== 'failed' && result != null) {
+    throw new Error('Invalid authenticated scan result')
+  }
+  return {
+    id: raw.id, kind: 'authenticated_scan', engagementId: raw.engagement_id, actionId: raw.action_id,
+    actor: raw.actor, status, evidenceId: typeof raw.evidence_id === 'string' ? raw.evidence_id : '',
+    errorCode: typeof raw.error_code === 'string' ? raw.error_code : '',
+    startedAt: typeof raw.started_at === 'string' ? raw.started_at : '',
+    finishedAt: typeof raw.finished_at === 'string' ? raw.finished_at : '',
+    result: mappedResult,
   }
 }
 
 function scanBody(input: DastScanInput) {
   return {
     target: input.target,
-    session: {},
+    session: input.session,
     crawler: {
       seeds: input.target ? [{ Method: 'GET', URL: input.target }] : [],
       rate_per_sec: input.ratePerSec ?? 2,
@@ -178,8 +244,11 @@ export const dastApi = {
   proposeDastScan: async (engagementId: string, input: DastScanInput): Promise<DastProposal> =>
     mapProposal(await req(`/engagements/${encodeURIComponent(engagementId)}/dast/proposals`, { method: 'POST', body: JSON.stringify(scanBody(input)) })),
 
-  runDastScan: async (engagementId: string, actionId: string, input: DastScanInput): Promise<DastScanResult> =>
-    mapScanResult(await req(`/engagements/${encodeURIComponent(engagementId)}/dast/proposals/${encodeURIComponent(actionId)}/run`, { method: 'POST', body: JSON.stringify(scanBody(input)) })),
+  runDastScan: async (engagementId: string, actionId: string, input: DastScanInput): Promise<DastScanRun> =>
+    mapScanRun(await req(`/engagements/${encodeURIComponent(engagementId)}/dast/proposals/${encodeURIComponent(actionId)}/run`, { method: 'POST', body: JSON.stringify(scanBody(input)) })),
+
+  getDastScanRun: async (engagementId: string, runId: string): Promise<DastScanRun> =>
+    mapScanRun(await req(`/engagements/${encodeURIComponent(engagementId)}/dast/scans/runs/${encodeURIComponent(runId)}`)),
 
   getDastRun: async (engagementId: string, runId: string): Promise<DastRun> =>
     mapRun(await req(`/engagements/${encodeURIComponent(engagementId)}/dast/runs/${encodeURIComponent(runId)}`)),

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 )
@@ -103,7 +104,7 @@ func (rt *Router) getDASTRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	if run.EngagementID != shared.ID(r.PathValue("id")) {
+	if run.Kind != dastrun.KindVerifier || run.EngagementID != shared.ID(r.PathValue("id")) {
 		writeError(w, rt.log, fmt.Errorf("%w: DAST run", shared.ErrNotFound))
 		return
 	}

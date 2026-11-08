@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const (
@@ -75,7 +77,7 @@ func (s *GrantSigner) Sign(req GrantRequest, now time.Time, lifetime time.Durati
 		return "", errors.New("egress grant execution kind is required")
 	}
 	req.ExecutionID = strings.TrimSpace(req.ExecutionID)
-	if req.ExecutionID == "" || len(req.ExecutionID) > 200 {
+	if req.ExecutionID == "" || len(req.ExecutionID) > ports.MaxEgressExecutionIDLength {
 		return "", errors.New("egress grant execution id is required")
 	}
 	if !runIDPattern.MatchString(req.RunID) {

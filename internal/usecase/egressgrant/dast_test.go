@@ -44,7 +44,7 @@ func newDASTFixture(t *testing.T) (*fixture, *dastAuthority) {
 	t.Helper()
 	f := newFixture(t)
 	p := dastprobe.Probe{JudgmentID: "judgment-1", URL: "https://app.example.com/fixture.json", ExpectedStatus: 200, ExpectedBodyContains: "synthetic fixture", ScoreIfConfirmed: 90, ScoreIfRefuted: 10, ExpectedVersion: 1, Rationale: "Confirm public static fixture response only"}
-	r := dastrun.Run{ID: "dast-run-1", TenantID: "tenant-test", EngagementID: "eng-1", ActionID: "action-1", Actor: "operator", Status: dastrun.RunRunning, StartedAt: f.now}
+	r := dastrun.Run{ID: "dast-run-1", Kind: dastrun.KindVerifier, TenantID: "tenant-test", EngagementID: "eng-1", ActionID: "action-1", Actor: "operator", Status: dastrun.RunRunning, StartedAt: f.now}
 	action := agent.ProposedAction{ID: r.ActionID, SessionID: "dast:judgment-1", EngagementID: r.EngagementID, Tool: dastprobe.ToolRunDASTVerifier, Action: dastprobe.ActionSafeHTTPProbe, Target: engagement.Target{Kind: engagement.TargetURL, Value: p.URL}, Argv: []string{"synapse-dast-probe", "--config-sha256=" + p.ApprovalDigest()}, Risk: agent.RiskIntrusive, ProposedAt: f.now}
 	decision := agent.ApprovalDecision{ActionID: r.ActionID, State: agent.ApprovalConsumed, DecidedBy: "reviewer"}
 	admBytes, _ := json.Marshal(map[string]any{"action_id": action.ID, "session_id": action.SessionID, "tool": action.Tool, "action": action.Action, "target": action.Target.Value, "argv": action.Argv, "risk": action.Risk, "decided_by": decision.DecidedBy})
@@ -78,6 +78,7 @@ func TestDASTGrantRequiresCommittedAuthorityAndIsSingleUse(t *testing.T) {
 
 func TestDASTGrantRejectsSubstitutionAndMissingCustody(t *testing.T) {
 	cases := map[string]func(*fixture, *dastAuthority){
+		"scan kind":                func(_ *fixture, a *dastAuthority) { a.auth.Run.Kind = dastrun.KindAuthenticatedScan },
 		"legacy owner":             func(_ *fixture, a *dastAuthority) { a.auth.ConsumedBy = "" },
 		"losing run":               func(_ *fixture, a *dastAuthority) { a.auth.ConsumedBy = "other-run" },
 		"job identity":             func(_ *fixture, a *dastAuthority) { a.auth.Job.RunID = "other-run" },

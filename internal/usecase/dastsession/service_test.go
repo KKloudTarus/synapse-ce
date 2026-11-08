@@ -2,6 +2,7 @@ package dastsession
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastcrawl"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -191,4 +193,49 @@ func TestExecuteRejectsOriginAndWindowChanges(t *testing.T) {
 			}
 		})
 	}
+}
+
+type failedSessionEngine struct{ err error }
+
+func (e failedSessionEngine) Run(context.Context, ports.DASTPlan, []string, func(context.Context, ports.DASTRequest) error) (ports.DASTOutcome, error) {
+	return ports.DASTOutcome{}, e.err
+}
+
+// sessionOwnerCallbacks exercises session evidence only; real ownership uses PostgreSQL.
+type sessionOwnerCallbacks struct{ ports.DASTScanRunStore }
+
+func (sessionOwnerCallbacks) WithDASTScanOwner(ctx context.Context, _ ports.DASTScanExecution, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func TestCrawlExecutionFailureCannotSealCleanSessionEvidence(t *testing.T) {
+	failure := errors.New("helper execution failed")
+	service, admitted, _, _ := sessionFixture(t, failedSessionEngine{err: failure})
+	action := admitted.Action()
+	ctx := context.Background()
+	_, err := service.CrawlWithRate(ctx, admitted, testHelperBin, testConfigDigest, validSession(),
+		dastcrawl.Input{Target: action.Target.Value},
+		dastcrawl.Limits{Depth: 1, Pages: 1, Requests: 2, WallClock: time.Second}, 1, 1,
+		ports.DASTScanExecution{TenantID: "tenant", RunID: "scan", JobID: "scan-job", Fence: 1}, sessionOwnerCallbacks{})
+	if !errors.Is(err, failure) {
+		t.Fatalf("execution failure was suppressed: %v", err)
+	}
+	items, err := service.evidence.List(ctx, action.EngagementID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Kind != evidenceKindSession {
+			continue
+		}
+		var outcome ports.DASTOutcome
+		if err := json.Unmarshal(item.Content, &outcome); err != nil {
+			t.Fatal(err)
+		}
+		if !outcome.Incomplete || outcome.Reason != "execution_failed" {
+			t.Fatalf("failed execution sealed clean evidence: %+v", outcome)
+		}
+		return
+	}
+	t.Fatal("execution failure omitted its session evidence")
 }

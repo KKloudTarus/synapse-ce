@@ -265,7 +265,7 @@ func (fakeDASTRunner) Submit(context.Context, shared.ID, shared.ID, string, dast
 }
 func (fakeDASTRunner) GetRun(_ context.Context, tenantID, runID shared.ID) (dastrun.Run, error) {
 	if tenantID == "tenantA" && runID == "dast-run-a" {
-		return dastrun.Run{ID: "dast-run-a", TenantID: "tenantA", EngagementID: "engA", ActionID: "act-a", Actor: "operator", Status: dastrun.RunSucceeded, Verdict: "confirmed", HTTPStatus: 200, EvidenceID: "ev-a", StartedAt: time.Unix(1_700_000_000, 0).UTC()}, nil
+		return dastrun.Run{ID: "dast-run-a", Kind: dastrun.KindVerifier, TenantID: "tenantA", EngagementID: "engA", ActionID: "act-a", Actor: "operator", Status: dastrun.RunSucceeded, Verdict: "confirmed", HTTPStatus: 200, EvidenceID: "ev-a", StartedAt: time.Unix(1_700_000_000, 0).UTC()}, nil
 	}
 	return dastrun.Run{}, fmt.Errorf("%w: DAST run", shared.ErrNotFound)
 }

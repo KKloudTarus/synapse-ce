@@ -2,14 +2,17 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastsession"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastsurface"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastcrawl"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 )
@@ -65,20 +68,20 @@ type crawlerBody struct {
 	WallClock   string                `json:"wall_clock"`
 }
 
-func (b dastScanBody) config() (dastworkflowuc.ScanConfig, error) {
+func (b dastScanBody) config() (dastconfig.ScanConfig, error) {
 	wallClock := time.Duration(0)
 	if b.Crawler.WallClock != "" {
 		var err error
 		wallClock, err = time.ParseDuration(b.Crawler.WallClock)
 		if err != nil {
-			return dastworkflowuc.ScanConfig{}, err
+			return dastconfig.ScanConfig{}, err
 		}
 	}
 	credentials := make([]dastsession.CredentialBinding, len(b.Session.Credentials))
 	for i, c := range b.Session.Credentials {
 		credentials[i] = dastsession.CredentialBinding{Name: c.Name, Reference: c.Reference, Field: c.Field}
 	}
-	return dastworkflowuc.ScanConfig{
+	return dastconfig.ScanConfig{
 		Target: b.Target,
 		Session: dastsession.Config{Scheme: b.Session.Scheme, Credentials: credentials,
 			LoginRequest: dastsession.Request{Method: b.Session.LoginRequest.Method, Path: b.Session.LoginRequest.Path},
@@ -91,22 +94,22 @@ func (b dastScanBody) config() (dastworkflowuc.ScanConfig, error) {
 	}, nil
 }
 
-func decodeDASTScan(w http.ResponseWriter, r *http.Request) (dastworkflowuc.ScanConfig, error) {
+func decodeDASTScan(w http.ResponseWriter, r *http.Request) (dastconfig.ScanConfig, error) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 256<<10))
 	if err != nil {
-		return dastworkflowuc.ScanConfig{}, err
+		return dastconfig.ScanConfig{}, err
 	}
 	if strings.Contains(strings.ToLower(string(body)), "{{secret:") {
-		return dastworkflowuc.ScanConfig{}, shared.ErrValidation
+		return dastconfig.ScanConfig{}, shared.ErrValidation
 	}
 	var request dastScanBody
 	dec := json.NewDecoder(strings.NewReader(string(body)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&request); err != nil {
-		return dastworkflowuc.ScanConfig{}, err
+		return dastconfig.ScanConfig{}, err
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return dastworkflowuc.ScanConfig{}, shared.ErrValidation
+		return dastconfig.ScanConfig{}, shared.ErrValidation
 	}
 	return request.config()
 }
@@ -131,10 +134,33 @@ func (rt *Router) runDASTScan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid DAST scan configuration"})
 		return
 	}
-	out, err := rt.dastScan.RunScan(r.Context(), PrincipalFrom(r.Context()), shared.ID(r.PathValue("id")), shared.ID(r.PathValue("aid")), config)
+	out, err := rt.dastScanRuns.SubmitScan(r.Context(), shared.ID(r.PathValue("id")), shared.ID(r.PathValue("aid")), PrincipalFrom(r.Context()), config)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusAccepted, dastScanRunBody{Run: out})
+}
+
+type dastScanRunBody struct {
+	dastrun.Run
+	Result *dastworkflowuc.ScanResult `json:"result,omitempty"`
+}
+
+func (rt *Router) getDASTScanRun(w http.ResponseWriter, r *http.Request) {
+	run, err := rt.dastScanRuns.GetRun(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("rid")))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	if run.Kind != dastrun.KindAuthenticatedScan || run.EngagementID != shared.ID(r.PathValue("id")) {
+		writeError(w, rt.log, fmt.Errorf("%w: DAST scan run", shared.ErrNotFound))
+		return
+	}
+	result, err := rt.dastScan.ReadScanResult(r.Context(), run)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, dastScanRunBody{Run: run, Result: result})
 }

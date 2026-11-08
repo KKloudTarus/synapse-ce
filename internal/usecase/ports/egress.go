@@ -39,7 +39,7 @@ type EgressPolicy struct {
 	DenyDomains      []string // hostname-wide out-of-scope domains to resolve + deny
 	AllowDomainRules []DomainRule
 	DenyDomainRules  []DomainRule
-	PinnedHosts      map[string][]netip.Addr // prevalidated host-to-address bindings; no second DNS lookup
+	PinnedHosts      map[string][]netip.Addr // prevalidated DNS bindings; never additional network authority
 }
 
 // EgressNamespace is the lifecycle handle for one configured execution network
@@ -80,6 +80,9 @@ func CanonicalEgressRulesEqual(left, right []CanonicalEgressRule) bool {
 	}
 	return true
 }
+
+// MaxEgressExecutionIDLength accommodates a versioned tenant/run/job/fence identity.
+const MaxEgressExecutionIDLength = 1024
 
 // EgressGrantRequest binds a signed grant to the exact tenant, execution,
 // Bubblewrap process, namespace slot, and canonical policy.

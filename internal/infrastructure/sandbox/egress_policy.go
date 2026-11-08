@@ -45,7 +45,6 @@ func resolveEgressPolicy(ctx context.Context, policy ports.EgressPolicy, lookup 
 				return ports.EgressPolicy{}, fmt.Errorf("pinned host %q contains a non-IPv4 address", host)
 			}
 			resolved.PinnedHosts[host] = append(resolved.PinnedHosts[host], addr)
-			resolved.Rules = append(resolved.Rules, ports.EgressRule{Allow: true, Net: netip.PrefixFrom(addr, 32)})
 		}
 	}
 	for _, domain := range domainRules(policy.AllowDomains, policy.AllowDomainRules) {

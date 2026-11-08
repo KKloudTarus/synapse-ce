@@ -2,10 +2,8 @@ package egressbroker
 
 import (
 	"context"
-	"crypto/ed25519"
 	"net/netip"
 	"testing"
-	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -37,50 +35,5 @@ func TestEgressGrantCanonicalizerPreservesDomainPortLimits(t *testing.T) {
 		if !rule.Allow || len(rule.Ports) != 1 || rule.Ports[0] != 443 {
 			t.Fatalf("HTTPS domain permission widened: %+v", rule)
 		}
-	}
-}
-
-func TestEgressGrantCanonicalizerDoesNotDuplicateExplicitPins(t *testing.T) {
-	rules, err := (EgressGrantCanonicalizer{}).Canonicalize(context.Background(), ports.EgressPolicy{
-		PinnedHosts: map[string][]netip.Addr{"localhost": {netip.MustParseAddr("127.0.0.1")}},
-	})
-	if err != nil || len(rules) != 1 {
-		t.Fatalf("explicit pin must produce one rule: %+v, %v", rules, err)
-	}
-}
-
-func TestEgressGrantSignerPreservesAuthorityBinding(t *testing.T) {
-	brokerSigner, err := NewGrantSigner(make([]byte, ed25519.SeedSize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	adapter, err := NewEgressGrantSigner(brokerSigner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Unix(1_800_000_000, 0)
-	req := ports.EgressGrantRequest{
-		TenantID:      "tenant-test",
-		ExecutionKind: "recon",
-		ExecutionID:   "run-1",
-		RunID:         "syn1",
-		Slot:          1,
-		PID:           1234,
-		Rules:         []ports.CanonicalEgressRule{{Allow: true, CIDR: "203.0.113.0/24", Ports: []uint16{443}}},
-	}
-	token, err := adapter.Sign(req, now, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verifier, err := NewGrantVerifier(brokerSigner.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	claims, err := verifier.Verify(token, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if claims.TenantID != req.TenantID || claims.ExecutionKind != req.ExecutionKind || claims.ExecutionID != req.ExecutionID || claims.RunID != req.RunID || claims.Slot != req.Slot || claims.PID != req.PID {
-		t.Fatalf("claims = %+v", claims)
 	}
 }

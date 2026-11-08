@@ -66,7 +66,7 @@ func (s *Service) execute(ctx context.Context, admitted safety.AdmittedAction, h
 	if action.Tool != ToolAuthenticatedDAST || action.Action != ActionAuthenticatedDAST || action.Target.Kind != engagement.TargetURL {
 		return ports.DASTOutcome{}, fmt.Errorf("%w: admitted action is not an authenticated DAST scan", shared.ErrValidation)
 	}
-	if admitted.DecidedBy() == "" || admitted.DecidedBy() == "auto" {
+	if shared.IsMachineActor(admitted.DecidedBy()) {
 		return ports.DASTOutcome{}, fmt.Errorf("%w: authenticated DAST requires explicit human approval", shared.ErrForbidden)
 	}
 	if err := config.Validate(); err != nil {
@@ -126,21 +126,26 @@ func sessionEgressPolicy(ctx context.Context, base *url.URL) (*ports.EgressPolic
 		}
 		port = parsed
 	}
+	hostname := base.Hostname()
+	literalIP := net.ParseIP(hostname)
 	var addrs []netip.Addr
-	if ip := net.ParseIP(base.Hostname()); ip != nil {
-		addr, ok := netip.AddrFromSlice(ip)
+	if literalIP != nil {
+		addr, ok := netip.AddrFromSlice(literalIP)
 		if !ok {
 			return nil, fmt.Errorf("%w: invalid DAST target address", shared.ErrValidation)
 		}
 		addrs = []netip.Addr{addr.Unmap()}
 	} else {
-		resolved, err := net.DefaultResolver.LookupNetIP(ctx, "ip", base.Hostname())
+		resolved, err := net.DefaultResolver.LookupNetIP(ctx, "ip", hostname)
 		if err != nil || len(resolved) == 0 {
 			return nil, fmt.Errorf("%w: DAST target could not be resolved safely", shared.ErrValidation)
 		}
 		addrs = resolved
 	}
-	policy := &ports.EgressPolicy{Rules: make([]ports.EgressRule, 0, len(addrs)), PinnedHosts: map[string][]netip.Addr{base.Hostname(): {}}}
+	policy := &ports.EgressPolicy{Rules: make([]ports.EgressRule, 0, len(addrs))}
+	if literalIP == nil {
+		policy.PinnedHosts = map[string][]netip.Addr{hostname: nil}
+	}
 	seen := map[netip.Addr]bool{}
 	for _, addr := range addrs {
 		addr = addr.Unmap()
@@ -152,7 +157,9 @@ func sessionEgressPolicy(ctx context.Context, base *url.URL) (*ports.EgressPolic
 		}
 		seen[addr] = true
 		policy.Rules = append(policy.Rules, ports.EgressRule{Allow: true, Net: netip.PrefixFrom(addr, addr.BitLen()), Ports: []uint16{uint16(port)}})
-		policy.PinnedHosts[base.Hostname()] = append(policy.PinnedHosts[base.Hostname()], addr)
+		if policy.PinnedHosts != nil {
+			policy.PinnedHosts[hostname] = append(policy.PinnedHosts[hostname], addr)
+		}
 	}
 	return policy, nil
 }
@@ -181,12 +188,16 @@ func (s *Service) Crawl(ctx context.Context, admitted safety.AdmittedAction, con
 	return dastcrawl.Result{}, fmt.Errorf("%w: DAST crawl requires an approval-bound helper and configuration digest", shared.ErrValidation)
 }
 
-func (s *Service) CrawlWithRate(ctx context.Context, admitted safety.AdmittedAction, helperBin, configDigest string, config dastsession.Config, input dastcrawl.Input, limits dastcrawl.Limits, ratePerSec, concurrency int) (dastcrawl.Result, error) {
+func (s *Service) CrawlWithRate(ctx context.Context, admitted safety.AdmittedAction, helperBin, configDigest string, config dastsession.Config, input dastcrawl.Input, limits dastcrawl.Limits, ratePerSec, concurrency int, executionOwner ports.DASTScanExecution, ownerStore ports.DASTScanRunStore) (dastcrawl.Result, error) {
+	executionID, err := executionOwner.ExecutionID()
+	if err != nil || ownerStore == nil {
+		return dastcrawl.Result{}, fmt.Errorf("%w: durable DAST scan owner required", shared.ErrForbidden)
+	}
 	action := admitted.Action()
 	if action.Tool != ToolAuthenticatedDAST || action.Action != ActionAuthenticatedDAST || action.Target.Kind != engagement.TargetURL {
 		return dastcrawl.Result{}, fmt.Errorf("%w: admitted action is not an authenticated DAST scan", shared.ErrValidation)
 	}
-	if admitted.DecidedBy() == "" || admitted.DecidedBy() == "auto" {
+	if shared.IsMachineActor(admitted.DecidedBy()) {
 		return dastcrawl.Result{}, fmt.Errorf("%w: authenticated DAST requires explicit human approval", shared.ErrForbidden)
 	}
 	if err := config.Validate(); err != nil {
@@ -214,7 +225,7 @@ func (s *Service) CrawlWithRate(ctx context.Context, admitted safety.AdmittedAct
 		},
 		RatePerSec: ratePerSec, Concurrency: concurrency,
 		EngagementID: action.EngagementID, EgressPolicy: egressPolicy,
-		EgressExecutionKind: "dast-session", EgressExecutionID: action.SessionID.String(),
+		EgressExecutionKind: "dast-session", EgressExecutionID: executionID,
 	}, secretEnv, func(ctx context.Context, request ports.DASTRequest) error {
 		target, err := requestTarget(base, request.URL)
 		if err != nil {
@@ -226,11 +237,31 @@ func (s *Service) CrawlWithRate(ctx context.Context, admitted safety.AdmittedAct
 		})
 		return err
 	})
+	if runErr != nil {
+		outcome.Incomplete = true
+		if outcome.Reason == "" {
+			outcome.Reason = "execution_failed"
+		}
+	}
 	payload, err := json.Marshal(outcome)
 	if err != nil {
 		return dastcrawl.Result{}, fmt.Errorf("marshal DAST evidence: %w", err)
 	}
-	if _, err := s.evidence.Seal(ctx, action.EngagementID, evidenceKindSession, payload, admitted.DecidedBy()); err != nil {
+	if err := evidence.AnchorAfterCommit(ctx, func(anchorctx context.Context) error {
+		return ownerStore.WithDASTScanOwner(anchorctx, executionOwner, func(txctx context.Context) error {
+			authorize := func() error {
+				_, err := s.guard.Authorize(txctx, execution.Request{Actor: admitted.DecidedBy(), EngagementID: action.EngagementID, Action: ActionAuthenticatedDAST, Target: action.Target})
+				return err
+			}
+			if err := authorize(); err != nil {
+				return err
+			}
+			if _, err := s.evidence.Seal(txctx, action.EngagementID, evidenceKindSession, payload, admitted.DecidedBy()); err != nil {
+				return err
+			}
+			return authorize()
+		})
+	}); err != nil {
 		return dastcrawl.Result{}, fmt.Errorf("seal DAST evidence: %w", err)
 	}
 	if runErr != nil {

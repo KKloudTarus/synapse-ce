@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Play, ShieldZap, Target04 } from '@untitledui/icons'
 import { Button, Card, ErrorState, Field, InfoNote, Input, Pill, Select, cn } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
 import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
-import type { DastProposal, DastScanInput, DastScanResult, RuntimeVerifyInput, RuntimeVerifyOutcome } from '../../lib/api'
+import type { DastProposal, DastScanInput, DastScanRun, DastSessionConfig, RuntimeVerifyInput, RuntimeVerifyOutcome } from '../../lib/api'
 import type { Judgment } from '../../lib/types'
 
 // Judgment capabilities whose exploitability claim a live probe can confirm or refute.
@@ -213,36 +213,97 @@ function RuntimeVerifyCard({ engagementId, canOperate, canReview }: { engagement
 }
 
 export function DASTTab({ engagementId }: { engagementId: string }) {
+  return <DASTEngagement key={engagementId} engagementId={engagementId} />
+}
+
+function DASTEngagement({ engagementId }: { engagementId: string }) {
   const { data: me } = useFetch(() => api.me(), { deps: [] })
   const canOperate = me?.role === 'admin' || me?.role === 'consultant' || me?.role === 'member'
   const canReview = me?.role === 'admin' || me?.role === 'reviewer'
   const { notify } = useToast()
 
-  const [input, setInput] = useState<DastScanInput>({ target: '', maxPages: 50, maxRequests: 200, ratePerSec: 2, wallClock: '30s' })
+  const [input, setInput] = useState<Omit<DastScanInput, 'session'>>({ target: '', maxPages: 50, maxRequests: 200, ratePerSec: 2, wallClock: '30s' })
+  const [sessionJSON, setSessionJSON] = useState('')
+  const [proposedInput, setProposedInput] = useState<DastScanInput | null>(null)
   const [proposal, setProposal] = useState<DastProposal | null>(null)
-  const [result, setResult] = useState<DastScanResult | null>(null)
+  const [scanRun, setScanRun] = useState<DastScanRun | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [reason, setReason] = useState('')
+  const [pollAttempt, setPollAttempt] = useState(0)
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false }
+  }, [])
 
-  function patch(p: Partial<DastScanInput>) {
+  const pendingRun = scanRun && (scanRun.status === 'queued' || scanRun.status === 'running') ? scanRun.id : ''
+  const result = scanRun?.result ?? null
+  useEffect(() => {
+    if (!pendingRun) return
+    let current = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
+    async function poll() {
+      try {
+        const next = await api.getDastScanRun(engagementId, pendingRun)
+        if (!current) return
+        if (next.id !== pendingRun || next.engagementId !== engagementId || next.actionId !== scanRun?.actionId) {
+          throw new Error('Scan status did not match the requested run')
+        }
+        setScanRun(next)
+        setErr('')
+        if (next.status !== 'queued' && next.status !== 'running') return
+        if (++attempts >= 1200) throw new Error('Scan status polling timed out; the run may still be active')
+        timer = setTimeout(poll, 1500)
+      } catch (e) {
+        if (current) setErr(e instanceof Error ? e.message : 'Could not read scan status')
+      }
+    }
+    void poll()
+    return () => { current = false; clearTimeout(timer) }
+  }, [engagementId, pendingRun, scanRun?.actionId, pollAttempt])
+
+  function invalidateProposal() {
+    setProposal(null)
+    setProposedInput(null)
+  }
+
+  function patch(p: Partial<Omit<DastScanInput, 'session'>>) {
+    invalidateProposal()
     setInput((cur) => ({ ...cur, ...p }))
   }
 
   async function propose() {
-    setBusy(true)
     setErr('')
-    setResult(null)
+    let session: DastSessionConfig
     try {
-      const p = await api.proposeDastScan(engagementId, input)
+      const parsed: unknown = JSON.parse(sessionJSON)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !('scheme' in parsed) || !('credentials' in parsed)) {
+        throw new Error()
+      }
+      session = parsed as DastSessionConfig
+    } catch {
+      setErr('Enter a valid session configuration JSON object with scheme and credentials. Use vault references, not credential values.')
+      return
+    }
+    const scanInput: DastScanInput = { ...input, session }
+    setBusy(true)
+    setScanRun(null)
+    invalidateProposal()
+    try {
+      const p = await api.proposeDastScan(engagementId, scanInput)
+      if (!active.current) return
       setProposal(p)
+      setProposedInput(scanInput)
       notify('Scan proposed. It needs an approval before it runs.', 'success')
     } catch (e) {
+      if (!active.current) return
       const m = e instanceof Error ? e.message : 'Could not propose the scan'
       setErr(m)
       notify(m, 'error')
     } finally {
-      setBusy(false)
+      if (active.current) setBusy(false)
     }
   }
 
@@ -252,32 +313,36 @@ export function DASTTab({ engagementId }: { engagementId: string }) {
     setErr('')
     try {
       const d = await api.decideDastApproval(engagementId, proposal.actionId, approve, reason.trim())
+      if (!active.current) return
       setProposal({ ...proposal, decisionState: d.state, decidedBy: d.decidedBy, decisionReason: d.reason })
       setReason('')
       notify(approve ? 'Scan approved.' : 'Scan denied.', 'success')
     } catch (e) {
+      if (!active.current) return
       const m = e instanceof Error ? e.message : 'Could not record the decision'
       setErr(m)
       notify(m, 'error')
     } finally {
-      setBusy(false)
+      if (active.current) setBusy(false)
     }
   }
 
   async function run() {
-    if (!proposal) return
+    if (!proposal || !proposedInput) return
     setBusy(true)
     setErr('')
     try {
-      const r = await api.runDastScan(engagementId, proposal.actionId, input)
-      setResult(r)
-      notify('Scan complete.', 'success')
+      const r = await api.runDastScan(engagementId, proposal.actionId, proposedInput)
+      if (!active.current) return
+      if (r.engagementId !== engagementId || r.actionId !== proposal.actionId) throw new Error('Scan submission did not match the requested approval')
+      setScanRun(r)
     } catch (e) {
+      if (!active.current) return
       const m = e instanceof Error ? e.message : 'The scan failed to run'
       setErr(m)
       notify(m, 'error')
     } finally {
-      setBusy(false)
+      if (active.current) setBusy(false)
     }
   }
 
@@ -289,35 +354,52 @@ export function DASTTab({ engagementId }: { engagementId: string }) {
         actions={
           <InfoNote label="How this works">
             A crawl-and-probe scan of a running target. Every scan is proposed first with an egress preview,
-            approved by a reviewer under separation of duties, and only then run. Credentials are referenced
-            from the vault, never entered here.
+            approved by an authenticated human, and only then run. Credentials are referenced
+            from the vault, never entered here. The system verifier is distinct from the proposer.
           </InfoNote>
         }
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Target URL">
-            <Input value={input.target} onChange={(e) => patch({ target: e.target.value })} placeholder="https://staging.example.internal" className="font-mono" aria-label="DAST target URL" />
+            <Input disabled={busy} value={input.target} onChange={(e) => patch({ target: e.target.value })} placeholder="https://staging.example.internal" className="font-mono" aria-label="DAST target URL" />
           </Field>
           <Field label="Max pages">
-            <Input type="number" min={1} value={input.maxPages} onChange={(e) => patch({ maxPages: Number(e.target.value) || 1 })} aria-label="Max pages" />
+            <Input disabled={busy} type="number" min={1} value={input.maxPages} onChange={(e) => patch({ maxPages: Number(e.target.value) || 1 })} aria-label="Max pages" />
           </Field>
           <Field label="Max requests">
-            <Input type="number" min={1} value={input.maxRequests} onChange={(e) => patch({ maxRequests: Number(e.target.value) || 1 })} aria-label="Max requests" />
+            <Input disabled={busy} type="number" min={1} value={input.maxRequests} onChange={(e) => patch({ maxRequests: Number(e.target.value) || 1 })} aria-label="Max requests" />
           </Field>
           <Field label="Rate (req/s)">
-            <Input type="number" min={1} value={input.ratePerSec} onChange={(e) => patch({ ratePerSec: Number(e.target.value) || 1 })} aria-label="Rate per second" />
+            <Input disabled={busy} type="number" min={1} value={input.ratePerSec} onChange={(e) => patch({ ratePerSec: Number(e.target.value) || 1 })} aria-label="Rate per second" />
           </Field>
           <Field label="Wall clock">
-            <Input value={input.wallClock} onChange={(e) => patch({ wallClock: e.target.value })} placeholder="30s" className="font-mono" aria-label="Wall clock" />
+            <Input disabled={busy} value={input.wallClock} onChange={(e) => patch({ wallClock: e.target.value })} placeholder="30s" className="font-mono" aria-label="Wall clock" />
           </Field>
         </div>
+        <div className="mt-3">
+          <Field label="Session configuration JSON" htmlFor="dast-session-config">
+            <textarea
+              id="dast-session-config"
+              required
+              aria-label="Session configuration JSON"
+              aria-describedby="dast-session-example"
+              disabled={busy}
+              value={sessionJSON}
+              onChange={(e) => { invalidateProposal(); setSessionJSON(e.target.value) }}
+              rows={9}
+              placeholder={'{"scheme":"bearer","credentials":[{"name":"token","reference":"vault://engagement/token","field":"token"}],"login_request":{"method":"GET","path":"/"},"success":{"status_code":200},"check_request":{"method":"GET","path":"/"}}'}
+              className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 font-mono text-sm text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+            />
+          </Field>
+          <p id="dast-session-example" className="mt-1 text-xs text-tertiary">Use vault references, never credential values. Editing configuration invalidates the proposal. Supported schemes: form, basic, bearer, header and cookie. Supply login and check requests and a success signal; the server validates the configuration.</p>
+        </div>
         <div className="mt-3 flex items-center gap-3">
-          <Button variant="primary" className="px-3 py-2" loading={busy} disabled={busy || !canOperate || !input.target.trim()} onClick={propose}>
+          <Button variant="primary" className="px-3 py-2" loading={busy} disabled={busy || !!pendingRun || !canOperate || !input.target.trim()} onClick={propose}>
             <Target04 className="size-4" /> Propose scan
           </Button>
           {!canOperate && <span className="text-xs text-tertiary">Proposing a scan needs the operator role.</span>}
         </div>
-        {err && <div className="mt-3"><ErrorState message={err} /></div>}
+        {err && <div className="mt-3"><ErrorState message={err} />{pendingRun && <Button variant="secondary" onClick={() => { setErr(''); setPollAttempt((n) => n + 1) }}>Retry scan status</Button>}</div>}
       </Card>
 
       {proposal && (
@@ -344,13 +426,22 @@ export function DASTTab({ engagementId }: { engagementId: string }) {
                 <Button variant="secondary" loading={busy} disabled={busy} onClick={() => decide(false)}>Deny</Button>
               </>
             )}
-            {proposal.decisionState === 'pending' && !canReview && <span className="text-xs text-tertiary">Awaiting a reviewer's decision (separation of duties).</span>}
+            {proposal.decisionState === 'pending' && !canReview && <span className="text-xs text-tertiary">Awaiting an authenticated human approval.</span>}
             {(proposal.decisionState === 'approved' || proposal.decisionState === 'consumed') && canOperate && (
-              <Button variant="primary" loading={busy} disabled={busy} onClick={run}><Play className="size-4" /> Run scan</Button>
+              <Button variant="primary" loading={busy} disabled={busy || !!scanRun} onClick={run}><Play className="size-4" /> Run scan</Button>
             )}
           </div>
           <p className="mt-3 font-mono text-[11px] text-quaternary">approval {proposal.actionId}</p>
         </Card>
+      )}
+
+      {scanRun && (
+        <div aria-live="polite" className="flex flex-wrap items-center gap-3 rounded-lg border border-secondary p-3 text-sm">
+          <Pill className="capitalize">{scanRun.status}</Pill>
+          {scanRun.status === 'failed' && <span className="text-error-primary">Scan failed{scanRun.errorCode ? `: ${scanRun.errorCode}` : ''}</span>}
+          {scanRun.evidenceId && <span className="font-mono text-xs text-tertiary">evidence {scanRun.evidenceId}</span>}
+          <span className="font-mono text-xs text-tertiary">run {scanRun.id}</span>
+        </div>
       )}
 
       {result && (

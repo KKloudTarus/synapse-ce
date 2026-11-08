@@ -779,7 +779,9 @@ describe('native organization sign-in recovery', () => {
     window.history.replaceState(null, '', '/settings/team')
     vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'native-csrf' })
     mocks.me.mockResolvedValue({ ...CURRENT_USER, credentialKind: 'browser_session', tenantId: 'sandbox-secondary' })
-    render(<AuthProvider><SessionActions /></AuthProvider>)
+    await act(async () => {
+      render(<AuthProvider><SessionActions /></AuthProvider>)
+    })
     await waitFor(() => expect(phase()).toBe('ready'))
   }
   it('preserves the served organization after successful native logout', async () => {
