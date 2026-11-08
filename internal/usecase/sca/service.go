@@ -4448,7 +4448,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 				} else {
 					rootfsReport, rerr := s.secretScanner.ScanFiles(ctx, ws.RootFS)
 					if rerr != nil {
-						result.mergeEnginePassError("secrets", rerr)
+						result.mergeEnginePassError("secrets", rerr, nil)
 						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan skipped: "+rerr.Error())
 						if errors.Is(rerr, context.Canceled) {
 							return result, rerr
@@ -4564,15 +4564,34 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 						rootfsReport.Findings, rerr = s.misconfig.ScanConfigs(ctx, ws.RootFS)
 					}
 					counts := map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(rootfsReport.Findings)), scanrun.MeasureUnrenderedCharts: int64(rootfsReport.UnrenderedCharts)}
+					if rootfsReport.UnassessedInputs > 0 {
+						counts[scanrun.MeasureFilesUnscanned] = int64(rootfsReport.UnassessedInputs)
+						warning := fmt.Sprintf("%d image-filesystem infrastructure-as-code input(s) were NOT evaluated by the capability that owns them", rootfsReport.UnassessedInputs)
+						if len(rootfsReport.UnassessedReasons) > 0 {
+							warning += ": " + strings.Join(rootfsReport.UnassessedReasons, "; ")
+						}
+						result.SourceWarnings = append(result.SourceWarnings, warning)
+					}
+					if n := len(rootfsReport.UnresolvedInputs); n > 0 {
+						shown := rootfsReport.UnresolvedInputs
+						if len(shown) > maxUnresolvedInputsReported {
+							shown = shown[:maxUnresolvedInputsReported]
+						}
+						result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+							"%d image-filesystem infrastructure-as-code attribute(s) did not resolve to a value, so the rules read their source text: %s",
+							n, strings.Join(shown, "; ")))
+					}
 					switch {
 					case rerr != nil:
-						result.mergeEnginePassError("iac", rerr)
+						result.mergeEnginePassError("iac", rerr, counts)
 						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem misconfig scan skipped: "+rerr.Error())
 						if errors.Is(rerr, context.Canceled) {
 							return result, rerr
 						}
 					case rootfsReport.Truncated || rootfsReport.UnrenderedCharts > 0:
 						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonTruncated, counts)
+					case rootfsReport.UnassessedInputs > 0:
+						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonAnalysisIncomplete, counts)
 					case !hasMisconfigReport:
 						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoverageUnknown, scanrun.ReasonLegacyReporter, counts)
 					default:
@@ -5332,7 +5351,7 @@ func (r *ScanResult) mergeEnginePass(engine string, execution scanrun.EngineExec
 	r.updateEngine(engine, execution, coverage, reason, combined)
 }
 
-func (r *ScanResult) mergeEnginePassError(engine string, err error) {
+func (r *ScanResult) mergeEnginePassError(engine string, err error, counts map[scanrun.EngineMeasure]int64) {
 	execution, reason := scanrun.EngineFailed, scanrun.ReasonEngineError
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -5340,7 +5359,7 @@ func (r *ScanResult) mergeEnginePassError(engine string, err error) {
 	case budgetExpired(err):
 		execution, reason = scanrun.EngineTimedOut, scanrun.ReasonDeadlineExceeded
 	}
-	r.mergeEnginePass(engine, execution, scanrun.CoveragePartial, reason, nil)
+	r.mergeEnginePass(engine, execution, scanrun.CoveragePartial, reason, counts)
 }
 
 func (r *ScanResult) completeEngine(engine string) {
@@ -6449,6 +6468,7 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 			LicensePct:              res.LicenseCoverage.Pct,
 			Confident:               res.Completeness.Confident,
 			CompletenessNote:        res.Completeness.Warning,
+			SourceWarnings:          res.SourceWarnings,
 			EngineOutcomes:          scanrun.CloneEngineOutcomes(res.EngineOutcomes),
 			EngineCoverage:          coverage,
 			ExecutionMode:           res.ExecutionMode,

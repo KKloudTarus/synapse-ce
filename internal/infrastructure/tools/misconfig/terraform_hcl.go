@@ -1,6 +1,7 @@
 package misconfig
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"slices"
@@ -183,11 +184,11 @@ func elementCount(v cty.Value) int {
 // nothing about a comprehension: a `for` repeats its body once per element at RUNTIME, so a single
 // written interpolation can be emitted thousands of times and nested loops multiply that again. The cost
 // of such a construct is not knowable from the source, so it is refused rather than evaluated.
-func tfEvaluable(expr hcl.Expression) bool {
-	if len(expr.Variables()) > tfMaxExprRefs {
+func tfEvaluable(expr hcl.Expression, referenceCount int, ctx *hcl.EvalContext) bool {
+	if referenceCount > tfMaxExprRefs {
 		return false
 	}
-	return tfBoundedExpr(expr, 0)
+	return tfBoundedExpr(expr, 0, ctx)
 }
 
 // tfEval is the one place a target-controlled expression is evaluated. Admission runs first, so every
@@ -197,9 +198,26 @@ func tfEvaluable(expr hcl.Expression) bool {
 // A refused expression yields an UNKNOWN value and no diagnostic. An error is what Terraform raises for a
 // broken configuration, and try(expr, fallback) is right to answer one with the fallback, which would
 // print this scanner's own limit as a verdict about the target.
+// References outside the supported context also stay unknown before evaluation: try() must not catch
+// a scanner limitation as though Terraform itself could not read a valid resource or data source.
+// Calls outside the supported function context are also refused before try can catch a missing-function
+// diagnostic and turn a scanner limitation into a concrete fallback.
 func tfEval(expr hcl.Expression, ctx *hcl.EvalContext) (cty.Value, hcl.Diagnostics) {
-	if !tfEvaluable(expr) {
+	references := expr.Variables()
+	if !tfEvaluable(expr, len(references), ctx) {
 		return cty.DynamicVal, nil
+	}
+	for _, reference := range references {
+		switch reference.RootName() {
+		case "var", "local":
+			continue
+		}
+		value, diags := reference.TraverseAbs(ctx)
+		// The external context models policy-document strings, not full provider objects. Do not infer
+		// object attributes from that partial projection through keys or jsonencode.
+		if diags.HasErrors() || value.Type() != cty.String {
+			return cty.DynamicVal, nil
+		}
 	}
 	return expr.Value(ctx)
 }
@@ -212,16 +230,16 @@ func tfEval(expr hcl.Expression, ctx *hcl.EvalContext) (cty.Value, hcl.Diagnosti
 // Containers are walked through the exported accessors, which expose an interpolated object key as well
 // as its value, and each leaf is read back with a NIL context, which hcl/json defines as "return the
 // string verbatim, do not interpolate", then parsed as the template it is about to become.
-func tfBoundedExpr(expr hcl.Expression, depth int) bool {
+func tfBoundedExpr(expr hcl.Expression, depth int, ctx *hcl.EvalContext) bool {
 	if depth > tfMaxAdmissionDepth {
 		return false
 	}
 	if node, ok := expr.(hclsyntax.Expression); ok {
-		return tfBoundedSyntax(node)
+		return tfBoundedSyntax(node, ctx)
 	}
 	if items, diags := hcl.ExprList(expr); !diags.HasErrors() {
 		for _, item := range items {
-			if !tfBoundedExpr(item, depth+1) {
+			if !tfBoundedExpr(item, depth+1, ctx) {
 				return false
 			}
 		}
@@ -229,7 +247,7 @@ func tfBoundedExpr(expr hcl.Expression, depth int) bool {
 	}
 	if pairs, diags := hcl.ExprMap(expr); !diags.HasErrors() {
 		for _, pair := range pairs {
-			if !tfBoundedExpr(pair.Key, depth+1) || !tfBoundedExpr(pair.Value, depth+1) {
+			if !tfBoundedExpr(pair.Key, depth+1, ctx) || !tfBoundedExpr(pair.Value, depth+1, ctx) {
 				return false
 			}
 		}
@@ -249,16 +267,23 @@ func tfBoundedExpr(expr hcl.Expression, depth int) bool {
 	if diags.HasErrors() {
 		return false
 	}
-	return tfBoundedSyntax(tmpl)
+	return tfBoundedSyntax(tmpl, ctx)
 }
 
-// tfBoundedSyntax refuses the native constructs whose cost is set at runtime rather than by the source.
-func tfBoundedSyntax(node hclsyntax.Expression) bool {
+// tfBoundedSyntax refuses runtime-sized constructs and functions outside the evaluation context.
+// A nil context checks cost only, so lowering can distinguish an existing bound diagnostic from UNKNOWN.
+func tfBoundedSyntax(node hclsyntax.Expression, ctx *hcl.EvalContext) bool {
 	bounded := true
 	diags := hclsyntax.VisitAll(node, func(n hclsyntax.Node) hcl.Diagnostics {
-		switch n.(type) {
+		switch n := n.(type) {
 		case *hclsyntax.ForExpr, *hclsyntax.TemplateJoinExpr:
 			bounded = false
+		case *hclsyntax.FunctionCallExpr:
+			if ctx != nil {
+				if _, supported := ctx.Functions[n.Name]; !supported {
+					bounded = false
+				}
+			}
 		}
 		return nil
 	})
@@ -300,6 +325,21 @@ func tfValueSize(v cty.Value, budget int) (int, bool) {
 	}
 	return 0, true
 }
+
+// Terraform length counts grapheme clusters in strings and elements in collections.
+var terraformLengthFunc = function.New(&function.Spec{
+	Params: []function.Parameter{{Name: "value", Type: cty.DynamicPseudoType, AllowDynamicType: true, AllowUnknown: true}},
+	Type:   function.StaticReturnType(cty.Number),
+	Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+		if args[0].Type() == cty.String {
+			return stdlib.StrlenFunc.Call(args)
+		}
+		if args[0].Type().IsObjectType() {
+			return args[0].Length(), nil
+		}
+		return stdlib.LengthFunc.Call(args)
+	},
+})
 
 // strContainsFunc is Terraform's strcontains: a substring test on two strings. The collection-membership
 // function it was bound to errors on strings, and a try() around it then took a fallback Terraform never
@@ -476,7 +516,7 @@ func rawTFFunctions() map[string]function.Function {
 		"jsondecode":   stdlib.JSONDecodeFunc,
 		"jsonencode":   stdlib.JSONEncodeFunc,
 		"keys":         stdlib.KeysFunc,
-		"length":       stdlib.LengthFunc,
+		"length":       terraformLengthFunc,
 		"lookup":       stdlib.LookupFunc,
 		"lower":        stdlib.LowerFunc,
 		"max":          stdlib.MaxFunc,
@@ -496,13 +536,6 @@ func rawTFFunctions() map[string]function.Function {
 		"values":       stdlib.ValuesFunc,
 		"zipmap":       stdlib.ZipmapFunc,
 	}
-}
-
-// evalContext builds the evaluation context for this module's expressions. Only `var` and `local` are
-// bound: every other root (a data source, another resource, count, each, path) stays undefined, so an
-// expression that reads one fails to evaluate and its attribute keeps its source text.
-func (m *tfModule) evalContext() *hcl.EvalContext {
-	return tfEvalContextFor(m.vars, m.locals)
 }
 
 func tfEvalContextFor(vars, locals map[string]cty.Value) *hcl.EvalContext {
@@ -553,18 +586,26 @@ func tfObject(m map[string]cty.Value) cty.Value {
 
 // collectDeclarations reads the module's `variable` defaults and remembers its `locals` and `module`
 // blocks for the resolution rounds.
-func (m *tfModule) collectDeclarations() {
+func (m *tfModule) collectDeclarations(ctx context.Context) error {
 	m.defaults = map[string]cty.Value{}
 	m.declaredVars = map[string]bool{}
 	empty := tfEvalContextFor(nil, nil)
 	for _, src := range m.sources {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		body, ok := src.file.Body.(*hclsyntax.Body)
 		if !ok {
 			// A .tf.json module: read its variable defaults and locals through the generic body API.
-			m.collectJSONDeclarations(src)
+			if err := m.collectJSONDeclarations(ctx, src); err != nil {
+				return err
+			}
 			continue
 		}
 		for _, blk := range body.Blocks {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			switch {
 			case blk.Type == "variable" && len(blk.Labels) == 1:
 				m.declaredVars[blk.Labels[0]] = true
@@ -574,6 +615,9 @@ func (m *tfModule) collectDeclarations() {
 				}
 			case blk.Type == "locals":
 				for _, attr := range blk.Body.Attributes {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
 					m.localAttrs = append(m.localAttrs, attr)
 				}
 			case blk.Type == "module" && len(blk.Labels) == 1:
@@ -584,13 +628,17 @@ func (m *tfModule) collectDeclarations() {
 	sort.Slice(m.localAttrs, func(i, j int) bool {
 		return m.localAttrs[i].SrcRange.Start.Byte < m.localAttrs[j].SrcRange.Start.Byte
 	})
+	return ctx.Err()
 }
 
 // collectJSONDeclarations reads `variable` defaults from a .tf.json module file.
-func (m *tfModule) collectJSONDeclarations(src *tfSource) {
+func (m *tfModule) collectJSONDeclarations(ctx context.Context, src *tfSource) error {
 	content, _, _ := src.file.Body.PartialContent(tfRootSchema)
 	empty := tfEvalContextFor(nil, nil)
 	for _, blk := range content.Blocks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if blk.Type != "variable" || len(blk.Labels) != 1 {
 			continue
 		}
@@ -604,6 +652,7 @@ func (m *tfModule) collectJSONDeclarations(src *tfSource) {
 			tfBindOrUnknown(m.defaults, blk.Labels[0], v, d)
 		}
 	}
+	return ctx.Err()
 }
 
 // tfRootSchema is the subset of Terraform's top-level block grammar this scanner reads. It exists for the
@@ -644,74 +693,129 @@ func tfBindOrUnknown(into map[string]cty.Value, name string, v cty.Value, d hcl.
 
 // resolveVars applies Terraform's precedence: a parent module call's input beats an automatically loaded
 // variable file, which beats the module's own default.
-func (m *tfModule) resolveVars(extra map[string]cty.Value) map[string]cty.Value {
+func (m *tfModule) resolveVars(ctx context.Context, extra map[string]cty.Value) (map[string]cty.Value, error) {
 	out := make(map[string]cty.Value, len(m.defaults)+len(m.fileVars)+len(extra))
 	for k, v := range m.defaults {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		out[k] = v
 	}
 	for k, v := range m.fileVars {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		out[k] = v
 	}
 	for k, v := range extra {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		out[k] = v
 	}
-	inputs, conflict := m.effectiveInputs()
+	inputs, conflict, err := m.effectiveInputs(ctx, out)
+	if err != nil {
+		return nil, err
+	}
 	for k, v := range inputs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		out[k] = v
 	}
 	// A variable that DIFFERENT call sites bind differently has no single effective value.
 	for k := range conflict {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		delete(out, k)
 	}
-	return out
+	return out, nil
 }
 
-// effectiveInputs reduces the per-call-site contributions to one value per name, and names those that
-// distinct sites disagree about.
-func (m *tfModule) effectiveInputs() (map[string]cty.Value, map[string]bool) {
+// effectiveInputs compares each site's effective bindings, including defaults and variable files for
+// omitted inputs. A missing required input is unknown rather than another site's explicit value.
+func (m *tfModule) effectiveInputs(ctx context.Context, fallback map[string]cty.Value) (map[string]cty.Value, map[string]bool, error) {
 	out := map[string]cty.Value{}
 	conflict := map[string]bool{}
-	sites := make([]string, 0, len(m.contributions))
-	for site := range m.contributions {
-		sites = append(sites, site)
+	present := map[string]int{}
+	record := func(k string, v cty.Value) {
+		if conflict[k] {
+			return
+		}
+		if prev, seen := out[k]; seen && !prev.RawEquals(v) {
+			conflict[k] = true
+			return
+		}
+		out[k] = v
 	}
-	sort.Strings(sites)
-	for _, site := range sites {
-		for k, v := range m.contributions[site] {
-			prev, seen := out[k]
-			if seen && !prev.RawEquals(v) {
-				conflict[k] = true
-				continue
+	for _, inputs := range m.contributions {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		for k, v := range inputs {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
 			}
-			out[k] = v
+			if m.declaredVars[k] {
+				present[k]++
+			}
+			record(k, v)
 		}
 	}
-	return out, conflict
+	if len(m.contributions) > 0 {
+		for k := range m.declaredVars {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+			if present[k] == len(m.contributions) || conflict[k] {
+				continue
+			}
+			v, ok := fallback[k]
+			if !ok {
+				v = cty.DynamicVal
+			}
+			record(k, v)
+		}
+	}
+	return out, conflict, nil
 }
 
 // tfResolveLocals evaluates local values by repeated substitution. A local that still fails to evaluate
 // after tfMaxEvalRounds (a cycle, or a reference outside the supported contract) stays absent, so every
 // expression that reads it keeps its source text.
-func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) map[string]cty.Value {
+func tfResolveLocals(ctx context.Context, attrs []*hclsyntax.Attribute, vars map[string]cty.Value) (map[string]cty.Value, error) {
 	locals := map[string]cty.Value{}
 	for round := 0; round < tfMaxEvalRounds; round++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		progress := false
 		// A local that is declared but not resolved YET is unknown, not missing. Presenting it as missing
 		// let try() take a fallback on the first round and froze that answer, because the local was then
 		// recorded as resolved and never revisited.
 		view := make(map[string]cty.Value, len(attrs))
 		for _, attr := range attrs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			view[attr.Name] = cty.DynamicVal
 		}
 		for k, v := range locals {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			view[k] = v
 		}
-		ctx := tfEvalContextFor(vars, view)
+		evalCtx := tfEvalContextFor(vars, view)
 		for _, attr := range attrs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if _, done := locals[attr.Name]; done {
 				continue
 			}
-			v, d := tfEval(attr.Expr, ctx)
+			v, d := tfEval(attr.Expr, evalCtx)
 			if d.HasErrors() || !v.IsWhollyKnown() || !tfValueWithinBudget(v, tfMaxValueBytes) {
 				continue
 			}
@@ -722,20 +826,27 @@ func tfResolveLocals(attrs []*hclsyntax.Attribute, vars map[string]cty.Value) ma
 			break
 		}
 	}
-	return locals
+	return locals, nil
 }
 
 // evaluate resolves the module's variables and locals, optionally with one manually selected variable file
-// layered on top, and returns the context its expressions are evaluated in.
-func (m *tfModule) evaluate(extra map[string]cty.Value) *hcl.EvalContext {
-	m.vars = m.resolveVars(extra)
+// layered on top, and stores the context its expressions are evaluated in.
+func (m *tfModule) evaluate(ctx context.Context, extra map[string]cty.Value) error {
+	var err error
+	m.vars, err = m.resolveVars(ctx, extra)
+	if err != nil {
+		return err
+	}
 	// Locals are resolved against the SAME unknown-aware variable view the final attributes use. Handing
 	// local resolution the raw map let a declared variable with no value look absent, so try() resolved
 	// to its fallback and that answer was then stored; a later unknown-aware context cannot undo it.
-	m.locals = tfResolveLocals(m.localAttrs, m.unknownAwareVars())
+	m.locals, err = tfResolveLocals(ctx, m.localAttrs, m.unknownAwareVars())
+	if err != nil {
+		return err
+	}
 	varView, localView := m.unknownAwareView()
 	m.ctx = m.withPolicyData(tfEvalContextFor(varView, localView))
-	return m.ctx
+	return ctx.Err()
 }
 
 // unknownAwareVars presents every declared variable, with the ones that did not resolve marked unknown.
@@ -767,19 +878,18 @@ func (m *tfModule) unknownAwareView() (vars, locals map[string]cty.Value) {
 
 // moduleCallInputs evaluates one `module` block's input attributes in the PARENT's context and returns the
 // child directory it targets. A module whose source is not a local directory binds nothing.
-func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inputs map[string]cty.Value, ok bool) {
+func (m *tfModule) moduleCallInputs(ctx context.Context, blk *hclsyntax.Block, initialize bool) (childDir string, inputs map[string]cty.Value, ok bool, err error) {
 	srcAttr, has := blk.Body.Attributes["source"]
 	if !has {
-		return "", nil, false
+		return "", nil, false, nil
 	}
-	ctx := m.evalContext()
-	sv, d := tfEval(srcAttr.Expr, ctx)
+	sv, d := tfEval(srcAttr.Expr, m.ctx)
 	if d.HasErrors() || !sv.IsWhollyKnown() || sv.Type() != cty.String {
-		return "", nil, false
+		return "", nil, false, nil
 	}
 	rel := sv.AsString()
 	if !strings.HasPrefix(rel, "./") && !strings.HasPrefix(rel, "../") {
-		return "", nil, false // a registry or VCS module: not a directory in this workspace
+		return "", nil, false, nil // a registry or VCS module: not a directory in this workspace
 	}
 	child := path.Clean(path.Join(m.dir, rel))
 	if child == "." {
@@ -787,14 +897,21 @@ func (m *tfModule) moduleCallInputs(blk *hclsyntax.Block) (childDir string, inpu
 	}
 	inputs = map[string]cty.Value{}
 	for name, attr := range blk.Body.Attributes {
+		if err := ctx.Err(); err != nil {
+			return "", nil, false, err
+		}
 		switch name {
 		case "source", "version", "providers", "count", "for_each", "depends_on":
 			continue
 		}
-		v, d := tfEval(attr.Expr, ctx)
+		if initialize {
+			inputs[name] = cty.DynamicVal
+			continue
+		}
+		v, d := tfEval(attr.Expr, m.ctx)
 		tfBindOrUnknown(inputs, name, v, d)
 	}
-	return child, inputs, true
+	return child, inputs, true, nil
 }
 
 // bindInputsFrom records one call site's inputs on the child module, REPLACING whatever that same site
@@ -932,13 +1049,14 @@ func lowerTFSource(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 				continue
 			}
 			source := string(src.data[rng.Start.Byte:rng.End.Byte])
-			if !tfEvaluable(attr.Expr) {
+			references := attr.Expr.Variables()
+			if !tfEvaluable(attr.Expr, len(references), nil) {
 				unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s (reference bound)", src.rel, rng.Start.Line, attr.Name))
 				continue
 			}
 			v, diags := tfEval(attr.Expr, ctx)
 			if diags.HasErrors() || !v.IsWhollyKnown() {
-				if carriesValues && len(attr.Expr.Variables()) > 0 {
+				if carriesValues {
 					unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s", src.rel, rng.Start.Line, attr.Name))
 				}
 				continue
@@ -1127,7 +1245,10 @@ type tfWorkspace struct {
 
 // buildTFWorkspace parses every Terraform file, applies variable-file precedence per module, and
 // propagates module-call inputs down the tree within the bounded number of rounds.
-func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
+func buildTFWorkspace(ctx context.Context, configs, varFiles []tfInputFile) (*tfWorkspace, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	ws := &tfWorkspace{modules: map[string]*tfModule{}}
 	moduleFor := func(dir string) *tfModule {
 		m, ok := ws.modules[dir]
@@ -1138,6 +1259,9 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 		return m
 	}
 	for _, f := range configs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		src := parseTFSource(f.rel, f.data)
 		if src == nil {
 			ws.raw = append(ws.raw, f)
@@ -1155,6 +1279,9 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 	}
 	auto := map[string][]ranked{}
 	for _, f := range varFiles {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		src := parseTFSource(strings.TrimSuffix(f.rel, ".tfvars")+".tf", f.data)
 		if strings.HasSuffix(strings.ToLower(f.rel), ".json") {
 			src = parseTFSource(f.rel+".tf.json", f.data)
@@ -1166,6 +1293,9 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 		attrs, _ := src.file.Body.JustAttributes()
 		empty := tfEvalContextFor(nil, nil)
 		for name, attr := range attrs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			v, d := tfEval(attr.Expr, empty)
 			tfBindOrUnknown(vals, name, v, d)
 		}
@@ -1183,6 +1313,9 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 		}
 	}
 	for dir, files := range auto {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		sort.Slice(files, func(i, j int) bool {
 			if files[i].rank != files[j].rank {
 				return files[i].rank < files[j].rank
@@ -1193,15 +1326,25 @@ func buildTFWorkspace(configs, varFiles []tfInputFile) *tfWorkspace {
 		m.fileVars = map[string]cty.Value{}
 		for _, f := range files {
 			for k, v := range f.vars {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				m.fileVars[k] = v
 			}
 		}
 	}
 	for _, m := range ws.modules {
-		m.collectDeclarations()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := m.collectDeclarations(ctx); err != nil {
+			return nil, err
+		}
 	}
-	ws.resolveAll(nil)
-	return ws
+	if err := ws.resolveAll(ctx, nil); err != nil {
+		return nil, err
+	}
+	return ws, nil
 }
 
 // sortedDirs lists the workspace's module directories in a stable order.
@@ -1220,17 +1363,59 @@ func (ws *tfWorkspace) sortedDirs() []string {
 // evaluates those children. Resolving the WHOLE workspace per configuration is what carries a variable-file
 // scenario down a module edge; resolving only the directory that owns the file left every descendant on the
 // default binding.
-func (ws *tfWorkspace) resolveAll(extra map[string]map[string]cty.Value) {
+func (ws *tfWorkspace) resolveAll(ctx context.Context, extra map[string]map[string]cty.Value) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	dirs := ws.sortedDirs()
 	for _, dir := range dirs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		ws.modules[dir].contributions = map[string]map[string]cty.Value{}
 	}
+	// Register every known call site before propagating values. An explicit input is unknown until its
+	// parent has been evaluated; it must not temporarily expose the child's lower-precedence default.
+	// Evaluate source expressions in the same context as normal resolution, without propagating inputs.
+	for _, dir := range dirs {
+		if err := ws.modules[dir].evaluate(ctx, extra[dir]); err != nil {
+			return err
+		}
+	}
+	for _, dir := range dirs {
+		m := ws.modules[dir]
+		for i, blk := range m.calls {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			child, inputs, ok, err := m.moduleCallInputs(ctx, blk, true)
+			if err != nil {
+				return err
+			}
+			if ok {
+				if cm, exists := ws.modules[child]; exists {
+					cm.bindInputsFrom(fmt.Sprintf("%s#%d", m.dir, i), inputs)
+				}
+			}
+		}
+	}
 	for round := 0; round < tfMaxEvalRounds; round++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		for _, dir := range dirs {
 			m := ws.modules[dir]
-			m.evaluate(extra[dir])
+			if err := m.evaluate(ctx, extra[dir]); err != nil {
+				return err
+			}
 			for i, blk := range m.calls {
-				child, inputs, ok := m.moduleCallInputs(blk)
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				child, inputs, ok, err := m.moduleCallInputs(ctx, blk, false)
+				if err != nil {
+					return err
+				}
 				if !ok {
 					continue
 				}
@@ -1241,14 +1426,20 @@ func (ws *tfWorkspace) resolveAll(extra map[string]map[string]cty.Value) {
 		}
 	}
 	for _, dir := range dirs {
-		ws.modules[dir].evaluate(extra[dir])
+		if err := ws.modules[dir].evaluate(ctx, extra[dir]); err != nil {
+			return err
+		}
 	}
+	return ctx.Err()
 }
 
 // scanWorkspace returns the findings for every Terraform file in the tree, plus the attributes evaluation
 // could not resolve. A module that carries manually selected variable files is also evaluated under each
 // of them, because each is a configuration an operator applies; the findings are unioned, never averaged.
-func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, int) {
+func (ws *tfWorkspace) scanWorkspace(ctx context.Context) ([]ports.MisconfigRawFinding, []string, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
 	var out []ports.MisconfigRawFinding
 	var unresolved []string
 	seen := map[string]bool{}
@@ -1258,8 +1449,11 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 		sort.Slice(m.sources, func(i, j int) bool { return m.sources[i].rel < m.sources[j].rel })
 	}
 	// scanPass scans every module under the configuration already resolved into each module's context.
-	scanPass := func() {
+	scanPass := func() error {
 		for _, dir := range dirs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			m := ws.modules[dir]
 			var facts tfBucketFacts
 			var batch []ports.MisconfigRawFinding
@@ -1267,11 +1461,17 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 			// the line rules do not report the same wildcard tokens under weaker reasoning.
 			sites, policyUnresolved, spans := tfCollectPolicySites(m, m.ctx)
 			for _, site := range sites {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				spans.add(site.file, site.line, site.endLine)
 				batch = append(batch, site.assess()...)
 			}
 			unresolved = append(unresolved, policyUnresolved...)
 			for _, src := range m.sources {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				text, un := lowerTFSource(src, m.ctx)
 				unresolved = append(unresolved, un...)
 				batch = append(batch, scanTerraformText(src.rel, text, &facts, spans)...)
@@ -1285,8 +1485,11 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 				out = append(out, f)
 			}
 		}
+		return ctx.Err()
 	}
-	scanPass()
+	if err := scanPass(); err != nil {
+		return nil, nil, 0, err
+	}
 	// Every manually selected variable file is a configuration an operator applies, so each is resolved as
 	// its own whole-workspace pass and the findings are unioned. The bound is on the workspace.
 	budget := tfMaxScenarios
@@ -1294,6 +1497,9 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 	for _, dir := range dirs {
 		skipped += ws.modules[dir].droppedScenarios
 		for _, sc := range ws.modules[dir].scenarios {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, 0, err
+			}
 			if budget <= 0 {
 				// A scenario the cap refused is work that was NOT done. It is reported as a coverage gap
 				// rather than passing silently, because the configuration it describes was never scanned.
@@ -1301,17 +1507,26 @@ func (ws *tfWorkspace) scanWorkspace() ([]ports.MisconfigRawFinding, []string, i
 				continue
 			}
 			budget--
-			ws.resolveAll(map[string]map[string]cty.Value{dir: sc.vars})
-			scanPass()
+			if err := ws.resolveAll(ctx, map[string]map[string]cty.Value{dir: sc.vars}); err != nil {
+				return nil, nil, 0, err
+			}
+			if err := scanPass(); err != nil {
+				return nil, nil, 0, err
+			}
 		}
 	}
 	if budget < tfMaxScenarios {
-		ws.resolveAll(nil) // leave the workspace on its default configuration
+		if err := ws.resolveAll(ctx, nil); err != nil { // leave the workspace on its default configuration
+			return nil, nil, 0, err
+		}
 	}
 	for _, f := range ws.raw {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, 0, err
+		}
 		var facts tfBucketFacts
 		out = append(out, facts.apply(scanTerraformText(f.rel, string(f.data), &facts, nil))...)
 	}
 	sort.Strings(unresolved)
-	return out, slices.Compact(unresolved), skipped
+	return out, slices.Compact(unresolved), skipped, ctx.Err()
 }

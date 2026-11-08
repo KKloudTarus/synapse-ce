@@ -154,6 +154,11 @@ func within(root, abs string) bool {
 // must not be scanned raw. A reference cycle is bounded by the visited set.
 func coveredFiles(rootDir string, index map[string]*kustomization) map[string]bool {
 	covered := map[string]bool{}
+	walkKustomizations(index, []string{rootDir}, covered)
+	return covered
+}
+
+func walkKustomizations(index map[string]*kustomization, dirs []string, covered map[string]bool) map[string]bool {
 	visited := map[string]bool{}
 	var visit func(dir string)
 	visit = func(dir string) {
@@ -165,17 +170,23 @@ func coveredFiles(rootDir string, index map[string]*kustomization) map[string]bo
 		if !ok {
 			return
 		}
-		covered[k.file] = true
+		if covered != nil {
+			covered[k.file] = true
+		}
 		for _, ref := range k.refs {
 			if _, isKustomizeDir := index[ref]; isKustomizeDir {
 				visit(ref) // a referenced sub-kustomization directory
 				continue
 			}
-			covered[ref] = true // a referenced manifest / patch file
+			if covered != nil {
+				covered[ref] = true // a referenced manifest / patch file
+			}
 		}
 	}
-	visit(rootDir)
-	return covered
+	for _, dir := range dirs {
+		visit(dir)
+	}
+	return visited
 }
 
 // renderKustomization runs `kustomize build dir` (sandboxed or direct, per the Scanner's configuration) and

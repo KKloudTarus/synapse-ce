@@ -11,6 +11,15 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+func scanTerraformForTest(t *testing.T, rel string, data []byte) []ports.MisconfigRawFinding {
+	t.Helper()
+	findings, err := scanTerraform(context.Background(), rel, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return findings
+}
+
 func TestTerraformInsecure(t *testing.T) {
 	tf := `resource "aws_s3_bucket" "b" {
   bucket = "my-bucket"
@@ -223,10 +232,8 @@ func TestTerraformRDSDeletionProtectionMissing(t *testing.T) {
   engine         = "postgres"
   instance_class = "db.t3.micro"
 }`
-	all := scanTerraform(
-		"infra/main.tf",
-		[]byte(tf),
-	)
+	all := scanTerraformForTest(t, "infra/main.tf",
+		[]byte(tf))
 
 	got := terraformFindingsByRule(
 		all,
@@ -256,7 +263,7 @@ func TestTerraformRDSDeletionProtectionFalse(t *testing.T) {
 	tf := `resource "aws_db_instance" "primary" {
   deletion_protection = false
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d: %+v", len(got), got)
@@ -273,7 +280,7 @@ func TestTerraformRDSDeletionProtectionTrue(t *testing.T) {
 	tf := `resource "aws_db_instance" "primary" {
   deletion_protection = true
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 0 {
 		t.Fatalf("want 0 findings, got %d: %+v", len(got), got)
@@ -315,7 +322,7 @@ func TestTerraformRDSDeletionProtectionLiteralSyntax(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tf := "resource \"aws_db_instance\" \"primary\" {\n" + tt.line + "\n}"
-			all := scanTerraform("main.tf", []byte(tf))
+			all := scanTerraformForTest(t, "main.tf", []byte(tf))
 			got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 			if len(got) != tt.want {
 				t.Fatalf("want %d findings, got %d: %+v", tt.want, len(got), got)
@@ -365,7 +372,7 @@ func TestTerraformRDSDeletionProtectionDynamicValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tf := "resource \"aws_db_instance\" \"primary\" {\n  deletion_protection = " + tt.value + "\n}"
-			all := scanTerraform("main.tf", []byte(tf))
+			all := scanTerraformForTest(t, "main.tf", []byte(tf))
 			got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 			if len(got) != 0 {
 				t.Fatalf("want 0 findings, got %d: %+v", len(got), got)
@@ -403,7 +410,7 @@ func TestTerraformRDSDeletionProtectionCommentsDoNotSuppress(t *testing.T) {
 	}
 	for i, tf := range tfs {
 		t.Run("comment_case_"+string(rune('0'+i)), func(t *testing.T) {
-			all := scanTerraform("main.tf", []byte(tf))
+			all := scanTerraformForTest(t, "main.tf", []byte(tf))
 			got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 			if len(got) != 1 {
 				t.Fatalf("want 1 finding, got %d: %+v", len(got), got)
@@ -418,7 +425,7 @@ func TestTerraformRDSDeletionProtectionExactAttribute(t *testing.T) {
   enable_deletion_protection = true
   rds_deletion_protection    = true
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d: %+v", len(got), got)
@@ -431,7 +438,7 @@ func TestTerraformRDSDeletionProtectionNestedAttribute(t *testing.T) {
     deletion_protection = true
   }
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d: %+v", len(got), got)
@@ -446,7 +453,7 @@ func TestTerraformRDSDeletionProtectionAfterNestedBlock(t *testing.T) {
 
   deletion_protection = true
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 0 {
 		t.Fatalf("want 0 findings, got %d: %+v", len(got), got)
@@ -461,7 +468,7 @@ func TestTerraformRDSDeletionProtectionDirectFalse(t *testing.T) {
 
   deletion_protection = false
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d: %+v", len(got), got)
@@ -497,7 +504,7 @@ func TestTerraformRDSDeletionProtectionResourceScope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tf := "resource \"" + tt.resourceType + "\" \"example\" {\n  deletion_protection = false\n}"
-			all := scanTerraform("main.tf", []byte(tf))
+			all := scanTerraformForTest(t, "main.tf", []byte(tf))
 			got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 			if len(got) != 0 {
 				t.Fatalf("want 0 findings, got %d: %+v", len(got), got)
@@ -519,7 +526,7 @@ resource "aws_db_instance" "enabled" {
 resource "aws_db_instance" "dynamic" {
   deletion_protection = var.enabled
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 2 {
 		t.Fatalf("want 2 findings, got %d: %+v", len(got), got)
@@ -545,9 +552,9 @@ resource "aws_db_instance" "enabled" {
 resource "aws_ebs_volume" "v" {
   size = 20
 }`
-	first := scanTerraform("main.tf", []byte(tf))
+	first := scanTerraformForTest(t, "main.tf", []byte(tf))
 	for i := 0; i < 20; i++ {
-		got := scanTerraform("main.tf", []byte(tf))
+		got := scanTerraformForTest(t, "main.tf", []byte(tf))
 		if len(first) != len(got) {
 			t.Fatalf("iteration %d: length mismatch %d != %d", i, len(first), len(got))
 		}
@@ -563,7 +570,7 @@ func TestTerraformRDSDeletionProtectionOneFindingPerResource(t *testing.T) {
 	tf := `resource "aws_db_instance" "primary" {
   deletion_protection = false
 }`
-	all := scanTerraform("main.tf", []byte(tf))
+	all := scanTerraformForTest(t, "main.tf", []byte(tf))
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d: %+v", len(got), got)

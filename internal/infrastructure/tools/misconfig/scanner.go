@@ -156,6 +156,19 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 				success[f] = true
 			}
 		}
+		// Indexed directories outside every root closure (for example, a cycle) were never rendered.
+		// Preserve their entire closure for raw scanning, including files shared with successful roots.
+		reachable := walkKustomizations(index, roots, nil)
+		var unreachable []string
+		for dir := range index {
+			if !reachable[dir] {
+				unreachable = append(unreachable, dir)
+			}
+		}
+		if len(unreachable) > 0 {
+			noteUnassessed(len(unreachable), "kustomizations unreachable from any render root were not rendered, so overlay patches were not applied")
+			walkKustomizations(index, unreachable, failed)
+		}
 		// Skip a file's raw scan only when EVERY root that references it rendered successfully; if any
 		// referencing root failed or was skipped, keep the raw scan (a harmless double is better than a
 		// suppressed finding).
@@ -309,7 +322,14 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	}
 	// Second Terraform pass: parse every module, resolve its variables, locals and module inputs within the
 	// bounded contract, and scan the normalized source in which each attribute carries its effective value.
-	tfFindings, tfUnresolved, tfSkippedScenarios := buildTFWorkspace(tfConfigs, tfVarFiles).scanWorkspace()
+	tfWorkspace, err := buildTFWorkspace(ctx, tfConfigs, tfVarFiles)
+	if err != nil {
+		return ports.MisconfigScanReport{Findings: out}, fmt.Errorf("misconfig scan: %w", err)
+	}
+	tfFindings, tfUnresolved, tfSkippedScenarios, err := tfWorkspace.scanWorkspace(ctx)
+	if err != nil {
+		return ports.MisconfigScanReport{Findings: out}, fmt.Errorf("misconfig scan: %w", err)
+	}
 	out = append(out, tfFindings...)
 	if tfSkippedScenarios > 0 {
 		noteUnassessed(tfSkippedScenarios, "the Terraform variable-file scenario budget was reached, so those configurations were not evaluated")

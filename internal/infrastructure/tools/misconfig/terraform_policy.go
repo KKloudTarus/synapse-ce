@@ -1,6 +1,7 @@
 package misconfig
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -553,10 +554,14 @@ func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) (cty.Value, map[string]b
 			if err != nil {
 				continue
 			}
+			var expanded bytes.Buffer
+			if err := json.Indent(&expanded, raw, "", "  "); err != nil {
+				docs[blk.Labels[1]] = cty.DynamicVal
+				continue
+			}
 			docs[blk.Labels[1]] = cty.ObjectVal(map[string]cty.Value{
-				"json":          cty.StringVal(string(raw)),
+				"json":          cty.StringVal(expanded.String()),
 				"minified_json": cty.StringVal(string(raw)),
-				"id":            cty.StringVal(blk.Labels[1]),
 			})
 			assessable[blk.Labels[1]] = true
 		}
@@ -572,13 +577,10 @@ func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) (cty.Value, map[string]b
 // read with a missing element would be assessed as something the operator did not write.
 func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocument, bool) {
 	doc := policyDocument{Version: "2012-10-17"}
-	// The provider MERGES source_policy_documents and override_policy_documents into the rendered .json,
-	// with its own Sid precedence. Reading only the direct statement blocks would publish a partial
-	// document as the resolved one, and a public grant contributed by a merged document would vanish from
-	// both this assessment and the literal fallback. Composition is outside the supported contract, so the
-	// document is left unresolved and the line rules keep it.
-	for _, name := range []string{"source_policy_documents", "override_policy_documents", "source_json", "override_json"} {
-		if _, composed := body.Attributes[name]; composed {
+	// Only the plain document's version is modeled. Instance collections, composition and other
+	// unmodeled attributes must not be dropped to publish a confident partial document.
+	for name := range body.Attributes {
+		if name != "version" {
 			return doc, false
 		}
 	}
@@ -602,6 +604,10 @@ func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocumen
 		if d.HasErrors() || !v.IsWhollyKnown() || v.IsNull() {
 			return nil, false, false
 		}
+		typ := v.Type()
+		if !typ.IsListType() && !typ.IsSetType() && !typ.IsTupleType() {
+			return nil, false, false
+		}
 		var out []string
 		for it := v.ElementIterator(); it.Next(); {
 			_, ev := it.Element()
@@ -612,9 +618,21 @@ func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocumen
 		}
 		return out, true, true
 	}
+	if version, present, ok := str(body, "version"); !ok {
+		return doc, false
+	} else if present {
+		doc.Version = version
+	}
 	for _, blk := range body.Blocks {
 		if blk.Type != "statement" {
-			continue
+			return doc, false
+		}
+		for name := range blk.Body.Attributes {
+			switch name {
+			case "sid", "effect", "actions", "not_actions", "resources", "not_resources":
+			default:
+				return doc, false
+			}
 		}
 		st := policyStatement{Effect: "Allow"}
 		if v, present, ok := str(blk.Body, "sid"); !ok {
@@ -676,6 +694,8 @@ func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocumen
 					conds[test] = map[string][]string{}
 				}
 				conds[test][variable] = append(conds[test][variable], values...)
+			default:
+				return doc, false
 			}
 		}
 		if len(principals) > 0 {
