@@ -62,9 +62,9 @@ bucket, and source-artifact volume before the API starts.
 The Compose stack is the smallest useful deployment. Three components run separately in a real
 installation:
 
-**`synapse-worker`** is required for durable recon, scheduled vulnerability-intelligence work, CSPM runs,
-and fleet dispatch. It is lease-based, so enable `SYNAPSE_LEADER_ENABLED` and run it alongside the API
-rather than inside it.
+**`synapse-worker`** is required for durable recon, authenticated DAST scans, scheduled
+vulnerability-intelligence work, CSPM runs, and fleet dispatch. It is lease-based, so
+enable `SYNAPSE_LEADER_ENABLED` and run it alongside the API rather than inside it.
 
 **Fleet agents** run on the hosts being defended, not on the control plane. `synapse-agent` needs Linux
 with eBPF for runtime detections; `synapse-cluster-agent` runs in-cluster or with a kubeconfig. Both enroll
@@ -72,9 +72,9 @@ with a one-time token and then authenticate with a client certificate. See
 [Fleet and runtime defense](fleet-blue-team.md) and
 [Fleet agent packaging](fleet-agent-packaging.md).
 
-**Sandboxed helpers** (`synapse-callgraph`, `synapse-ast`, `synapse-cspm`, `synapse-dast-helper`) are
-executed by the server as pinned binaries. They need to be present on the host or image, and in production
-should be referenced by absolute path with hashes pinned in `SYNAPSE_TOOL_HASHES`.
+**Sandboxed helpers** (`synapse-callgraph`, `synapse-ast`, `synapse-cspm`, `synapse-dast-helper`) must be
+present where they execute. Authenticated DAST requires a canonical absolute worker path and an
+authoritative hash in `SYNAPSE_TOOL_HASHES`; see [Configuration](configuration.md#fleet-leader-election-and-dast).
 
 The stack reads its settings from environment variables with dev defaults. Change them for
 anything but local development. Put real values in a `.env` file next to the Compose file, or
@@ -142,19 +142,18 @@ executes capless, and a root-owned broker enforces per-run kernel egress.
 | `execution.mode` | What runs | What works | Where it fits |
 | --- | --- | --- | --- |
 | `controlPlaneOnly` (default) | API (in-process) + web + migration. No worker, no broker. Non-production, sandbox off. | The OFFLINE product: SCA, SAST, secrets, IaC, SBOM import, code quality, connectors management, CI push, fleet host-CVE. | Any node, including standard managed EKS/GKE and `kind`. The portable, boots-anywhere posture and the local smoke target. |
-| `externalNative` | Production control plane on k8s (API `dispatch-only` + web + migration). Execution tier (`synapse-worker` + root `synapse-egress-broker`) runs on NATIVE EC2/VM hosts. | Everything, including DAST, live recon, CSPM, and remote git-clone / image-pull, executed on the native tier under kernel-enforced egress. | The recommended production topology (ADR 0008). Requires `api.grantAuthority.enabled=true`. |
-| `inClusterBroker` | Everything in `externalNative` plus the worker and a privileged `synapse-egress-broker` DaemonSet IN-cluster, on tainted/labelled execution nodes. | Same as `externalNative`, entirely in k8s. | Self-managed clusters or Karpenter/EC2NodeClass custom AMIs whose nodes permit unprivileged user namespaces. Opt-in; a chart guard requires the broker to be enabled and node-pinned. |
+| `externalNative` | Production control plane on k8s (API `dispatch-only` + web + migration). Execution tier (`synapse-worker` + root `synapse-egress-broker`) runs on native EC2/VM hosts. | Supported signed-grant branches include recon, CSPM, DAST verifier probes and authenticated DAST scans. Networked SCA/acquisition remain unavailable. | The production topology in ADR 0008. Requires `api.grantAuthority.enabled=true` and a qualified execution host. |
+| `inClusterBroker` | `externalNative` roles with the worker and a privileged `synapse-egress-broker` DaemonSet in-cluster, on tainted/labelled execution nodes. | The same supported branches, subject to the node's sandbox and egress capabilities. | Self-managed clusters or Karpenter/EC2NodeClass custom AMIs whose nodes permit unprivileged user namespaces. Opt-in; a chart guard requires the broker to be enabled and node-pinned. |
 
 The dividing line is the node, not the chart. **Standard managed EKS/GKE nodes deny the nested unprivileged
 user namespaces bubblewrap needs**, so they cannot run the sandboxed execution tier in a Pod. On those, use
-`externalNative` with native EC2 workers; the offline `controlPlaneOnly` product still runs in-cluster. Only
-`inClusterBroker` on a demonstrably capable node pool runs the full product inside k8s. The egress broker is
-the ONE privileged component (NET_ADMIN + SYS_ADMIN); the worker and API stay capless.
+`externalNative` with native EC2 workers; the offline `controlPlaneOnly` product still runs in-cluster.
+`inClusterBroker` requires a demonstrably capable node pool. The egress broker is the privileged
+component for namespace and firewall administration; the worker and API stay capless.
 
 Single host (one EC2/VM): the offline product runs from `deploy/docker-compose.full.yml` (sandbox off, dev).
-The full product on one box runs the three native roles co-located, `synapse-api` (dispatch-only),
-`synapse-worker`, and root `synapse-egress-broker`, keeping the same privilege split; the API never holds
-NET_ADMIN/SYS_ADMIN.
+The execution roles can be co-located as `synapse-api` (dispatch-only), `synapse-worker`, and root
+`synapse-egress-broker`, keeping the same privilege split; the API never holds NET_ADMIN/SYS_ADMIN.
 
 ### The runtime database role must be non-superuser
 
@@ -335,10 +334,40 @@ only after custody commits, outside the audit, approval and run locks.
 
 The trusted verifier workflow enforces the approved GET/HEAD configuration and URL; the broker enforces
 the signed process and destination IP/port. It does not enforce an HTTPS path against a compromised worker.
-Authenticated DAST sessions and networked SCA/acquisition still lack authoritative issuer branches and
-remain unavailable in production. Do not bypass
-these refusals with host networking, a local privileged egress applier, a worker-supplied policy, or a broadly
-reachable proxy.
+Authenticated DAST scans also have a dedicated issuer branch. Apply additive migrations through 0272 first.
+The API is the control plane: it checks policy, enqueues and reads runs, while PostgreSQL durably
+records the queue, approval ownership and custody. The capless worker executes in the sandbox through
+the bounded root broker using a signed, one-use grant from the private authority. Keep human API
+tokens, the authority signing seed and migration credentials out of the worker. Configure the same
+canonical helper path, authoritative hash and limits across API policy, issuer and worker as described
+in [Configuration](configuration.md#fleet-leader-election-and-dast). A missing or mismatched pin or
+required containment capability fails closed. In-memory or non-durable operation does not run scans
+synchronously.
+
+The Helm chart gives the human API token only to the API and the migration credential
+only to the migration Job. The Job also receives the runtime DSN for role-separation
+validation and runtime-role grants. Production API containers use `dispatch-only`; in-cluster worker containers
+use `worker`.
+
+Human approval, engagement scope and the authorization window remain mandatory; the independent
+system verifier remains distinct from the proposer. The issuer rechecks live authority and the job
+lease before granting access, and publication is fenced as well. A consumed approval or uncertain
+grant response requires a new approval; started work is not automatically resumed.
+
+The worker reconciles failed DAST queue jobs at maintenance startup and every five minutes;
+with leader election enabled, maintenance starts when leadership is acquired.
+Each tenant batch selects at most 100 unfinished runs through a partial index, excluding
+terminal run history. It rechecks the stored run/job binding, terminal queue state
+and fence before failing a queued or running scan with `queue_failed`. This also
+covers a missing approval or a lost dead-letter callback: cleanup grants no execution
+authority, consumes no approval and never creates a successful scan result. Existing
+terminal runs remain unchanged; publication and notification capture stay transactional.
+
+DNS bindings are metadata for the approved destinations, not additional all-port rules. Literal
+addresses and resolved names remain limited to the authorized address and port; DNS metadata does
+not widen scope. Networked SCA/acquisition still lack authoritative issuer branches and remain
+unavailable in production. Do not bypass these refusals with host networking, a local privileged
+egress applier, a worker-supplied policy, or a broadly reachable proxy.
 
 ## Production checklist
 

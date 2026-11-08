@@ -42,17 +42,35 @@ Locals resolve by repeated substitution. A local that is declared but not resolv
 UNKNOWN rather than missing, so an expression reading it propagates uncertainty instead of
 taking a `try` fallback that Terraform would not take. Module inputs propagate down the
 tree, recorded per call site: one site refining its value across rounds is the same binding
-becoming accurate, and only two different sites disagreeing leaves the input without a
-single value. Both are bounded at eight rounds: a configuration that needs more is left
-unresolved rather than iterated to a fixpoint.
+becoming accurate. Calls compare their effective bindings, including defaults and variable
+files for omitted inputs. An omitted required input is unknown; it never inherits another
+call's override. Different bindings leave the shared module input unresolved rather than
+choosing one instance's value. Before propagation, every explicit input at a known call
+site starts UNKNOWN, so a child's default cannot become a provisional concrete value
+while an overriding input is still travelling down the tree. Omitted inputs still use
+their effective defaults or variable files. Both locals and module propagation are
+bounded at eight rounds: a configuration that needs more is left unresolved rather than
+iterated to a fixpoint. An unresolved declared input stays unknown when forwarded to
+another module, including through `try`: uncertainty is not an evaluation error that
+permits a concrete fallback.
+Resource and other external references the evaluation context cannot resolve also stay
+UNKNOWN before expression evaluation, including inside `try`; a scanner limitation
+must not activate a Terraform fallback or a child default.
+Caller cancellation stops resolution and the remaining variable-file scenarios.
 
 Functions are a fixed, pure allowlist (`concat`, `slice`, `merge`, `jsonencode`,
 `lookup`, and the other value transformations). None reads a file, a provider, the
 network, or the Terraform state, so evaluating a target's configuration can have no effect
 outside the scan.
 
+`length` counts Unicode grapheme clusters in strings and elements or attributes in
+collections. Real argument-type errors remain catchable by `try`, while an unknown
+input propagates uncertainty rather than selecting its fallback.
+
 `format`, `formatlist` and `indent` are absent: their width and count parameters let a
 one-line configuration ask for an arbitrarily large string.
+The admission walk also rejects calls outside the allowlist before `try` can mistake
+a missing-function diagnostic for a configuration error and select a concrete fallback.
 
 Every remaining function is wrapped so the projected size of its result is checked from the
 arguments BEFORE it runs. The check has to come first: a predicate on the finished value
@@ -138,6 +156,16 @@ of falling back to a value the provider would never produce, and only a document
 scanner actually rendered suppresses its own literal findings. A document a referencing resource carries
 is assessed once, at the resource; a document no recognised resource consumes keeps its
 literal line rules, because it attaches to nothing this scanner can establish.
+
+The parsed statement model exposes indented `json` and compact `minified_json`.
+Provider-derived `id` values and introspection of the full provider object stay
+UNKNOWN; a local declaration name is not a provider identity. A declaration using
+`count`, `for_each`, dynamic blocks or unmodeled inputs such as `policy_id` also
+stays UNKNOWN; none is discarded to construct a partial document. Its literal
+statements remain eligible for inspection, and malformed string-list attributes
+are refused rather than iterated as collections. Explicit `version` values are
+retained, with `"2012-10-17"` used only when absent. These strings neither prove that
+a provider ran nor promise byte-for-byte provider output.
 
 ### Decisions
 

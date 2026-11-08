@@ -2,8 +2,9 @@
 
 Synapse records a bounded outcome for each planned scan engine. An outcome separates
 whether an engine executed from whether it fully covered its required scope. A finding
-is positive evidence; zero findings only supports a clean conclusion when the required
-engine coverage is complete.
+is positive evidence; complete required-engine coverage is necessary but not sufficient
+to conclude that zero findings means clean. Source warnings can identify values that
+remain unresolved within an engine's documented evaluation bounds.
 
 Each outcome contains the engine name, execution (`completed`, `failed`, `timed_out`,
 `cancelled`, or `not_run`), coverage (`complete`, `partial`, `unknown`, or
@@ -34,6 +35,65 @@ with a summary on stderr, read from these outcomes rather than from warning text
 required engine that did not complete, its execution and reason, the engines excluded on
 purpose, and the source warnings in full.
 
+## SBOM inventory reuse
+
+Inventory caching does not cache advisory matching. A reused SBOM keeps its actual
+producer provenance and is matched against the advisory data available to that scan.
+Changing producers cannot relabel a cached inventory as another producer's output.
+
+The owned producer bypasses inventory reuse for Maven trees, whose resolution can
+change through an external local repository or fetcher without changing the target.
+Syft identity includes executable contents and the effective configuration loaded
+through the same runner used for generation. Unidentifiable or mutable external
+inputs bypass both cache lookup and storage; generation still runs. With a sandbox
+runner, use an absolute Syft path to identify its executable rather than assuming
+the host and sandbox resolve a bare PATH name identically.
+
+## Authenticated DAST scans
+
+Authenticated DAST uses a separate durable run from the engine outcomes above. A
+queued or running scan has no result yet. Its terminal result records the approved
+configuration digest, observed surface, coverage, incomplete flag, optional reason
+and proofs. An incomplete crawl retains its observed surface and coverage but does not
+promote observations to proofs or judgments. Execution failure is not a completed
+scan: available session evidence stays in the ledger, while the run reports an
+error code without inventing a terminal scan result.
+
+Target-issued cookie values remain tracked through login, liveness checks, rotations
+and crawling. Bounded excerpts are redacted once, using all values learned by the end
+of execution, before serialization and sealing; body hashes still describe the raw
+response. Issued values shorter than eight bytes, such as language or consent flags,
+are redacted only where they appear as whole tokens, so a one-letter value cannot erase
+unrelated evidence; longer issued values and configured credentials are redacted
+wherever they appear. A short issued value that appears as a whole token in a URL the
+helper would send, such as a `1` flag and a `/orders/1` link, makes the scan incomplete
+rather than risk disclosing it. Passive checks retain header names, cookie attributes and
+nonsecret body content. Cookie names and values do not count as attributes. If secret
+handling cannot produce safe observations, the helper returns an explicit incomplete
+outcome instead. Request URLs, sealed URLs and excerpts are checked across alternate
+orders of percent, HTML character-reference and JSON/hex string-escape decoding,
+including plus-as-space views. Exploration is limited to four decoding steps and 64
+distinct views; reaching a bound with unexplored representations is unsafe. If a
+reflection cannot be located for safe redaction, the helper refuses the outcome rather
+than silently discarding coverage.
+Known credentials in request or redirect URLs are refused inside the helper before
+parent authorization, audit logging or HTTP dispatch. Values learned only from a later
+response still trigger the final URL safety check before serialization and sealing.
+
+Proofs reflect observations, not assumptions from a successful request or a finished
+job. A distinct system verifier checks claims; the human approval, engagement scope
+and authorization window remain required. See [DAST](ui-walkthrough.md#dast) for the
+queued workflow.
+
+Request authorization follows the helper's rate-limit wait, immediately before dispatch,
+so the wait cannot carry an earlier authorization past the engagement window.
+
+A source-map finding requires a served, nonempty response with captured source-map
+content. Empty `200`, `204`, `205`, and `404` responses cannot confirm an artifact.
+The configured-authentication marker check recognizes its explicit body marker or the
+exact captured `X-Synapse-Auth-Weakness` header name; header values stay redacted.
+This marker check is not general authentication-vulnerability discovery.
+
 ## Infrastructure-as-code capability gaps
 
 The `iac` engine reports partial coverage when a capability could not evaluate its input,
@@ -43,6 +103,14 @@ reported as `unrendered_charts`; a Kustomize overlay that was not rendered is re
 what to enable, and the raw manifests behind them are still scanned, so the findings that
 were available remain. Execution completing never implies that every input was assessed.
 
+Workspace and materialized image-rootfs coverage are merged conservatively: a successful
+pass cannot erase the other's gap. Indexed Kustomizations unreachable from every render
+root, including cyclic components, remain unassessed and retain their raw resource findings.
+Both passes retain bounded `file:line: attribute` diagnostics for unresolved Terraform
+values. Persisted source warnings appear in report scan sections, so image-rootfs
+uncertainty is not silently presented as evaluated-and-clean. These diagnostics do not
+change complete coverage of the documented bounded capability or the coverage gate.
+
 [Infrastructure-as-code evaluation](iac-evaluation.md) states the full contract, including
 the Terraform constructs that are evaluated and the ones that stay unresolved.
 
@@ -50,10 +118,12 @@ the Terraform constructs that are evaluated and the ones that stay unresolved.
 
 The owned installed-package catalog walks a materialized image root filesystem under a
 file cap and a component cap. Reaching either returns the packages found so far and
-reports the catalog as a lower bound, naming the bound that was reached; entries the walk
-could not read are counted the same way. Both clear the inventory's confidence, mark the
-`inventory` engine's coverage partial with `analysis_incomplete`, and add a source
-warning. The components that were cataloged are kept and still match advisories.
+reports the catalog as a lower bound, naming the bound that was reached. Unreadable
+directory entries and regular-file read failures—including installed metadata,
+archives and binary candidates—are counted as inventory gaps. Both bounds and read
+failures clear the inventory's confidence, mark the `inventory` engine's coverage
+partial with `analysis_incomplete`, and add a source warning. The components that
+were cataloged are kept and still match advisories.
 
 ## Semantic engine selection
 

@@ -293,7 +293,7 @@ as intact.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_SBOM_PRODUCER` | `ownsbom` | `ownsbom` (default; detection-independent owned parsers across 23 ecosystems with dep-graph edges, so no third-party scanner binary is required) or `syft` (the pinned Syft binary, an opt-in cross-check). Set `syft` to roll back. |
-| `SYNAPSE_SYFT_BIN` | `syft` | Syft executable, resolved on PATH. |
+| `SYNAPSE_SYFT_BIN` | `syft` | Syft executable, resolved on PATH for execution. Sandboxed inventory reuse requires an absolute path; see [inventory reuse](scan-coverage.md#sbom-inventory-reuse). |
 | `SYNAPSE_GRYPE_BIN` | `grype` | Grype executable. Missing means detection degrades to the live source only. |
 | `SYNAPSE_GRYPE_DB_DIR` | (online) | Pin Grype's vulnerability database to a pre-synced directory for offline, reproducible scans. |
 | `SYNAPSE_DETECTION_SOURCES` | (owned default) | Comma list selecting and ordering the vulnerability detection sources from `grype`, `osv`, `advisory-store` (Synapse's own advisory corpus). Empty selects the owned-only default: `osv` unless offline, then `advisory-store` when `SYNAPSE_OWNED_ADVISORY` (the default), with Grype dropped to an opt-in cross-check. Dropping Grype does not silently lower OS-package recall: the OS-distro coverage guard marks a scan not-confident when an OS-package's distro is not covered by the owned store and Grype is absent. When set it is authoritative, so an operator restores Grype with `osv,grype,advisory-store`. Unknown names fail closed at startup. |
@@ -376,7 +376,7 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_SUPPRESSION_ENABLED` | `true` | Honor a `.synapseignore` file. Acceptance exempts only the `--fail-on` gate; the finding is still reported, persisted, and evidence-sealed. |
 | `SYNAPSE_VEX_ENABLED` | `true` | Consume an in-repo OpenVEX document (`.synapse.vex.json`) at scan time, on the same retain-and-mark surface as suppression. |
 | `SYNAPSE_COMPLIANCE_ENABLED` | `true` | Compliance benchmark. Re-projects findings onto a control specification and reports per-control PASS or FAIL. |
-| `SYNAPSE_SCAN_CACHE_ENABLED` | `true` | Enables content-addressed scan caches. SBOM entries key on content plus producer version. Tenant-bound API AI-triage entries key on tenant, project/engagement scope, finding fingerprint, complete-source hash, prompt-context hash, proposer/verifier models, prompt version, and policy version. Cached AI claims are always rebound to the current finding, re-authorized by server policy, and linked to newly sealed scan evidence; missing tenant identity and provider failures are not cached. The directory must be operator-owned, since a shared-writable cache would allow poisoning. |
+| `SYNAPSE_SCAN_CACHE_ENABLED` | `true` | Enables content-addressed scan caches. SBOM entries bind target content to an identifiable producer and effective inputs; mutable external resolution inputs bypass inventory reuse. See [inventory reuse](scan-coverage.md#sbom-inventory-reuse). Tenant-bound API AI-triage entries key on tenant, project/engagement scope, finding fingerprint, complete-source hash, prompt-context hash, proposer/verifier models, prompt version, and policy version. Cached AI claims are always rebound to the current finding, re-authorized by server policy, and linked to newly sealed scan evidence; missing tenant identity and provider failures are not cached. The directory must be operator-owned, since a shared-writable cache would allow poisoning. |
 | `SYNAPSE_SCAN_CACHE_DIR` | (per-user) | Cache location. Empty uses a per-user cache directory; AI-triage entries live in its owner-only `ai-triage` subdirectory and contain typed claims, never source text or credentials. |
 | `SYNAPSE_IMAGE_ROOTFS_ENABLED` | `true` | Materialize a container image root filesystem so the owned OS-package catalogers (dpkg, apk, and the rpm sqlite database) and installed-binary catalogers (Go build info, Python dist-info) can run. Best-effort. |
 
@@ -558,7 +558,27 @@ split deployments cannot suppress another profile's maintenance. See
 | `SYNAPSE_DAST_MAX_DEPTH` | `8` | Maximum crawl depth. |
 | `SYNAPSE_DAST_MAX_PAGES` | `2000` | Maximum pages crawled. |
 | `SYNAPSE_DAST_MAX_WALL_CLOCK` | `30m` | Maximum crawl wall-clock. |
-| `SYNAPSE_DAST_HELPER_BIN` | `synapse-dast-helper` | Sandboxed DAST helper binary. |
+| `SYNAPSE_DAST_HELPER_BIN` | `synapse-dast-helper` | Sandboxed DAST helper binary. Authenticated production scans require an operator-configured canonical absolute path on the worker and an authoritative SHA-256 pin in `SYNAPSE_TOOL_HASHES`. |
+
+For authenticated DAST, configure the same helper path, pin and scan limits in the API's
+policy and private issuer and on the worker. `SYNAPSE_TOOL_HASHES` accepts
+`/absolute/path=sha256` or `basename=sha256`. At execution, all applicable pins for
+the requested and symlink-resolved paths and basenames must match; conflicting pins
+fail closed. Each pin must be a 64-character SHA-256 hex digest (case-insensitive).
+The command-name default and trust-on-first-use alone do not satisfy this requirement.
+
+Run additive migrations through 0272 before deploying the new binaries. The dispatch-only API
+validates policy and submits or reads work; PostgreSQL provides the durable queue,
+scan ownership and approval custody. A dedicated signed authority, unprivileged
+sandboxed worker and separately bounded root broker execute the approved work.
+The worker must not receive a human API token, authority signing seed or migration
+credential. Authenticated scans are unavailable with in-memory or other non-durable
+storage; they do not fall back to synchronous execution.
+
+An authenticated human must approve the scan, and engagement scope and authorization
+window remain enforced. The same human may approve and request it; machine actors,
+blank identities and automatic approvals cannot substitute for that decision. The
+system verifier remains distinct from the proposer.
 
 Engagement authorization-window notices use each rule's `lead_time_seconds`.
 Only draft or active standalone engagements with the selected future authorization
@@ -799,7 +819,7 @@ as intact.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_SBOM_PRODUCER` | `ownsbom` | `ownsbom` (default; detection-independent owned parsers across 23 ecosystems with dep-graph edges, so no third-party scanner binary is required) or `syft` (the pinned Syft binary, an opt-in cross-check). Set `syft` to roll back. |
-| `SYNAPSE_SYFT_BIN` | `syft` | Syft executable, resolved on PATH. |
+| `SYNAPSE_SYFT_BIN` | `syft` | Syft executable, resolved on PATH for execution. Sandboxed inventory reuse requires an absolute path; see [inventory reuse](scan-coverage.md#sbom-inventory-reuse). |
 | `SYNAPSE_GRYPE_BIN` | `grype` | Grype executable. Missing means detection degrades to the live source only. |
 | `SYNAPSE_GRYPE_DB_DIR` | (online) | Pin Grype's vulnerability database to a pre-synced directory for offline, reproducible scans. |
 | `SYNAPSE_DETECTION_SOURCES` | (owned default) | Comma list selecting and ordering the vulnerability detection sources from `grype`, `osv`, `advisory-store` (Synapse's own advisory corpus). Empty selects the owned-only default: `osv` unless offline, then `advisory-store` when `SYNAPSE_OWNED_ADVISORY` (the default), with Grype dropped to an opt-in cross-check. Dropping Grype does not silently lower OS-package recall: the OS-distro coverage guard marks a scan not-confident when an OS-package's distro is not covered by the owned store and Grype is absent. When set it is authoritative, so an operator restores Grype with `osv,grype,advisory-store`. Unknown names fail closed at startup. |
