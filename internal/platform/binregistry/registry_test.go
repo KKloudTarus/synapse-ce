@@ -1,7 +1,10 @@
 package binregistry
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,6 +76,66 @@ func TestVerifyReturnsResolvedPath(t *testing.T) {
 	}
 	if resolved != want || resolved == link {
 		t.Fatalf("Verify(%q) returned %q, want resolved target %q", link, resolved, want)
+	}
+}
+
+func TestVerifySymlinkAuthoritativePins(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(targetDir, "tool-v1")
+	content := []byte("original")
+	if err := os.WriteFile(target, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fileLink := filepath.Join(dir, "tool")
+	parentLink := filepath.Join(dir, "alias")
+	for link, dest := range map[string]string{fileLink: target, parentLink: targetDir} {
+		if err := os.Symlink(dest, link); err != nil {
+			t.Skipf("symlink creation unavailable: %v", err)
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	good := hex.EncodeToString(sum[:])
+	wrong := "deadbeef"
+
+	for _, requested := range []string{fileLink, filepath.Join(parentLink, "tool-v1")} {
+		t.Run(filepath.Base(filepath.Dir(requested))+"-"+filepath.Base(requested), func(t *testing.T) {
+			cases := []struct {
+				name string
+				pins map[string]string
+				fail bool
+			}{
+				{"requested path correct", map[string]string{requested: good}, false},
+				{"requested path wrong", map[string]string{requested: wrong}, true},
+				{"requested basename wrong", map[string]string{filepath.Base(requested): wrong}, true},
+				{"requested wrong resolved correct", map[string]string{requested: wrong, resolved: good}, true},
+				{"requested correct resolved wrong", map[string]string{requested: good, resolved: wrong}, true},
+				{"requested basename wrong resolved correct", map[string]string{filepath.Base(requested): wrong, resolved: good}, true},
+				{"all matching", map[string]string{requested: good, filepath.Base(requested): good, resolved: good, filepath.Base(resolved): good}, false},
+				{"no pin", nil, false},
+			}
+			for _, tc := range cases {
+				for _, tofu := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/tofu=%t", tc.name, tofu), func(t *testing.T) {
+						got, err := New(tc.pins, tofu).Verify(requested)
+						if tc.fail {
+							if !errors.Is(err, ErrIntegrity) || got != "" {
+								t.Fatalf("Verify(%q) = %q, %v; want integrity refusal and no path", requested, got, err)
+							}
+						} else if err != nil || got != resolved {
+							t.Fatalf("Verify(%q) = %q, %v; want %q, nil", requested, got, err, resolved)
+						}
+					})
+				}
+			}
+		})
 	}
 }
 
