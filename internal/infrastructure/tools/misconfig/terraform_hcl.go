@@ -1026,6 +1026,8 @@ func lowerTFSource(src *tfSource, ctx *hcl.EvalContext) (string, []string) {
 			}
 			source := string(src.data[rng.Start.Byte:rng.End.Byte])
 			references := attr.Expr.Variables()
+			// The nil context selects the bound-specific diagnostic. tfEval checks
+			// admission again with the real context before evaluating the expression.
 			if !tfEvaluable(attr.Expr, len(references), nil) {
 				unresolved = append(unresolved, fmt.Sprintf("%s:%d: %s (reference bound)", src.rel, rng.Start.Line, attr.Name))
 				continue

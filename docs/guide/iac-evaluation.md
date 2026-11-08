@@ -158,10 +158,10 @@ is assessed once, at the resource; a document no recognised resource consumes ke
 literal line rules, because it attaches to nothing this scanner can establish.
 
 The statement model supplies JSON for policy analysis. Provider-derived `id`
-values and introspection of the full provider object remain UNKNOWN. Declarations
-with `count`, `for_each`, dynamic blocks, explicit `version`, or `policy_id`
-remain UNKNOWN and retain literal inspection. Malformed string-list attributes
-also leave the document unresolved.
+values and introspection of the full provider object remain UNKNOWN. An explicit
+`version` alone, even `version = "2012-10-17"`, leaves the document UNKNOWN and
+retains literal inspection. The same applies to `count`, `for_each`, dynamic
+blocks, `policy_id`, and malformed string-list attributes.
 
 ### Decisions
 
