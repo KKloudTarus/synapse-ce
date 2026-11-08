@@ -117,7 +117,7 @@ func TestRenderLongCompletenessWarningKeepsEngineTableBelowWarning(t *testing.T)
 	insight := ports.ReportInsight{
 		HasScan:          true,
 		CompletenessNote: note,
-		SourceWarnings:   []string{"1 image-filesystem infrastructure-as-code attribute did not resolve to a value: modules/vol/main.tf:5: encrypted"},
+		CoverageWarnings: []string{"1 image-filesystem infrastructure-as-code attribute did not resolve to a value: modules/vol/main.tf:5: encrypted"},
 		EngineCoverage:   scanrun.EngineCoverage{Status: scanrun.CoveragePartial, Required: 2, Completed: 1},
 		EngineOutcomes: []scanrun.EngineOutcome{
 			{Engine: "dependency_resolution", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoveragePartial, Reason: scanrun.ReasonDependencyUnresolved, Required: true},

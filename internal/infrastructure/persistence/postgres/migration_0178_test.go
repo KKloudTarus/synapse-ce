@@ -202,16 +202,21 @@ func TestImportReceiptsDurabilityRLSAndConcurrentIdempotency(t *testing.T) {
 }
 
 func TestMigration0178UpgradePreservesImportedFindings(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0178")
+	dsn := testDSN(t)
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() { _ = MigrateLocked(context.Background(), dsn) })
+
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 177); err != nil {
-		t.Fatalf("up to 177: %v", err)
+	if err := goose.DownTo(db, ".", 177); err != nil {
+		t.Fatalf("down to 177: %v", err)
 	}
 
 	pool, err := Connect(ctx, dsn)

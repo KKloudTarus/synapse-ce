@@ -26,7 +26,6 @@ import (
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
@@ -156,7 +155,6 @@ type Router struct {
 	qualityProfiles          qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
 	rules                    rulesService          // optional; nil ⇒ rule catalog routes are not registered
 	dastScan                 dastScanService
-	dastScanRuns             dastScanRunService
 	vulnerabilitySources     *vulnerabilitysourceuc.Service
 	vulnerabilityMonitor     *vulnerabilitymonitor.Service
 	vulnerabilityReconcile   *vulnerabilityreconciliation.Service
@@ -261,19 +259,12 @@ type dastRunService interface {
 func (rt *Router) SetDASTRunner(s dastRunService) { rt.dastRun = s }
 
 type dastScanService interface {
-	ProposeScan(context.Context, string, shared.ID, dastconfig.ScanConfig) (dastworkflowuc.Proposal, error)
-	ReadScanResult(context.Context, dastrun.Run) (*dastworkflowuc.ScanResult, error)
+	ProposeScan(context.Context, string, shared.ID, dastworkflowuc.ScanConfig) (dastworkflowuc.Proposal, error)
+	RunScan(context.Context, string, shared.ID, shared.ID, dastworkflowuc.ScanConfig) (dastworkflowuc.ScanResult, error)
 }
 
-type dastScanRunService interface {
-	SubmitScan(context.Context, shared.ID, shared.ID, string, dastconfig.ScanConfig) (dastrun.Run, error)
-	GetRun(context.Context, shared.ID, shared.ID) (dastrun.Run, error)
-}
-
-// SetDASTScan wires policy-only proposals and durable authenticated scan runs.
-func (rt *Router) SetDASTScan(s dastScanService, runs dastScanRunService) {
-	rt.dastScan, rt.dastScanRuns = s, runs
-}
+// SetDASTScan wires secret-free authenticated DAST scan endpoints.
+func (rt *Router) SetDASTScan(s dastScanService) { rt.dastScan = s }
 
 // SetThreatModel wires the architecture threat-model ingest/read endpoints. nil ⇒ not registered.
 func (rt *Router) SetThreatModel(s threatModelService) { rt.threatModels = s }
@@ -1027,10 +1018,9 @@ func (rt *Router) routes() *http.ServeMux {
 			mux.HandleFunc("GET /api/v1/engagements/{id}/dast/runs/{rid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getDASTRun)))
 		}
 	}
-	if rt.dastScan != nil && rt.dastScanRuns != nil {
+	if rt.dastScan != nil {
 		mux.HandleFunc("POST /api/v1/engagements/{id}/dast/proposals", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.proposeDASTScan)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/dast/proposals/{aid}/run", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runDASTScan)))
-		mux.HandleFunc("GET /api/v1/engagements/{id}/dast/scans/runs/{rid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getDASTScanRun)))
 	}
 	if rt.threatModels != nil { // architecture threat-model ingest (PermOperate) + read (PermView)
 		mux.HandleFunc("PUT /api/v1/engagements/{id}/threat-model", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.putThreatModel)))

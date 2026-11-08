@@ -33,7 +33,6 @@ const (
 type Store interface {
 	ports.JudgmentStore
 	ports.JudgmentAuditStore
-	GetByID(ctx context.Context, engagementID, id shared.ID) (judgment.Judgment, error)
 	SetScoreState(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, expectedVersion int) (judgment.Judgment, error)
 }
 
@@ -336,13 +335,19 @@ func (s *Service) List(ctx context.Context, engagementID shared.ID) ([]judgment.
 	return s.store.ListByEngagement(ctx, engagementID)
 }
 
-// load returns one judgment scoped to its engagement without materializing its history.
+// load returns one judgment scoped to its engagement (the store lists by engagement, so a single
+// get is a scan-and-match – mirrors the exploitation use case).
 func (s *Service) load(ctx context.Context, engagementID, id shared.ID) (judgment.Judgment, error) {
-	j, err := s.store.GetByID(ctx, engagementID, id)
+	all, err := s.store.ListByEngagement(ctx, engagementID)
 	if err != nil {
-		return judgment.Judgment{}, fmt.Errorf("judgment %s: %w", id, err)
+		return judgment.Judgment{}, fmt.Errorf("load judgment: %w", err)
 	}
-	return j, nil
+	for _, j := range all {
+		if j.ID == id {
+			return j, nil
+		}
+	}
+	return judgment.Judgment{}, fmt.Errorf("judgment %s: %w", id, shared.ErrNotFound)
 }
 
 // GovernanceReconciler retries immutable judgment audit outboxes. It has no

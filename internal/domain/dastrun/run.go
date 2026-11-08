@@ -12,42 +12,30 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// Kind distinguishes a verifier probe from an authenticated scan for its entire lifetime.
-type Kind string
-
-const (
-	KindVerifier          Kind = "verifier"
-	KindAuthenticatedScan Kind = "authenticated_scan"
-)
-
-func (k Kind) Valid() bool { return k == KindVerifier || k == KindAuthenticatedScan }
-
 // RunStatus is the durable DAST run lifecycle. A probe is a single verification, so there is no partial
 // state: it is queued, running, then succeeded (the probe ran and produced a verdict) or failed.
 type RunStatus string
 
 const (
-	RunQueued     RunStatus = "queued"
-	RunRunning    RunStatus = "running"
-	RunSucceeded  RunStatus = "succeeded"
-	RunIncomplete RunStatus = "incomplete"
-	RunFailed     RunStatus = "failed"
+	RunQueued    RunStatus = "queued"
+	RunRunning   RunStatus = "running"
+	RunSucceeded RunStatus = "succeeded"
+	RunFailed    RunStatus = "failed"
 )
 
 func (s RunStatus) Valid() bool {
 	switch s {
-	case RunQueued, RunRunning, RunSucceeded, RunIncomplete, RunFailed:
+	case RunQueued, RunRunning, RunSucceeded, RunFailed:
 		return true
 	}
 	return false
 }
 
-func (s RunStatus) Terminal() bool { return s == RunSucceeded || s == RunIncomplete || s == RunFailed }
+func (s RunStatus) Terminal() bool { return s == RunSucceeded || s == RunFailed }
 
 // Run is the durable, secret-free record the DAST run API returns.
 type Run struct {
 	ID           shared.ID `json:"id"`
-	Kind         Kind      `json:"kind"`
 	TenantID     shared.ID `json:"-"`
 	EngagementID shared.ID `json:"engagement_id"`
 	ActionID     shared.ID `json:"action_id"`
@@ -70,17 +58,7 @@ func NewRun(id, tenantID, engagementID, actionID shared.ID, actor string, now ti
 	if id.IsZero() || tenantID.IsZero() || engagementID.IsZero() || actionID.IsZero() || actor == "" || now.IsZero() {
 		return Run{}, fmt.Errorf("%w: DAST run needs id, tenant, engagement, action, actor, and time", shared.ErrValidation)
 	}
-	return Run{ID: id, Kind: KindVerifier, TenantID: tenantID, EngagementID: engagementID, ActionID: actionID, Actor: actor, Status: RunQueued, StartedAt: now.UTC()}, nil
-}
-
-// NewScanRun creates a queued authenticated scan without inventing a verifier verdict.
-func NewScanRun(id, tenantID, engagementID, actionID shared.ID, actor string, now time.Time) (Run, error) {
-	r, err := NewRun(id, tenantID, engagementID, actionID, actor, now)
-	if err != nil {
-		return Run{}, err
-	}
-	r.Kind = KindAuthenticatedScan
-	return r, nil
+	return Run{ID: id, TenantID: tenantID, EngagementID: engagementID, ActionID: actionID, Actor: actor, Status: RunQueued, StartedAt: now.UTC()}, nil
 }
 
 // Start moves a queued run to running.
@@ -99,28 +77,11 @@ func (r *Run) Succeed(verdict string, httpStatus int, evidenceID shared.ID, now 
 	if r.Status != RunRunning {
 		return fmt.Errorf("%w: DAST run %s is %s, not running", shared.ErrConflict, r.ID, r.Status)
 	}
-	if r.Kind != KindVerifier {
-		return fmt.Errorf("%w: verifier completion requires a verifier run", shared.ErrValidation)
-	}
 	if verdict == "" || evidenceID.IsZero() {
 		return fmt.Errorf("%w: DAST run %s cannot succeed without a verdict and sealed evidence", shared.ErrValidation, r.ID)
 	}
 	t := now.UTC()
 	r.Status, r.Verdict, r.HTTPStatus, r.EvidenceID, r.FinishedAt = RunSucceeded, verdict, httpStatus, evidenceID, &t
-	return nil
-}
-
-// CompleteScan records the sealed full scan result, including incomplete coverage.
-func (r *Run) CompleteScan(evidenceID shared.ID, incomplete bool, now time.Time) error {
-	if r.Kind != KindAuthenticatedScan || r.Status != RunRunning || evidenceID.IsZero() || now.IsZero() {
-		return fmt.Errorf("%w: invalid authenticated scan completion", shared.ErrValidation)
-	}
-	t := now.UTC()
-	r.Status = RunSucceeded
-	if incomplete {
-		r.Status = RunIncomplete
-	}
-	r.EvidenceID, r.FinishedAt = evidenceID, &t
 	return nil
 }
 
@@ -132,17 +93,14 @@ func (r *Run) Fail(code string, now time.Time) {
 
 // Validate enforces the record invariants.
 func (r Run) Validate() error {
-	if r.ID.IsZero() || !r.Kind.Valid() || r.TenantID.IsZero() || r.EngagementID.IsZero() || r.ActionID.IsZero() || r.Actor == "" || !r.Status.Valid() || r.StartedAt.IsZero() {
+	if r.ID.IsZero() || r.TenantID.IsZero() || r.EngagementID.IsZero() || r.ActionID.IsZero() || r.Actor == "" || !r.Status.Valid() || r.StartedAt.IsZero() {
 		return fmt.Errorf("%w: invalid DAST run", shared.ErrValidation)
 	}
 	if r.Status.Terminal() != (r.FinishedAt != nil) {
 		return fmt.Errorf("%w: DAST run terminal timestamp does not match status %s", shared.ErrValidation, r.Status)
 	}
-	if r.Kind == KindVerifier && (r.Status == RunIncomplete || (r.Status == RunSucceeded && (r.Verdict == "" || r.EvidenceID.IsZero()))) {
-		return fmt.Errorf("%w: invalid verifier run result", shared.ErrValidation)
-	}
-	if r.Kind == KindAuthenticatedScan && (r.Verdict != "" || r.HTTPStatus != 0 || ((r.Status == RunSucceeded || r.Status == RunIncomplete) && r.EvidenceID.IsZero())) {
-		return fmt.Errorf("%w: invalid authenticated scan result", shared.ErrValidation)
+	if r.Status == RunSucceeded && (r.Verdict == "" || r.EvidenceID.IsZero()) {
+		return fmt.Errorf("%w: a succeeded DAST run must carry a verdict and sealed evidence", shared.ErrValidation)
 	}
 	return nil
 }

@@ -90,8 +90,8 @@ func (r *JudgmentRepository) ListByEngagement(ctx context.Context, engagementID 
 	return out, err
 }
 
-// GetByID loads one judgment within an engagement and the context tenant, so callers
-// that verify or act on a single judgment never load the engagement's full history.
+// GetByID provides a bounded engagement-scoped lookup for migration/backfill
+// consumers without loading every judgment into process memory.
 func (r *JudgmentRepository) GetByID(ctx context.Context, engagementID, id shared.ID) (out judgment.Judgment, err error) {
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		var scanErr error

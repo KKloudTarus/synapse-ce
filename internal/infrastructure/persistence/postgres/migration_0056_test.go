@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -12,16 +13,30 @@ import (
 )
 
 func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0056")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("initial migrate up: %v", err)
+	}
 	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("goose set dialect: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 55); err != nil {
-		t.Fatalf("goose up to 55: %v", err)
+	// Migration tests share the integration database with repository tests. Always restore current
+	// HEAD, including when an assertion fails after a historical DownTo.
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore latest schema: %v", err)
+		}
+	})
+	deleteV2AuditRowsForMigrationRollback(t, db)
+	if err := goose.DownTo(db, ".", 55); err != nil {
+		t.Fatalf("goose down to 55: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
@@ -105,6 +120,7 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 			}
 		}
 	}
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 55); err != nil {
 		t.Fatalf("goose down to 55: %v", err)
 	}

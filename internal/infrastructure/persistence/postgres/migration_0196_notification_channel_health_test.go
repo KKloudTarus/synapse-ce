@@ -18,7 +18,7 @@ import (
 const migration0196Base = 194
 
 func TestMigration0196NotificationChannelHealthSchema(t *testing.T) {
-	_, db := ownershipTestDatabase(t, migration0196Base, 196, nil)
+	_, db := ownershipTestDatabase(t, migration0196Base, nil)
 	requireMigrationTable(t, db, "notification_channel_health_events", true)
 	requireMigrationRLS(t, db, "notification_channel_health_events")
 	requireMigrationIndexes(t, db, "notification_channel_health_events_channel")
@@ -105,7 +105,7 @@ func TestMigration0196NotificationChannelHealthSchema(t *testing.T) {
 // does not bypass RLS: another tenant cannot read a channel's pause history, cannot forge history
 // for it, cannot resume it and cannot clear its pause.
 func TestMigration0196ChannelHealthIsTenantIsolated(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, migration0196Base, 0, nil)
+	pool, db := ownershipTestDatabase(t, migration0196Base, nil)
 	for _, id := range []string{"t-a", "t-b"} {
 		if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES($1,$1) ON CONFLICT DO NOTHING`, id); err != nil {
 			t.Fatal(err)

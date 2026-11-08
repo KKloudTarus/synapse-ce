@@ -62,13 +62,17 @@ var _ ports.SBOMProducerIdentity = (*Generator)(nil)
 // loaded in the same execution boundary as the scan. Unidentifiable inputs disable both
 // cache lookup and storage without changing normal generation.
 func (g *Generator) SBOMProducerIdentity(ctx context.Context, targetRef string) (string, bool, error) {
+	// A sandbox may resolve a bare name against a curated PATH rather than the host PATH.
+	if g.runner != nil && !filepath.IsAbs(g.bin) {
+		return "", false, nil
+	}
 	resolved, err := exec.LookPath(g.bin)
 	if err != nil {
 		return "", false, fmt.Errorf("resolve syft executable: %w", err)
 	}
-	// A sandbox may resolve a bare name against a curated PATH rather than the host PATH.
-	if g.runner != nil && !filepath.IsAbs(g.bin) {
-		return "", false, nil
+	cacheable, err := syftInputCacheable(ctx, targetRef)
+	if err != nil || !cacheable {
+		return "", false, err
 	}
 	file, err := os.Open(resolved)
 	if err != nil {
@@ -125,10 +129,6 @@ func (g *Generator) SBOMProducerIdentity(ctx context.Context, targetRef string) 
 		config.JavaScript.SearchRemoteLicenses || config.Python.SearchRemoteLicenses {
 		return "", false, nil
 	}
-	cacheable, err := syftInputCacheable(ctx, targetRef)
-	if err != nil || !cacheable {
-		return "", false, err
-	}
 	configHash := sha256.Sum256(result.Stdout)
 	return fmt.Sprintf("syft:v2:%x:%x", binaryHash, configHash), true, nil
 }
@@ -140,15 +140,18 @@ func syftInputCacheable(ctx context.Context, targetRef string) (bool, error) {
 	if sourceScheme(targetRef) != "dir" {
 		return false, nil
 	}
+	const maxEntries = 300000 // At most the SBOM cache's fingerprint walk budget.
+	entries := 0
 	cacheable := true
-	err := filepath.WalkDir(targetRef, func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(targetRef, func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if entry.Type()&os.ModeSymlink != 0 {
+		entries++
+		if entries > maxEntries || entry.Type()&os.ModeSymlink != 0 {
 			cacheable = false
 			return fs.SkipAll
 		}

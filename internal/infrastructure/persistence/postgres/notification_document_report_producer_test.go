@@ -91,7 +91,7 @@ func (o failingDocumentReportOutbox) Append(ctx context.Context, record notifica
 }
 
 func TestDocumentReportProducerPostgresRollsBackCommandWhenOutboxCaptureFails(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "document_report")
+	dsn := testDSN(t)
 	ctx := context.Background()
 	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatal(err)

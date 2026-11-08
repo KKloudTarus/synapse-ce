@@ -8,7 +8,7 @@ import (
 )
 
 func TestMigration0171And0172OwnershipExecutionUpgrade(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 170, 172, func(db *sql.DB) {
+	_, db := ownershipTestDatabase(t, 170, func(db *sql.DB) {
 		if _, err := db.Exec(`BEGIN; SELECT set_config('app.current_tenant','default',true); INSERT INTO engagements(tenant_id,id,name) VALUES('default','before-capture','Before capture'); INSERT INTO findings(tenant_id,engagement_id,id,title,assignee) VALUES('default','before-capture','historical','Existing finding','Existing owner'); COMMIT`); err != nil {
 			t.Fatal(err)
 		}

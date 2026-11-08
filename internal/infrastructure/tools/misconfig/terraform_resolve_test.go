@@ -640,9 +640,6 @@ func TestTerraformPolicyDocumentValueBoundaries(t *testing.T) {
 		{"provider identifier inequality", `data.aws_iam_policy_document.doc.id != "doc"`, true, false},
 		{"whole object attributes", `contains(keys(data.aws_iam_policy_document.doc), "statement")`, true, false},
 		{"whole object attribute absence", `!contains(keys(data.aws_iam_policy_document.doc), "statement")`, true, false},
-		{"distinct JSON encodings", `data.aws_iam_policy_document.doc.json != data.aws_iam_policy_document.doc.minified_json`, false, true},
-		{"JSON encodings are not identical", `data.aws_iam_policy_document.doc.json == data.aws_iam_policy_document.doc.minified_json`, false, false},
-		{"JSON encodings retain equal meaning", `jsondecode(data.aws_iam_policy_document.doc.json) == jsondecode(data.aws_iam_policy_document.doc.minified_json)`, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			findings, unresolved := scanReport(t, map[string]string{
@@ -742,16 +739,12 @@ func TestTerraformPolicyVersionAndUnsupportedAttributes(t *testing.T) {
 		finding    bool
 	}{
 		{"default version", "", `jsondecode(data.aws_iam_policy_document.doc.json).Version == "2012-10-17"`, false, false},
-		{"explicit version", `version = "2008-10-17"`, `jsondecode(data.aws_iam_policy_document.doc.json).Version == "2008-10-17"`, false, false},
-		{"explicit version opposite predicate", `version = "2008-10-17"`, `jsondecode(data.aws_iam_policy_document.doc.json).Version != "2008-10-17"`, false, true},
-		{"invalid version type", "version = true", `jsondecode(data.aws_iam_policy_document.doc.json).Version == "2012-10-17"`, true, false},
-		{"unresolved version", "version = var.selected", `jsondecode(data.aws_iam_policy_document.doc.json).Version == "2012-10-17"`, true, false},
+		{"unsupported explicit version", `version = "2008-10-17"`, `try(jsondecode(data.aws_iam_policy_document.doc.json).Version == "2012-10-17", false)`, true, false},
 		{"unsupported policy identity", `policy_id = "AssessmentPolicy"`, `try(jsondecode(data.aws_iam_policy_document.doc.json).Id == "AssessmentPolicy", false)`, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			findings, unresolved := scanReport(t, map[string]string{
-				"main.tf": `variable "selected" {}
-data "aws_iam_policy_document" "doc" {
+				"main.tf": `data "aws_iam_policy_document" "doc" {
   ` + tc.attributes + `
   statement {
     actions = ["s3:GetObject"]

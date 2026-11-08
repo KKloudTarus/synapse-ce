@@ -27,7 +27,6 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition"
-	"github.com/KKloudTarus/synapse-ce/internal/composition/dastcompose"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
@@ -40,8 +39,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/accuracyprobe"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastengine"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
@@ -97,7 +94,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
 	dastrunuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrun"
 	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
-	dastsessionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastsession"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	docpublishuc "github.com/KKloudTarus/synapse-ce/internal/usecase/docpublish"
@@ -1071,9 +1067,6 @@ func main() {
 	// worker without a live egress broker must still claim the job and fail it egress_unavailable rather
 	// than leave the run orphaned at 'queued' forever (invisible to the operator polling GET .../runs).
 	{
-		scanPolicy, scanPolicyErr := dastcompose.ConfiguredScanPolicy(&cfg)
-		scanRunStore := postgres.NewDASTRunStore(pool)
-		var scanExecutor dastrunuc.ScanExecutor
 		var dastProber dastrunuc.Prober
 		if egressLive {
 			dastJudgmentSvc, jerr := analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
@@ -1118,79 +1111,17 @@ func main() {
 				log.Error("DAST custody transaction init failed", "err", err)
 				os.Exit(1)
 			}
-			if scanPolicyErr == nil {
-				if err := dastWorkflowSvc.SetScanPolicy(scanPolicy.HelperPath, scanPolicy.HelperSHA256, scanPolicy.Ceilings); err != nil {
-					log.Error("authenticated DAST execution policy init failed", "err", err)
-					os.Exit(1)
-				}
-				if err := dastWorkflowSvc.SetScanOwnerStore(scanRunStore); err != nil {
-					log.Error("authenticated DAST fenced custody init failed", "err", err)
-					os.Exit(1)
-				}
-				engine, err := dastengine.New(sb, scanPolicy.HelperPath, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
-				if err != nil {
-					log.Error("authenticated DAST engine init failed", "err", err)
-					os.Exit(1)
-				}
-				session, err := dastsessionuc.NewService(engine, guard, evidenceService)
-				if err != nil {
-					log.Error("authenticated DAST session init failed", "err", err)
-					os.Exit(1)
-				}
-				if err := dastWorkflowSvc.SetScan(session, scanPolicy.HelperPath, evidenceService, dastchecks.NewEvaluator(), dastchecks.NewEvaluator(), dastJudgmentSvc, runtimeVerifierSvc, scanPolicy.Ceilings); err != nil {
-					log.Error("authenticated DAST proof workflow init failed", "err", err)
-					os.Exit(1)
-				}
-				scanExecutor = dastWorkflowSvc
-			}
 			dastProber = dastWorkflowSvc
 			log.Info("DAST verification runs execute on this worker (dast_run handler)")
 		} else {
 			log.Warn("worker has no scoped-egress broker – DAST runs will fail egress_unavailable")
 		}
-		dastRunSvc, rserr := dastrunuc.NewService(scanRunStore, dastProber, auditLog, clock, ids)
+		dastRunSvc, rserr := dastrunuc.NewService(postgres.NewDASTRunStore(pool), dastProber, auditLog, clock, ids)
 		if rserr != nil {
 			log.Error("DAST durable run service init failed", "err", rserr)
 			os.Exit(1)
 		}
 		handlers[dastrunuc.JobKind] = dastRunJobHandler{svc: dastRunSvc}
-		locker := postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.DASTMaxWallClock+time.Minute)
-		if err := dastRunSvc.SetScanLocker(locker); err != nil {
-			log.Error("authenticated DAST recovery lock init failed", "err", err)
-			os.Exit(1)
-		}
-		if scanPolicyErr == nil {
-			if err := dastRunSvc.ConfigureScan(scanPolicy.HelperPath, scanPolicy.HelperSHA256, scanPolicy.Ceilings, scanExecutor, locker); err != nil {
-				log.Error("authenticated DAST durable worker init failed", "err", err)
-				os.Exit(1)
-			}
-		} else {
-			log.Warn("authenticated DAST execution unavailable: configure an absolute pinned helper", "err", scanPolicyErr)
-		}
-		handlers[dastrunuc.ScanJobKind] = dastScanJobHandler{svc: dastRunSvc}
-		maintenanceTasks = append(maintenanceTasks, func(ctx context.Context) {
-			recoverScans := func() {
-				// A partial failure can still have finalized some runs, so report both.
-				n, err := scanRunStore.RecoverDeadLetteredDASTScans(ctx, clock.Now())
-				if n > 0 {
-					log.Info("authenticated DAST failure recovery finalized runs", "count", n)
-				}
-				if err != nil && ctx.Err() == nil {
-					log.Error("authenticated DAST failure recovery failed", "err", err)
-				}
-			}
-			recoverScans()
-			ticker := time.NewTicker(5 * time.Minute)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					recoverScans()
-				}
-			}
-		})
 	}
 	if cfg.CSPMEnabled {
 		connectors := make(map[cloudposture.Provider]ports.CloudConnector, len(cfg.CSPMProviders))
@@ -1775,16 +1706,6 @@ func (h dastRunJobHandler) Handle(ctx context.Context, job ports.QueuedJob) erro
 
 func (h dastRunJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
 	return h.svc.FailStrandedJob(ctx, job.Payload, cause)
-}
-
-type dastScanJobHandler struct{ svc *dastrunuc.Service }
-
-func (h dastScanJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
-	return h.svc.RunScanJob(ctx, job)
-}
-
-func (h dastScanJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
-	return h.svc.FailStrandedScanJob(ctx, job, cause)
 }
 
 // cspmJobHandler binds durable CSPM execution and dead-letter finalization.

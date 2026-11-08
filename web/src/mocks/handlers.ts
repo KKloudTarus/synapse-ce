@@ -2214,14 +2214,11 @@ func Callback(w http.ResponseWriter, r *http.Request) {
   http.post('/api/v1/engagements/:id/dast/proposals', () =>
     HttpResponse.json({ Action: { ID: 'dast-act-1', Tool: 'dast', Action: 'scan', Target: { Kind: 'url', Value: 'https://staging.example.internal' }, EgressPreview: 'GET https://staging.example.internal (rate 2/s, <=200 req)', Risk: 'medium', Rationale: 'authenticated crawl and probe', ProposedAt: '2026-09-05T09:00:00Z' }, Decision: { State: 'pending' } }, { status: 202 }),
   ),
-  http.post('/api/v1/engagements/:id/dast/proposals/:aid/run', ({ params }) =>
-    HttpResponse.json({ id: 'scan-run-1', kind: 'authenticated_scan', engagement_id: params.id, action_id: params.aid, actor: 'demo.operator', status: 'queued', started_at: '2026-09-05T09:00:00Z' }, { status: 202 }),
-  ),
-  http.get('/api/v1/engagements/:id/dast/scans/runs/:rid', ({ params }) =>
-    HttpResponse.json({ id: params.rid, kind: 'authenticated_scan', engagement_id: params.id, action_id: 'dast-act-1', actor: 'demo.operator', status: 'succeeded', evidence_id: 'ev-scan-1', started_at: '2026-09-05T09:00:00Z', result: { config_sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', incomplete: false, surface: { Requests: [{}, {}, {}] }, coverage: { Entries: [{}, {}] }, proofs: [
-      { check_id: 'xss.reflected', version: 2, normalized_endpoint: 'GET /search?q=', hash: 'deadbeefdeadbeefdeadbeef' },
-      { check_id: 'headers.missing_csp', version: 2, normalized_endpoint: 'GET /', hash: 'cafebabecafebabecafebabe' },
-    ] } }),
+  http.post('/api/v1/engagements/:id/dast/proposals/:aid/run', () =>
+    HttpResponse.json({ config_sha256: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', incomplete: false, surface: { Requests: [{}, {}, {}] }, coverage: { Entries: [{}, {}] }, proofs: [
+      { check_id: 'xss.reflected', version: '1', normalized_endpoint: 'GET /search?q=', hash: 'deadbeefdeadbeefdeadbeef' },
+      { check_id: 'headers.missing_csp', version: '1', normalized_endpoint: 'GET /', hash: 'cafebabecafebabecafebabe' },
+    ] }),
   ),
   http.get('/api/v1/engagements/:id/dast/runs/:rid', ({ params }) =>
     HttpResponse.json({ id: params.rid, engagement_id: params.id, status: 'succeeded', verdict: 'runtime_confirmed', http_status: 200, evidence_id: 'ev-dast-1', started_at: '2026-09-05T09:00:00Z', finished_at: '2026-09-05T09:01:00Z' }),

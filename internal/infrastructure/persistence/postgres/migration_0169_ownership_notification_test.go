@@ -8,7 +8,7 @@ import (
 )
 
 func TestMigration0169OwnershipNotificationUpgrade(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 168, 169, func(db *sql.DB) {
+	_, db := ownershipTestDatabase(t, 168, func(db *sql.DB) {
 		withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
 			if _, err := tx.Exec(`INSERT INTO notification_rules(tenant_id,id,name,event_type,created_at,updated_at)
 				VALUES('default','legacy-scan','Existing scan rule','scan.completed',now(),now())`); err != nil {

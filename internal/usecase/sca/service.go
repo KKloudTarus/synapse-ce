@@ -6468,7 +6468,7 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 			LicensePct:              res.LicenseCoverage.Pct,
 			Confident:               res.Completeness.Confident,
 			CompletenessNote:        res.Completeness.Warning,
-			SourceWarnings:          res.SourceWarnings,
+			CoverageWarnings:        reportCoverageWarnings(res.SourceWarnings),
 			EngineOutcomes:          scanrun.CloneEngineOutcomes(res.EngineOutcomes),
 			EngineCoverage:          coverage,
 			ExecutionMode:           res.ExecutionMode,
@@ -6507,6 +6507,31 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 		ins.EvidenceKeyID = ev.Attestation.KeyID
 	}
 	return ins, nil
+}
+
+// reportCoverageWarnings selects the existing persisted coverage messages for report
+// consumers. Other source diagnostics can contain internal tool or filesystem errors.
+func reportCoverageWarnings(warnings []string) []string {
+	var out []string
+	for _, warning := range warnings {
+		if strings.HasPrefix(warning, "the installed-package catalog did not cover ") ||
+			strings.HasPrefix(warning, "infrastructure-as-code scan hit its file cap,") ||
+			warning == stageBudgetWarning("infrastructure-as-code scan") {
+			out = append(out, warning)
+			continue
+		}
+		count, message, _ := strings.Cut(warning, " ")
+		if n, err := strconv.Atoi(count); err != nil || n <= 0 {
+			continue
+		}
+		message = strings.TrimPrefix(message, "image-filesystem ")
+		if strings.HasPrefix(message, "infrastructure-as-code input(s) were NOT evaluated ") ||
+			strings.HasPrefix(message, "infrastructure-as-code attribute(s) did not resolve ") ||
+			strings.HasPrefix(message, "Helm chart(s) could not be rendered,") {
+			out = append(out, warning)
+		}
+	}
+	return out
 }
 
 // EvidenceReport is the engagement's evidence ledger plus its verification status.

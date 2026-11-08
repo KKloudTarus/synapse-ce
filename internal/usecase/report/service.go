@@ -908,7 +908,7 @@ func scanSection(insight ports.ReportInsight) (ports.ReportSection, bool) {
 		if insight.CompletenessNote != "" {
 			sec.Paragraphs = append(sec.Paragraphs, insight.CompletenessNote)
 		}
-		sec.Paragraphs = append(sec.Paragraphs, insight.SourceWarnings...)
+		sec.Paragraphs = append(sec.Paragraphs, insight.CoverageWarnings...)
 		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Reproducibility score: %d/100.", insight.ReproScore))
 		if insight.VulnDBSnapshot != "" {
 			sec.Paragraphs = append(sec.Paragraphs, "Vulnerability DB snapshot: "+insight.VulnDBSnapshot)

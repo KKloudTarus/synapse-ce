@@ -39,8 +39,8 @@ const (
 	maxKustomizeRenders    = 200              // bound the total renders on a hostile tree with many roots
 )
 
-// isKustomizationName recognizes a kustomization root file by its conventional names.
-func isKustomizationName(name string) bool {
+// IsKustomizationName recognizes a kustomization root file by its conventional names.
+func IsKustomizationName(name string) bool {
 	switch name {
 	case "kustomization.yaml", "kustomization.yml", "Kustomization":
 		return true
@@ -89,7 +89,7 @@ func collectKustomizations(ctx context.Context, root string) (index map[string]*
 		if walked > maxEntries {
 			return filepath.SkipAll
 		}
-		if d.IsDir() || !d.Type().IsRegular() || !isKustomizationName(d.Name()) {
+		if d.IsDir() || !d.Type().IsRegular() || !IsKustomizationName(d.Name()) {
 			return nil
 		}
 		dir := filepath.Dir(path)

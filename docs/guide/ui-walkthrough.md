@@ -1145,19 +1145,13 @@ Cloud posture findings; an unknown-state resource stays NotAssessed.
 
 `/engagements/{id}/dast`
 
-Dynamic testing requires a proposal and a human approval. Scope and the authorization
-window still apply, and the system verifier is distinct from the proposer.
+Dynamic testing. A scan or probe is proposed and a distinct reviewer approves it.
 
 1. **Runtime verification** turns a finding into a probe: press **Propose probe**, fill in the URL, method, expected status and optional expected body.
 2. A proposal is a claim, not an action. Press **Approve** or **Deny**, with a reason; only an approved probe can run.
 3. Press **Run probe**. It executes under a kernel-enforced egress allowlist, so it can only reach what the scope permits.
-4. For an **Authenticated DAST scan**, enter the target and budgets, then supply **Session configuration JSON** with vault references (never credential values), login and check requests, and a success signal. The field shows a bearer example; form, basic, header and cookie are also supported. The server validates the configuration. Propose and approve the scan before requesting a run. Changing the configuration invalidates the displayed proposal and requires a new proposal and approval. The same authenticated human may approve and request it; an automatic or machine decision is not a human approval.
-5. The scan is queued, not returned as a synchronous result. Watch the queued or running status as the run is polled until it succeeds, is incomplete, or fails. A result appears only when real terminal evidence is available. An incomplete or failed result retains available surface, coverage and proofs; failure before a result instead reports an error. Incomplete coverage is not a clean scan.
-6. Once an approval is consumed, a replay needs a new proposal and approval. Started work is not automatically resumed after interruption.
-
-The scan run uses `POST /api/v1/engagements/{id}/dast/proposals/{aid}/run` and
-`GET /api/v1/engagements/{id}/dast/scans/runs/{rid}` for polling. The separate
-`/dast/runs` verifier routes continue to serve verifier probes, not authenticated scan runs.
+4. **Authenticated DAST scan** follows the same propose, approve, run shape for a full scan.
+5. The result records what was observed, which is what confirms or refutes the finding.
 
 === "Desktop"
 

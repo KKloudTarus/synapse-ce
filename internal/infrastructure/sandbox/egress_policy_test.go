@@ -67,34 +67,21 @@ func TestResolveEgressPolicyPreservesDenyPriorityMaterial(t *testing.T) {
 	}
 }
 
-func TestResolveEgressPolicyDoesNotWidenPrevalidatedOriginPorts(t *testing.T) {
+func TestResolveEgressPolicyAddsExistingPinsToKernelRules(t *testing.T) {
 	resolved, err := resolveEgressPolicy(context.Background(), ports.EgressPolicy{
-		Rules:       []ports.EgressRule{{Allow: true, Net: netip.MustParsePrefix("203.0.113.7/32"), Ports: []uint16{443}}},
 		PinnedHosts: map[string][]netip.Addr{"API.Example.COM": {netip.MustParseAddr("203.0.113.7")}},
 	}, func(context.Context, string, string) ([]netip.Addr, error) {
-		t.Fatal("prevalidated origin must not be rebound through DNS")
+		t.Fatal("pre-resolved pins must not trigger DNS")
 		return nil, nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resolved.Rules) != 1 || !resolved.Rules[0].Allow || resolved.Rules[0].Net.String() != "203.0.113.7/32" || !slices.Equal(resolved.Rules[0].Ports, []uint16{443}) {
-		t.Fatalf("DNS binding broadened explicit HTTPS authority: %+v", resolved.Rules)
+	if len(resolved.Rules) != 1 || !resolved.Rules[0].Allow || resolved.Rules[0].Net.String() != "203.0.113.7/32" {
+		t.Fatalf("rules = %+v", resolved.Rules)
 	}
-}
-
-func TestResolveEgressPolicyBindingsCannotAuthorizeTraffic(t *testing.T) {
-	resolved, err := resolveEgressPolicy(context.Background(), ports.EgressPolicy{
-		PinnedHosts: map[string][]netip.Addr{"api.example.com": {netip.MustParseAddr("203.0.113.7")}},
-	}, func(context.Context, string, string) ([]netip.Addr, error) {
-		t.Fatal("prevalidated binding must not cause a DNS lookup")
-		return nil, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(resolved.Rules) != 0 {
-		t.Fatalf("DNS metadata granted network authority: %+v", resolved.Rules)
+	if _, ok := resolved.PinnedHosts["api.example.com"]; !ok {
+		t.Fatalf("canonical pins = %v", resolved.PinnedHosts)
 	}
 }
 

@@ -615,9 +615,6 @@ func (m *tfModule) collectDeclarations(ctx context.Context) error {
 				}
 			case blk.Type == "locals":
 				for _, attr := range blk.Body.Attributes {
-					if err := ctx.Err(); err != nil {
-						return err
-					}
 					m.localAttrs = append(m.localAttrs, attr)
 				}
 			case blk.Type == "module" && len(blk.Labels) == 1:
@@ -696,21 +693,12 @@ func tfBindOrUnknown(into map[string]cty.Value, name string, v cty.Value, d hcl.
 func (m *tfModule) resolveVars(ctx context.Context, extra map[string]cty.Value) (map[string]cty.Value, error) {
 	out := make(map[string]cty.Value, len(m.defaults)+len(m.fileVars)+len(extra))
 	for k, v := range m.defaults {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		out[k] = v
 	}
 	for k, v := range m.fileVars {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		out[k] = v
 	}
 	for k, v := range extra {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		out[k] = v
 	}
 	inputs, conflict, err := m.effectiveInputs(ctx, out)
@@ -718,19 +706,13 @@ func (m *tfModule) resolveVars(ctx context.Context, extra map[string]cty.Value) 
 		return nil, err
 	}
 	for k, v := range inputs {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		out[k] = v
 	}
 	// A variable that DIFFERENT call sites bind differently has no single effective value.
 	for k := range conflict {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		delete(out, k)
 	}
-	return out, nil
+	return out, ctx.Err()
 }
 
 // effectiveInputs compares each site's effective bindings, including defaults and variable files for
@@ -796,15 +778,9 @@ func tfResolveLocals(ctx context.Context, attrs []*hclsyntax.Attribute, vars map
 		// recorded as resolved and never revisited.
 		view := make(map[string]cty.Value, len(attrs))
 		for _, attr := range attrs {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
 			view[attr.Name] = cty.DynamicVal
 		}
 		for k, v := range locals {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
 			view[k] = v
 		}
 		evalCtx := tfEvalContextFor(vars, view)
@@ -1513,11 +1489,6 @@ func (ws *tfWorkspace) scanWorkspace(ctx context.Context) ([]ports.MisconfigRawF
 			if err := scanPass(); err != nil {
 				return nil, nil, 0, err
 			}
-		}
-	}
-	if budget < tfMaxScenarios {
-		if err := ws.resolveAll(ctx, nil); err != nil { // leave the workspace on its default configuration
-			return nil, nil, 0, err
 		}
 	}
 	for _, f := range ws.raw {

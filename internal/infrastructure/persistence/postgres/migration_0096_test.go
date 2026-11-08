@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -13,16 +14,27 @@ import (
 )
 
 func TestMigration0096CPEPersistenceAndLookup(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0096")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := MigrateLocked(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", 95); err != nil {
-		t.Fatalf("up to 0095: %v", err)
+	if err := goose.DownTo(db, ".", 95); err != nil {
+		t.Fatalf("down to 0095: %v", err)
 	}
 	if err := goose.UpTo(db, ".", 96); err != nil {
 		t.Fatalf("up 0096: %v", err)

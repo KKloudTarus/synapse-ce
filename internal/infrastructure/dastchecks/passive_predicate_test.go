@@ -194,12 +194,15 @@ func TestArtifactProofRequiresNonemptyServedContent(t *testing.T) {
 		hash    string
 		valid   bool
 	}{
-		{"served current proof", proofVersion, 200, strings.Repeat("a", 64), true},
-		{"empty current proof", proofVersion, 200, emptyBodySHA256, false},
-		{"uppercase empty digest", proofVersion, 200, strings.ToUpper(emptyBodySHA256), false},
-		{"no-content current proof", proofVersion, 204, strings.Repeat("a", 64), false},
-		{"reset-content current proof", proofVersion, 205, strings.Repeat("a", 64), false},
-		{"legacy proof retains recorded contract", 1, 200, emptyBodySHA256, true},
+		{"served current proof", artifactProofVersion, 200, strings.Repeat("a", 64), true},
+		{"empty current proof", artifactProofVersion, 200, emptyBodySHA256, false},
+		{"uppercase empty digest", artifactProofVersion, 200, strings.ToUpper(emptyBodySHA256), false},
+		{"no-content current proof", artifactProofVersion, 204, strings.Repeat("a", 64), false},
+		{"reset-content current proof", artifactProofVersion, 205, strings.Repeat("a", 64), false},
+		{"stored v2 empty response", 2, 200, emptyBodySHA256, true},
+		{"stored v2 no-content response", 2, 204, emptyBodySHA256, true},
+		{"stored v2 unserved response", 2, 404, emptyBodySHA256, false},
+		{"stored v1 empty response", 1, 200, emptyBodySHA256, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			finding := newVersionedFinding(tc.version, "sensitive-public-artifact", "https://app.test/app.js.map",
@@ -209,6 +212,47 @@ func TestArtifactProofRequiresNonemptyServedContent(t *testing.T) {
 				t.Fatalf("proof validity=%v want=%v: %v", err == nil, tc.valid, err)
 			}
 		})
+	}
+}
+
+func TestStoredV2ArtifactProofRemainsVerifiable(t *testing.T) {
+	// Emitted by the base evaluator for an empty 200 source-map response.
+	const stored = `{
+		"check_id": "sensitive-public-artifact",
+		"version": 2,
+		"normalized_endpoint": "https://app.test/empty.js.map",
+		"observation": {
+			"method": "GET",
+			"status": 200,
+			"body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"headers_captured": true,
+			"signature": "public_artifact",
+			"predicate_tokens": ["source_map_path"]
+		},
+		"hash": "7418f381f26c5eea57171ed665a46526546f1ee5835cd5455c72e39a470169dc"
+	}`
+	var proof ports.DASTProof
+	if err := json.Unmarshal([]byte(stored), &proof); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewEvaluator().VerifyProof(proof); err != nil {
+		t.Fatalf("stored v2 artifact proof must remain verifiable: %v", err)
+	}
+}
+
+func TestArtifactProofVersionIsBoundToHash(t *testing.T) {
+	endpoint := "https://app.test/app.js.map"
+	finding := newFinding("sensitive-public-artifact", endpoint,
+		ports.DASTObservation{Method: "GET", Status: 200, BodySHA256: strings.Repeat("a", 64)},
+		"public_artifact", nil, "source_map_path")
+	proof := finding.Proof
+	evaluator := NewEvaluator()
+	if err := evaluator.VerifyProof(proof); err != nil {
+		t.Fatalf("new artifact proof must verify: %v", err)
+	}
+	proof.Version = 2
+	if err := evaluator.VerifyProof(proof); err == nil {
+		t.Fatal("changing an artifact proof's version must invalidate its hash")
 	}
 }
 

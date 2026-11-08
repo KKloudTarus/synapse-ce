@@ -59,7 +59,7 @@ type fakeScanSession struct {
 	calls  int
 }
 
-func (f *fakeScanSession) CrawlWithRate(context.Context, safety.AdmittedAction, string, string, dastsession.Config, dastcrawl.Input, dastcrawl.Limits, int, int, ports.DASTScanExecution, ports.DASTScanRunStore) (dastcrawl.Result, error) {
+func (f *fakeScanSession) CrawlWithRate(context.Context, safety.AdmittedAction, string, string, dastsession.Config, dastcrawl.Input, dastcrawl.Limits, int, int) (dastcrawl.Result, error) {
 	f.calls++
 	return f.result, f.err
 }

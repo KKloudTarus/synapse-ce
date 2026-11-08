@@ -216,7 +216,8 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		// the Kubernetes rules – the raw templates carry Go-template directives and are not valid YAML.
 		// Skip a Chart.yaml bundled under a parent chart's charts/ dir (the parent render covers the subchart).
 		if d.Name() == "Chart.yaml" {
-			if !strings.Contains(path, string(os.PathSeparator)+"charts"+string(os.PathSeparator)) && count < maxFiles {
+			rel, _ := filepath.Rel(root, path)
+			if IsHelmChartRoot(rel) && count < maxFiles {
 				count++
 				relDir := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(filepath.Dir(path), root), string(os.PathSeparator)))
 				result := scanHelmChart(ctx, s.helmRun, s.helmDir, s.helmBin, filepath.Dir(path), relDir)
@@ -226,7 +227,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 			}
 			return nil
 		}
-		if isKustomizationName(d.Name()) {
+		if IsKustomizationName(d.Name()) {
 			kustomizationsSeen++
 		}
 		kind := classifyName(d.Name())

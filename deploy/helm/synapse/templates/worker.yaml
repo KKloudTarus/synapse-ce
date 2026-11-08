@@ -55,8 +55,6 @@ spec:
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
             {{- include "synapse.workerEgressEnv" . | nindent 12 }}
-            - name: SYNAPSE_TOOL_EXECUTION_MODE
-              value: worker
             - name: SYNAPSE_LEADER_ENABLED
               value: "true"
             - name: SYNAPSE_INTEGRATION_SCHEDULER_ENABLED

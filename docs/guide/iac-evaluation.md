@@ -157,15 +157,11 @@ scanner actually rendered suppresses its own literal findings. A document a refe
 is assessed once, at the resource; a document no recognised resource consumes keeps its
 literal line rules, because it attaches to nothing this scanner can establish.
 
-The parsed statement model exposes indented `json` and compact `minified_json`.
-Provider-derived `id` values and introspection of the full provider object stay
-UNKNOWN; a local declaration name is not a provider identity. A declaration using
-`count`, `for_each`, dynamic blocks or unmodeled inputs such as `policy_id` also
-stays UNKNOWN; none is discarded to construct a partial document. Its literal
-statements remain eligible for inspection, and malformed string-list attributes
-are refused rather than iterated as collections. Explicit `version` values are
-retained, with `"2012-10-17"` used only when absent. These strings neither prove that
-a provider ran nor promise byte-for-byte provider output.
+The statement model supplies JSON for policy analysis. Provider-derived `id`
+values and introspection of the full provider object remain UNKNOWN. Declarations
+with `count`, `for_each`, dynamic blocks, explicit `version`, or `policy_id`
+remain UNKNOWN and retain literal inspection. Malformed string-list attributes
+also leave the document unresolved.
 
 ### Decisions
 

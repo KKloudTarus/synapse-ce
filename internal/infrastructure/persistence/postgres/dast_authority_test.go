@@ -38,7 +38,7 @@ func TestDASTAuthorityPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range runs {
-		run := dastrun.Run{ID: id, Kind: dastrun.KindVerifier, TenantID: tenant, EngagementID: engagementID, ActionID: action, Actor: "operator", Status: dastrun.RunQueued, StartedAt: time.Now()}
+		run := dastrun.Run{ID: id, TenantID: tenant, EngagementID: engagementID, ActionID: action, Actor: "operator", Status: dastrun.RunQueued, StartedAt: time.Now()}
 		payload, err := json.Marshal(ports.DASTRunJob{TenantID: tenant, RunID: id})
 		if err != nil {
 			t.Fatal(err)

@@ -3,10 +3,12 @@ package sca
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +21,25 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
 )
+
+func TestReportInsightExportsOnlyCoverageWarnings(t *testing.T) {
+	want := []string{
+		"1 image-filesystem infrastructure-as-code attribute(s) did not resolve to a value: main.tf:5: encrypted",
+		"2 Helm chart(s) could not be rendered, so their manifests were NOT evaluated",
+		"the installed-package catalog did not cover the whole image root filesystem, so its inventory is a lower bound",
+	}
+	raw, err := json.Marshal(ScanResult{SourceWarnings: append(slices.Clone(want),
+		"git-history secret scan skipped: private filesystem error",
+		"image-filesystem misconfig scan skipped: private renderer error")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := Service{results: staticScanResultStore{data: raw}}
+	insight, err := svc.ReportInsight(context.Background(), "e1")
+	if err != nil || !slices.Equal(insight.CoverageWarnings, want) {
+		t.Fatalf("coverage warnings = %q, want %q; error = %v", insight.CoverageWarnings, want, err)
+	}
+}
 
 // capabilityGapMisconfigScanner reports a capability that could not evaluate its input, with findings from
 // the raw scan that remained available.

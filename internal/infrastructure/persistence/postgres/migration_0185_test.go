@@ -22,14 +22,17 @@ func TestMigration0185DisablesRulesThatCanNeverMatch(t *testing.T) {
 	}
 	dsn := isolatedMigrationDSN(t, sharedDSN, "0185")
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 184); err != nil {
-		t.Fatalf("up to 184: %v", err)
+	if err := goose.DownTo(db, ".", 184); err != nil {
+		t.Fatalf("down to 184: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {

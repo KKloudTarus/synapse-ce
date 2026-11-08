@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -11,16 +12,27 @@ import (
 )
 
 func TestMigration0098AdvisoryEvaluationCheckpointConstraints(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0098")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := MigrateLocked(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", 97); err != nil {
-		t.Fatalf("up to 0097: %v", err)
+	if err := goose.DownTo(db, ".", 97); err != nil {
+		t.Fatalf("down to 0097: %v", err)
 	}
 	if err := goose.UpTo(db, ".", 98); err != nil {
 		t.Fatalf("up 0098: %v", err)

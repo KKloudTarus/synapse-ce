@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"reflect"
 	"testing"
 	"time"
 
@@ -110,98 +109,5 @@ func TestJudgmentRepository(t *testing.T) {
 	}
 	if _, err := repo.ListByEngagement(ctx, eid); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("corrupted enum row should fail-closed on read, got %v", err)
-	}
-}
-
-func TestJudgmentRepositoryGetByIDScoped(t *testing.T) {
-	f := newTenantRLSFixtureWithDSN(t, isolatedMigrationDSN(t, testDSN(t), "judgment_get_by_id"))
-	root := context.Background()
-	suffix := randHex(t)
-	tenant := shared.ID("judgment-tenant-" + suffix)
-	foreignTenant := shared.ID("judgment-foreign-" + suffix)
-	engagementID := shared.ID("judgment-engagement-" + suffix)
-	otherEngagementID := shared.ID("judgment-other-engagement-" + suffix)
-	id := shared.ID("judgment-id-" + suffix)
-	corruptID := shared.ID("judgment-corrupt-" + suffix)
-
-	t.Cleanup(func() {
-		if _, err := f.owner.Exec(root, `DELETE FROM judgments WHERE id = ANY($1)`, []string{id.String(), corruptID.String()}); err != nil {
-			t.Errorf("delete judgments: %v", err)
-		}
-		if _, err := f.owner.Exec(root, `DELETE FROM engagements WHERE id = ANY($1)`, []string{engagementID.String(), otherEngagementID.String()}); err != nil {
-			t.Errorf("delete engagements: %v", err)
-		}
-		if _, err := f.owner.Exec(root, `DELETE FROM tenants WHERE id = ANY($1)`, []string{tenant.String(), foreignTenant.String()}); err != nil {
-			t.Errorf("delete tenants: %v", err)
-		}
-	})
-	for _, tenantID := range []shared.ID{tenant, foreignTenant} {
-		if _, err := f.owner.Exec(root, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenantID); err != nil {
-			t.Fatalf("seed tenant: %v", err)
-		}
-	}
-	for _, eng := range []shared.ID{engagementID, otherEngagementID} {
-		if _, err := f.owner.Exec(root, `INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,$1)`, eng, tenant); err != nil {
-			t.Fatalf("seed engagement: %v", err)
-		}
-	}
-
-	ctx := shared.WithTenant(root, tenant)
-	repo := NewJudgmentRepository(f.runtime)
-	claim := judgment.ReachabilityClaim{
-		Reachable: "reachable", Tier: "tier-1.5", Confidence: 90,
-		Path: []string{"entry", "vulnerable"}, EntrypointsPresent: true,
-	}
-	j, err := judgment.New(id, engagementID, judgment.CapReachability, judgment.SubjectFinding,
-		"finding-1", claim, "agent:proposer", time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.Save(ctx, j); err != nil {
-		t.Fatalf("save judgment: %v", err)
-	}
-	if _, err := repo.SetVerdictState(ctx, engagementID, id, 90, judgment.StateConfirmed, "human:verifier", "reproduced path", 1); err != nil {
-		t.Fatalf("set verdict: %v", err)
-	}
-
-	got, err := repo.GetByID(ctx, engagementID, id)
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if got.ID != id || got.EngagementID != engagementID || got.Capability != judgment.CapReachability ||
-		got.SubjectKind != judgment.SubjectFinding || got.SubjectID != "finding-1" ||
-		got.State != judgment.StateConfirmed || got.EvidenceScore != 90 || got.Version != 2 ||
-		got.ProposedBy != "agent:proposer" || got.VerifiedBy != "human:verifier" || got.VerdictRationale != "reproduced path" {
-		t.Fatalf("GetByID returned wrong judgment or provenance: %+v", got)
-	}
-	if actual, ok := got.Claim.(judgment.ReachabilityClaim); !ok || !reflect.DeepEqual(actual, claim) {
-		t.Fatalf("GetByID claim = %#v, want typed %#v", got.Claim, claim)
-	}
-
-	for _, tc := range []struct {
-		name string
-		ctx  context.Context
-		eng  shared.ID
-		id   shared.ID
-	}{
-		{"wrong engagement", ctx, otherEngagementID, id},
-		{"foreign tenant", shared.WithTenant(root, foreignTenant), engagementID, id},
-		{"missing id", ctx, engagementID, shared.ID("missing-" + suffix)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := repo.GetByID(tc.ctx, tc.eng, tc.id); !errors.Is(err, shared.ErrNotFound) {
-				t.Fatalf("GetByID: want ErrNotFound, got %v", err)
-			}
-		})
-	}
-
-	if _, err := f.owner.Exec(root,
-		`INSERT INTO judgments (id, tenant_id, engagement_id, capability, subject_kind, subject_id, claim, state, version, created_at, updated_at)
-		 VALUES ($1,$2,$3,'reachability','finding','f1','{"capability":"reachability","claim":{"reachable":"unknown","tier":"tier-0","confidence":0}}','GARBAGE',1,now(),now())`,
-		corruptID, tenant, engagementID); err != nil {
-		t.Fatalf("insert corrupt judgment: %v", err)
-	}
-	if _, err := repo.GetByID(ctx, engagementID, corruptID); !errors.Is(err, shared.ErrValidation) {
-		t.Fatalf("corrupt enum: want ErrValidation, got %v", err)
 	}
 }

@@ -49,50 +49,12 @@ inputs bypass both cache lookup and storage; generation still runs. With a sandb
 runner, use an absolute Syft path to identify its executable rather than assuming
 the host and sandbox resolve a bare PATH name identically.
 
-## Authenticated DAST scans
+## Passive DAST evidence
 
-Authenticated DAST uses a separate durable run from the engine outcomes above. A
-queued or running scan has no result yet. Its terminal result records the approved
-configuration digest, observed surface, coverage, incomplete flag, optional reason
-and proofs. An incomplete crawl retains its observed surface and coverage but does not
-promote observations to proofs or judgments. Execution failure is not a completed
-scan: available session evidence stays in the ledger, while the run reports an
-error code without inventing a terminal scan result.
-
-Target-issued cookie values remain tracked through login, liveness checks, rotations
-and crawling. Bounded excerpts are redacted once, using all values learned by the end
-of execution, before serialization and sealing; body hashes still describe the raw
-response. Issued values shorter than eight bytes, such as language or consent flags,
-are redacted only where they appear as whole tokens, so a one-letter value cannot erase
-unrelated evidence; longer issued values and configured credentials are redacted
-wherever they appear. A short issued value that appears as a whole token in a URL the
-helper would send, such as a `1` flag and a `/orders/1` link, makes the scan incomplete
-rather than risk disclosing it. Passive checks retain header names, cookie attributes and
-nonsecret body content. Cookie names and values do not count as attributes. If secret
-handling cannot produce safe observations, the helper returns an explicit incomplete
-outcome instead. Request URLs, sealed URLs and excerpts are checked across alternate
-orders of percent, HTML character-reference and JSON/hex string-escape decoding,
-including plus-as-space views. Exploration is limited to four decoding steps and 64
-distinct views; reaching a bound with unexplored representations is unsafe. If a
-reflection cannot be located for safe redaction, the helper refuses the outcome rather
-than silently discarding coverage.
-Known credentials in request or redirect URLs are refused inside the helper before
-parent authorization, audit logging or HTTP dispatch. Values learned only from a later
-response still trigger the final URL safety check before serialization and sealing.
-
-Proofs reflect observations, not assumptions from a successful request or a finished
-job. A distinct system verifier checks claims; the human approval, engagement scope
-and authorization window remain required. See [DAST](ui-walkthrough.md#dast) for the
-queued workflow.
-
-Request authorization follows the helper's rate-limit wait, immediately before dispatch,
-so the wait cannot carry an earlier authorization past the engagement window.
-
-A source-map finding requires a served, nonempty response with captured source-map
-content. Empty `200`, `204`, `205`, and `404` responses cannot confirm an artifact.
-The configured-authentication marker check recognizes its explicit body marker or the
-exact captured `X-Synapse-Auth-Weakness` header name; header values stay redacted.
-This marker check is not general authentication-vulnerability discovery.
+A source-map finding requires captured source-map content from a served, nonempty
+response. New public-artifact proofs use version 3. Stored versions 1 and 2
+remain verifiable under their original rules. The configured-authentication check
+matches only its explicit marker in the captured response.
 
 ## Infrastructure-as-code capability gaps
 
@@ -107,7 +69,7 @@ Workspace and materialized image-rootfs coverage are merged conservatively: a su
 pass cannot erase the other's gap. Indexed Kustomizations unreachable from every render
 root, including cyclic components, remain unassessed and retain their raw resource findings.
 Both passes retain bounded `file:line: attribute` diagnostics for unresolved Terraform
-values. Persisted source warnings appear in report scan sections, so image-rootfs
+values. Persisted IaC and inventory coverage warnings appear in report scan sections, so image-rootfs
 uncertainty is not silently presented as evaluated-and-clean. These diagnostics do not
 change complete coverage of the documented bounded capability or the coverage gate.
 

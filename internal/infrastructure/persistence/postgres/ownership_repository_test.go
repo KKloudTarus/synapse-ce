@@ -38,7 +38,7 @@ type ownershipFixture struct {
 
 func newOwnershipFixture(t *testing.T) *ownershipFixture {
 	t.Helper()
-	pool, ddl := ownershipTestDatabase(t, 163, 0, nil)
+	pool, ddl := ownershipTestDatabase(t, 163, nil)
 	ctx := shared.WithTenant(context.Background(), "own-a")
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	repo, err := NewOwnershipRepository(pool)

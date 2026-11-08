@@ -57,8 +57,14 @@ func TestMigration0123PrivacyPolicyActivationEvidenceGuards(t *testing.T) {
 }
 
 func TestMigration0123RefusesRollbackWithActivationHistory(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0123")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() {
 		_, _ = db.ExecContext(context.Background(), `SET session_replication_role = replica`)
@@ -72,9 +78,6 @@ func TestMigration0123RefusesRollbackWithActivationHistory(t *testing.T) {
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
-	}
-	if err := goose.UpTo(db, ".", 123); err != nil {
-		t.Fatalf("up to 0123: %v", err)
 	}
 
 	const digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -91,6 +94,15 @@ func TestMigration0123RefusesRollbackWithActivationHistory(t *testing.T) {
 		VALUES ('migration-0123-probe','migration-0123-probe',1,$1,'probe:v1','migration-test',now())`, digest); err != nil {
 		t.Fatalf("seed migration activation: %v", err)
 	}
+	// DownTo, not Down: Down rolls back only the NEWEST applied migration, so once a later
+	// migration exists it would absorb this assertion instead of exercising 0123's guard.
+	// DownTo unwinds every migration above the target, which drops those later tables, so
+	// re-apply them before returning or the rest of the suite runs against a partial schema.
+	t.Cleanup(func() {
+		if err := goose.Up(db, "."); err != nil {
+			t.Errorf("restore migrations after rollback probe: %v", err)
+		}
+	})
 	if err := goose.DownTo(db, ".", 122); err == nil || !strings.Contains(err.Error(), "cannot roll back 0123") {
 		t.Fatalf("down migration error=%v, want activation-history refusal", err)
 	}

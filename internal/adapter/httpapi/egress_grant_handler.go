@@ -108,7 +108,7 @@ func newEgressGrantHandler(token string, authorizer EgressGrantAuthorizer, reque
 		body.RunID = strings.TrimSpace(body.RunID)
 		if body.TenantID == "" || len(body.TenantID) > maxEgressGrantIDLength ||
 			body.ExecutionKind == "" || len(body.ExecutionKind) > maxEgressGrantKindLen ||
-			body.ExecutionID == "" || len(body.ExecutionID) > ports.MaxEgressExecutionIDLength ||
+			body.ExecutionID == "" || len(body.ExecutionID) > maxEgressGrantIDLength ||
 			body.RunID == "" || len(body.RunID) > maxEgressGrantIDLength ||
 			body.Slot < 0 || body.Slot >= 64 || body.PID <= 1 || len(body.Rules) > maxEgressGrantRules {
 			writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid egress grant request"})

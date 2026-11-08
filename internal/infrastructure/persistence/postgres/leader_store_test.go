@@ -79,17 +79,21 @@ func TestLeaderStore(t *testing.T) {
 
 // TestMigration0061 exercises the migration down and back up.
 func TestMigration0061(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0061")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 61); err != nil {
-		t.Fatalf("up to 61: %v", err)
-	}
+	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 60); err != nil {
 		t.Fatalf("down to 60: %v", err)
 	}

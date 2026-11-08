@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -15,18 +14,16 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
 )
 
 const (
-	defaultMaxFiles       = 20000
-	defaultMaxEntries     = 100000
-	defaultMaxDepth       = 64
-	maxChartMetadataBytes = 1 << 20
-	versionTimeout        = 2 * time.Second
+	defaultMaxFiles   = 20000
+	defaultMaxEntries = 100000
+	defaultMaxDepth   = 64
+	versionTimeout    = 2 * time.Second
 )
 
 // Status is a readiness value for one scan dimension.
@@ -336,10 +333,10 @@ func inventory(ctx context.Context, root string, opts Options) (Inventory, error
 		}
 		name := d.Name()
 		lower := strings.ToLower(name)
-		if name == "Chart.yaml" && !strings.Contains(string(filepath.Separator)+rel, string(filepath.Separator)+"charts"+string(filepath.Separator)) && !isLibraryChart(path) {
+		if misconfig.IsHelmChartRoot(rel) && !misconfig.IsHelmLibraryChart(path) {
 			helmInput = true
 		}
-		if name == "kustomization.yaml" || name == "kustomization.yml" || name == "Kustomization" {
+		if misconfig.IsKustomizationName(name) {
 			kustomizeInput = true
 		}
 		if ecosystem, ok := markers[lower]; ok {
@@ -374,26 +371,6 @@ func inventory(ctx context.Context, root string, opts Options) (Inventory, error
 	}
 	sort.Slice(languages, func(i, j int) bool { return languages[i].Name < languages[j].Name })
 	return Inventory{Markers: hits, Languages: languages, Truncated: truncated, helmInput: helmInput, kustomizeInput: kustomizeInput}, nil
-}
-
-// Invalid or unreadable metadata remains an ordinary chart, so a gap is not hidden.
-func isLibraryChart(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, maxChartMetadataBytes+1))
-	if err != nil || len(data) > maxChartMetadataBytes {
-		return false
-	}
-	var meta struct {
-		Type string `yaml:"type"`
-	}
-	if err := yaml.Unmarshal(data, &meta); err != nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(meta.Type), "library")
 }
 
 func depth(rel string) int {

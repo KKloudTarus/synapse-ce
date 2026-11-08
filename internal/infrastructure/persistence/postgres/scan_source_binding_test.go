@@ -391,19 +391,12 @@ func TestPostgresScanSourceDoesNotReconstructUnboundHistory(t *testing.T) {
 }
 
 func TestPostgresScanSourceMigrationRollbackGuard(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 160, 160)
-	db := isolated.db
-	ctx := context.Background()
-	config, err := pgxpool.ParseConfig(isolated.dsn)
+	ctx, pool := setupTestDB(t)
+	db, err := goose.OpenDBWithDriver("pgx", pool.Config().ConnString())
 	if err != nil {
 		t.Fatal(err)
 	}
-	config.ConnConfig.RuntimeParams["app.current_tenant"] = "source-tenant"
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
+	t.Cleanup(func() { _ = db.Close() })
 	// Empty metadata can safely migrate in both directions.
 	if err := goose.DownTo(db, ".", 159); err != nil {
 		t.Fatalf("empty source binding rollback: %v", err)

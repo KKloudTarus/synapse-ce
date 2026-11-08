@@ -32,7 +32,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/notificationbuiltin"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
-	"github.com/KKloudTarus/synapse-ce/internal/composition/dastcompose"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/ticketruntime"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
@@ -53,6 +52,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	alertwebhook "github.com/KKloudTarus/synapse-ce/internal/infrastructure/alertsink/webhook"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastengine"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
@@ -153,6 +154,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
 	dastrunuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrun"
 	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
+	dastsessionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastsession"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	docpublishuc "github.com/KKloudTarus/synapse-ce/internal/usecase/docpublish"
@@ -1355,8 +1357,6 @@ func main() {
 	}
 	var privateAuthorityHandler http.Handler
 	var dastGrantAuthorityConfigured bool
-	var dastScanGrantAuthorityConfigured bool
-	scanPolicy, scanPolicyErr := dastcompose.ConfiguredScanPolicy(&cfg)
 	if cfg.EgressGrantAuthorityAddr != "" {
 		seed, serr := signing.DecodeSeed(cfg.EgressGrantSigningSeed)
 		if serr != nil {
@@ -1411,18 +1411,6 @@ func main() {
 				os.Exit(1)
 			}
 			dastGrantAuthorityConfigured = true
-			if scanPolicyErr == nil {
-				scanAuthority, ok := dastRunStore.(ports.DASTScanAuthority)
-				if !ok {
-					log.Error("authenticated DAST requires persisted scan authority")
-					os.Exit(1)
-				}
-				if serr = grantService.SetDASTScan(scanAuthority, scanPolicy.HelperPath, scanPolicy.HelperSHA256, scanPolicy.Ceilings); serr != nil {
-					log.Error("authenticated DAST grant authority init failed", "err", serr)
-					os.Exit(1)
-				}
-				dastScanGrantAuthorityConfigured = true
-			}
 		}
 		egressGrantHandler, serr := httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
 		if serr != nil {
@@ -2757,20 +2745,29 @@ func main() {
 					}
 					router.SetDASTRunner(dastRunSvc)
 					log.Info("DAST verification runs execute on the worker (durable)", "route", "POST .../runtime-verification/proposals/{aid}/run")
-					if dastScanGrantAuthorityConfigured {
-						if err := dastWorkflowSvc.SetScanPolicy(scanPolicy.HelperPath, scanPolicy.HelperSHA256, scanPolicy.Ceilings); err != nil {
-							log.Error("authenticated DAST proposal policy init failed", "err", err)
-							os.Exit(1)
-						}
-						if err := dastRunSvc.ConfigureScan(scanPolicy.HelperPath, scanPolicy.HelperSHA256, scanPolicy.Ceilings, nil, nil); err != nil {
-							log.Error("authenticated DAST durable submission init failed", "err", err)
-							os.Exit(1)
-						}
-						router.SetDASTScan(dastWorkflowSvc, dastRunSvc)
-						log.Info("authenticated DAST proposals and durable worker execution ENABLED")
-					} else {
-						log.Warn("authenticated DAST scanner DISABLED: configured helper pin and independent scan grant authority required", "policy_error", scanPolicyErr)
+				}
+				if egressLive {
+					engine, eerr := dastengine.New(reconRunner, cfg.DASTHelperBin, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
+					if eerr != nil {
+						log.Error("authenticated DAST engine init failed", "err", eerr)
+						os.Exit(1)
 					}
+					sessionSvc, serr := dastsessionuc.NewService(engine, reconGuard, evidenceService)
+					if serr != nil {
+						log.Error("authenticated DAST session init failed", "err", serr)
+						os.Exit(1)
+					}
+					ceilings := dastworkflowuc.DefaultScanCeilings()
+					ceilings.MaxReauth, ceilings.RatePerSec, ceilings.Concurrency = cfg.DASTMaxReauth, cfg.DASTRatePerSec, cfg.DASTConcurrency
+					ceilings.Limits.Depth, ceilings.Limits.Pages, ceilings.Limits.Requests, ceilings.Limits.WallClock = cfg.DASTMaxDepth, cfg.DASTMaxPages, cfg.DASTMaxRequests, cfg.DASTMaxWallClock
+					if err := dastWorkflowSvc.SetScan(sessionSvc, cfg.DASTHelperBin, evidenceService, dastchecks.NewEvaluator(), dastchecks.NewEvaluator(), judgmentSvc, runtimeVerifierSvc, ceilings); err != nil {
+						log.Error("authenticated DAST scan workflow init failed", "err", err)
+						os.Exit(1)
+					}
+					router.SetDASTScan(dastWorkflowSvc)
+					log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
+				} else {
+					log.Info("durable DAST verifier ENABLED; authenticated scanner remains unavailable")
 				}
 			} else {
 				log.Warn("DAST execution workflows DISABLED: authoritative signed DAST grants are unavailable in this process posture")

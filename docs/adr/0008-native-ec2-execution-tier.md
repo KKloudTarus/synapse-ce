@@ -64,15 +64,3 @@ ADR supersedes only its execution-worker placement decision:
   ASG replacement, broker recovery, replay refusal, and a subsequent healthy run.
 - This topology adds an EC2 and systemd operational surface, but keeps privileged namespace administration out of
   the worker and keeps untrusted execution out of the API and Kubernetes Pods.
-
-## Implementation note
-
-The decision above records the issuer availability at the time it was made. Durable
-DAST verifier probes and authenticated DAST scans now have their own authoritative
-issuer branches; networked SCA and acquisition remain unavailable in production.
-Authenticated scans require additive migration 0271, PostgreSQL-backed queue and
-approval custody, a canonical helper path and authoritative hash shared by API policy,
-issuer and worker, and the same sandbox and bounded broker separation described above.
-See [Deployment](../guide/deployment.md#supported-network-execution-posture).
-Availability of these branches does not itself qualify a native host or its systemd
-hardening; the exact execution environment still needs its own conformance evidence.

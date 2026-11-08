@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"net/url"
 	"reflect"
 	"strings"
 
@@ -19,15 +18,6 @@ import (
 )
 
 const ExecutionKindDASTVerifier = "dast-verifier"
-
-func dastOriginPolicy(origin *url.URL) ports.EgressPolicy {
-	port := dastprobe.Port(origin)
-	if addr, err := netip.ParseAddr(origin.Hostname()); err == nil {
-		addr = addr.Unmap()
-		return ports.EgressPolicy{Rules: []ports.EgressRule{{Allow: true, Net: netip.PrefixFrom(addr, addr.BitLen()), Ports: []uint16{port}}}}
-	}
-	return ports.EgressPolicy{AllowDomainRules: []ports.DomainRule{{Host: origin.Hostname(), Ports: []uint16{port}}}}
-}
 
 func (s *Service) SetDAST(reader ports.DASTRunAuthority) error {
 	if reader == nil {
@@ -74,7 +64,7 @@ func (s *Service) authorizeDAST(ctx context.Context, tenant shared.ID, req Reque
 	}
 	// Independently resolve the approved host. A worker may select one current
 	// public address, never an unrelated address, wider network or extra port.
-	resolved, err := s.canonicalizer.Canonicalize(ctx, dastOriginPolicy(u))
+	resolved, err := s.canonicalizer.Canonicalize(ctx, ports.EgressPolicy{AllowDomainRules: []ports.DomainRule{{Host: u.Hostname(), Ports: []uint16{dastprobe.Port(u)}}}})
 	if err != nil {
 		return "", fmt.Errorf("derive DAST egress rules: %w", err)
 	}
@@ -118,7 +108,7 @@ func validateDASTAuthority(a ports.DASTRunAuthorization, tenant, runID shared.ID
 		return fmt.Errorf("%w: DAST run, approval or sealed custody is invalid", shared.ErrForbidden)
 	}
 	r, p, d, probe := a.Run, a.Action, a.Decision, a.Job.Probe
-	if r.Validate() != nil || r.Kind != dastrun.KindVerifier || r.ID != runID || r.TenantID != tenant || r.Status != dastrun.RunRunning || r.FinishedAt != nil || a.GrantIssued || a.ConsumedBy != runID || a.Job.TenantID != tenant || a.Job.RunID != runID || !probe.RunID.IsZero() {
+	if r.Validate() != nil || r.ID != runID || r.TenantID != tenant || r.Status != dastrun.RunRunning || r.FinishedAt != nil || a.GrantIssued || a.ConsumedBy != runID || a.Job.TenantID != tenant || a.Job.RunID != runID || !probe.RunID.IsZero() {
 		return deny()
 	}
 	if p.ID != r.ActionID || p.EngagementID != r.EngagementID || p.Tool != dastprobe.ToolRunDASTVerifier || p.Action != dastprobe.ActionSafeHTTPProbe || p.Risk != agent.RiskIntrusive || p.Target.Kind != engagement.TargetURL || p.Target.Value != probe.URL || probe.JudgmentID.IsZero() || (probe.NormalizedMethod() != "GET" && probe.NormalizedMethod() != "HEAD") {

@@ -57,8 +57,6 @@ spec:
             {{- include "synapse.containerSecurityContext" . | nindent 12 }}
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
-            - name: SYNAPSE_DB_MIGRATION_DSN
-              valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.database.migration.name is required" .Values.existingSecrets.database.migration.name }}, key: {{ required "existingSecrets.database.migration.key is required" .Values.existingSecrets.database.migration.key }}}}
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
           volumeMounts:

@@ -1383,7 +1383,7 @@ type ReportInsight struct {
 	LicensePct              float64
 	Confident               bool
 	CompletenessNote        string
-	SourceWarnings          []string
+	CoverageWarnings        []string
 	EngineOutcomes          []scanrun.EngineOutcome
 	EngineCoverage          scanrun.EngineCoverage
 	ExecutionMode           string

@@ -2,14 +2,10 @@ package egressbroker
 
 import (
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestGrantSignerBindsRequestAndExpires(t *testing.T) {
@@ -75,56 +71,5 @@ func TestGrantVerifierRejectsTampering(t *testing.T) {
 	tampered := base64.RawURLEncoding.EncodeToString(payload) + "." + parts[1]
 	if _, err := verifier.Verify(tampered, now); err == nil {
 		t.Fatal("tampered grant must be rejected")
-	}
-}
-
-func TestGrantSupportsFencedScanExecutionIdentity(t *testing.T) {
-	execution := ports.DASTScanExecution{
-		TenantID: shared.ID(strings.Repeat("t", 200)),
-		RunID:    shared.ID(strings.Repeat("r", 32)),
-		JobID:    strings.Repeat("r", 32) + "-job",
-		Fence:    1 << 62,
-	}
-	id, err := execution.ExecutionID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var seed [ed25519.SeedSize]byte
-	if _, err := rand.Read(seed[:]); err != nil {
-		t.Fatal(err)
-	}
-	signer, err := NewGrantSigner(seed[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Unix(1_800_000_000, 0)
-	req := GrantRequest{TenantID: execution.TenantID.String(), ExecutionKind: "dast-session", ExecutionID: id, RunID: "syn1", PID: 1234}
-	token, err := signer.Sign(req, now, time.Minute)
-	if err != nil {
-		t.Fatalf("valid full fenced identity cannot receive a grant: %v", err)
-	}
-	verifier, err := NewGrantVerifier(signer.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	claims, err := verifier.Verify(token, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := ports.ParseDASTScanExecutionID(claims.ExecutionID)
-	if err != nil || decoded != execution {
-		t.Fatalf("signed claim lost execution ownership: %+v %v", decoded, err)
-	}
-	wire := request{Version: protocolVersion, Action: "setup", TenantID: req.TenantID, ExecutionKind: req.ExecutionKind, ExecutionID: id, RunID: req.RunID, PID: req.PID, Grant: token}
-	if err := validateRequest(wire); err != nil {
-		t.Fatalf("valid full fenced identity rejected on broker wire: %v", err)
-	}
-	req.ExecutionID = strings.Repeat("x", 1025)
-	if _, err := signer.Sign(req, now, time.Minute); err == nil {
-		t.Fatal("unbounded execution identity was signed")
-	}
-	wire.ExecutionID = req.ExecutionID
-	if err := validateRequest(wire); err == nil {
-		t.Fatal("unbounded execution identity reached broker setup")
 	}
 }

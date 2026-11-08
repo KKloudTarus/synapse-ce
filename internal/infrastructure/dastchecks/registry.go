@@ -155,13 +155,21 @@ func looksSourceMap(body string) bool {
 	return strings.Contains(body, `"mappings"`) || strings.Contains(body, `"sources"`) || strings.Contains(body, `"sourcesContent"`)
 }
 
-// proofVersion is the current closed-proof contract. Version 2 carries the corrected cookie,
-// artifact-evidence and header-capture predicates and binds HeadersCaptured into the hash. Version
-// 1 proofs stay verifiable against their own recorded content.
-const proofVersion = 2
+// Version 2 binds HeadersCaptured. Version 3 tightens only the public-artifact contract.
+const (
+	proofVersion         = 2
+	artifactProofVersion = 3
+)
+
+func checkProofVersion(id string) int {
+	if id == "sensitive-public-artifact" {
+		return artifactProofVersion
+	}
+	return proofVersion
+}
 
 func newFinding(id, endpoint string, o ports.DASTObservation, signature string, headers []string, predicateTokens ...string) ports.DASTFinding {
-	return newVersionedFinding(proofVersion, id, endpoint, o, signature, headers, predicateTokens...)
+	return newVersionedFinding(checkProofVersion(id), id, endpoint, o, signature, headers, predicateTokens...)
 }
 
 func newVersionedFinding(version int, id, endpoint string, o ports.DASTObservation, signature string, headers []string, predicateTokens ...string) ports.DASTFinding {
@@ -172,6 +180,9 @@ func newVersionedFinding(version int, id, endpoint string, o ports.DASTObservati
 	raw := proof.CheckID + "\n" + proof.NormalizedEndpoint + "\n" + proof.Observation.Method + "\n" + fmt.Sprint(proof.Observation.Status) + "\n" + proof.Observation.BodySHA256 + "\n" + strings.Join(proof.Observation.Headers, ",") + "\n" + proof.Observation.Signature + "\n" + strings.Join(proof.Observation.PredicateTokens, ",")
 	if version >= 2 {
 		raw += "\n" + strconv.FormatBool(proof.Observation.HeadersCaptured)
+	}
+	if version >= artifactProofVersion {
+		raw += "\nversion:" + strconv.Itoa(version)
 	}
 	hash := sha256.Sum256([]byte(raw))
 	proof.Hash = hex.EncodeToString(hash[:])
@@ -188,7 +199,7 @@ func checkCWE(id string) string {
 }
 
 func (e *Evaluator) VerifyProof(p ports.DASTProof) error {
-	if !e.dastcheckID(p.CheckID) || checkCWE(p.CheckID) == "" || p.Version < 1 || p.Version > proofVersion || p.NormalizedEndpoint == "" || p.Observation.Method == "" || p.Observation.Status < 100 || p.Observation.Status > 599 || len(p.Observation.BodySHA256) != 64 {
+	if !e.dastcheckID(p.CheckID) || checkCWE(p.CheckID) == "" || p.Version < 1 || p.Version > checkProofVersion(p.CheckID) || p.NormalizedEndpoint == "" || p.Observation.Method == "" || p.Observation.Status < 100 || p.Observation.Status > 599 || len(p.Observation.BodySHA256) != 64 {
 		return fmt.Errorf("%w: invalid closed DAST proof", shared.ErrValidation)
 	}
 	for _, token := range p.Observation.PredicateTokens {
@@ -218,8 +229,11 @@ func (e *Evaluator) VerifyProof(p ports.DASTProof) error {
 		if !valid {
 			return fmt.Errorf("%w: DAST artifact predicate did not match", shared.ErrValidation)
 		}
-		// Current artifact proofs must record a served, nonempty response.
-		if p.Version >= 2 && (!servedSuccessfully(p.Observation.Status) || strings.EqualFold(p.Observation.BodySHA256, emptyBodySHA256)) {
+		// Keep the original 2xx rule for stored v2 proofs. New proofs also require content.
+		if p.Version >= 2 && (p.Observation.Status < 200 || p.Observation.Status >= 300) {
+			return fmt.Errorf("%w: DAST artifact proof records an unserved response", shared.ErrValidation)
+		}
+		if p.Version >= artifactProofVersion && (!servedSuccessfully(p.Observation.Status) || strings.EqualFold(p.Observation.BodySHA256, emptyBodySHA256)) {
 			return fmt.Errorf("%w: DAST artifact proof records an unserved or empty response", shared.ErrValidation)
 		}
 	case "auth-configured-weakness":

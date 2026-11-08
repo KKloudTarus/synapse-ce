@@ -18,7 +18,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -34,15 +33,13 @@ type Service struct {
 	ids           ports.IDGenerator
 	session       scanSession
 	helperBin     string
-	helperSHA256  string
 	evidence      *evidence.Service
-	ceilings      dastconfig.ScanCeilings
+	ceilings      ScanCeilings
 	evaluator     ports.DASTCheckEvaluator
 	proofVerifier ports.DASTProofVerifier
 	judgments     scanJudgmentProposer
 	verifier      scanProofVerifier
 	tx            ports.IndependentTenantTransactionRunner
-	scanOwners    ports.DASTScanRunStore
 }
 
 func NewService(gate *safety.Gate, approvals *approval.Service, store ports.ApprovalStore, runner *dastrunner.Service, ev *evidence.Service, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {

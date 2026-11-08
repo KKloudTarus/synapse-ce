@@ -32,15 +32,12 @@ type jobPayload = ports.DASTRunJob
 
 // Service submits and reads DAST runs (API) and executes them (worker).
 type Service struct {
-	runs         ports.DASTRunStore
-	enqueuer     ports.DASTRunEnqueuer
-	prober       Prober // nil on the API side (submit/read only); required on the worker
-	audit        ports.AuditLogger
-	clock        ports.Clock
-	ids          ports.IDGenerator
-	scanPolicy   *scanPolicy
-	scanExecutor ScanExecutor
-	scanLocker   ports.LeaseRunLocker
+	runs     ports.DASTRunStore
+	enqueuer ports.DASTRunEnqueuer
+	prober   Prober // nil on the API side (submit/read only); required on the worker
+	audit    ports.AuditLogger
+	clock    ports.Clock
+	ids      ports.IDGenerator
 }
 
 // NewService validates dependencies. prober may be nil for a submit/read-only (API) service; it is
@@ -122,9 +119,6 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	run, err := s.runs.GetDASTRun(ctx, tenant, p.RunID)
 	if err != nil {
 		return err
-	}
-	if run.Kind != ddast.KindVerifier {
-		return fmt.Errorf("%w: verifier job cannot execute an authenticated scan", shared.ErrForbidden)
 	}
 	if run.Status.Terminal() {
 		return nil // already finished on an earlier delivery
@@ -233,9 +227,6 @@ func (s *Service) FailStrandedJob(ctx context.Context, payload []byte, cause err
 	run, err := s.runs.GetDASTRun(ctx, tenant, p.RunID)
 	if err != nil {
 		return err
-	}
-	if run.Kind != ddast.KindVerifier {
-		return fmt.Errorf("%w: verifier job cannot terminalize an authenticated scan", shared.ErrForbidden)
 	}
 	if run.Status.Terminal() {
 		return nil

@@ -224,8 +224,8 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 		t.Fatalf("response attempt deadline trigger count=%d, want 1", triggerCount)
 	}
 
-	if err := goose.UpTo(db, ".", 141); err != nil {
-		t.Fatalf("migrate consolidated database to 0141: %v", err)
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("migrate consolidated database to head: %v", err)
 	}
 	finalColumns := map[string]string{
 		"authorization_target":  "jsonb",

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -9,7 +10,7 @@ import (
 
 func TestTicketWorkflowMigrationRollbackPreservesTenantPolicy(t *testing.T) {
 	isolated := newIsolatedMigrationDB(t, 237, 235)
-	if err := goose.UpTo(isolated.db, ".", 237); err != nil {
+	if err := Migrate(context.Background(), isolated.dsn); err != nil {
 		t.Fatal(err)
 	}
 	if err := goose.DownTo(isolated.db, ".", 235); err != nil {

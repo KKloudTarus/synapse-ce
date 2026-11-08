@@ -30,14 +30,6 @@ func (f *fakeStore) Save(_ context.Context, j judgment.Judgment) error {
 	f.saved = append(f.saved, j)
 	return nil
 }
-func (f *fakeStore) GetByID(_ context.Context, eng, id shared.ID) (judgment.Judgment, error) {
-	for _, j := range f.saved {
-		if j.EngagementID == eng && j.ID == id {
-			return j, nil
-		}
-	}
-	return judgment.Judgment{}, shared.ErrNotFound
-}
 func (f *fakeStore) ListByEngagement(_ context.Context, eng shared.ID) ([]judgment.Judgment, error) {
 	var out []judgment.Judgment
 	for _, j := range f.saved {
@@ -339,25 +331,6 @@ func TestVerifyConflict(t *testing.T) {
 	// wrong expectedVersion → conflict (seal still happens; orphan acceptable by design)
 	if _, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 80, "holds", j.Version+1); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
-	}
-}
-
-func TestVerifyRejectsJudgmentFromAnotherEngagement(t *testing.T) {
-	svc, store, sealer, _ := newSvc()
-	j, err := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapReachability, judgment.SubjectFinding, "f1", reach())
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealsBefore := len(sealer.kinds)
-	if _, err := svc.Verify(context.Background(), "human:bob", "e2", j.ID, 80, "holds", j.Version); !errors.Is(err, shared.ErrNotFound) {
-		t.Fatalf("cross-engagement verification: want ErrNotFound, got %v", err)
-	}
-	stored := store.saved[0]
-	if stored.State != j.State || stored.EvidenceScore != j.EvidenceScore || stored.Version != j.Version || stored.VerifiedBy != j.VerifiedBy {
-		t.Fatal("cross-engagement verification changed the proposed judgment")
-	}
-	if len(sealer.kinds) != sealsBefore {
-		t.Fatal("cross-engagement verification sealed a verdict")
 	}
 }
 

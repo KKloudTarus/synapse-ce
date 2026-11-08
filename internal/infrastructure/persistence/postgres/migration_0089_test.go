@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -11,16 +12,27 @@ import (
 )
 
 func TestMigration0089BackfillsAndIsolatesScanInventory(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0089")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := MigrateLocked(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 88); err != nil {
-		t.Fatalf("up to 0088: %v", err)
+	if err := goose.DownTo(db, ".", 88); err != nil {
+		t.Fatalf("down to 0088: %v", err)
 	}
 
 	prefix := "m89-" + randHex(t)
@@ -64,8 +76,10 @@ func TestMigration0089BackfillsAndIsolatesScanInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	t.Cleanup(pool.Close)
+	defer pool.Close()
 	role := uniqueProbeRole(t, dsn, "sbom_rls_probe_0089")
+	_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
+	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
 	if _, err := pool.Exec(ctx, `CREATE ROLE `+role+` NOSUPERUSER NOBYPASSRLS`); err != nil {
 		t.Fatalf("create probe role: %v", err)
 	}
@@ -75,6 +89,14 @@ func TestMigration0089BackfillsAndIsolatesScanInventory(t *testing.T) {
 	if _, err := pool.Exec(ctx, `GRANT SELECT ON sboms, components, vulnerabilities TO `+role); err != nil {
 		t.Fatalf("grant inventory: %v", err)
 	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM sboms WHERE id IN ($1,$2)`, sbomA, sbomB)
+		_, _ = pool.Exec(bg, `DELETE FROM engagements WHERE id IN ($1,$2)`, engagementA, engagementB)
+		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id IN ($1,$2)`, tenantA, tenantB)
+		_, _ = pool.Exec(bg, `DROP OWNED BY `+role)
+		_, _ = pool.Exec(bg, `DROP ROLE IF EXISTS `+role)
+	})
 
 	countComponents := func(tenant string) int {
 		t.Helper()

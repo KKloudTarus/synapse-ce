@@ -1,7 +1,6 @@
 package misconfig
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -554,13 +553,8 @@ func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) (cty.Value, map[string]b
 			if err != nil {
 				continue
 			}
-			var expanded bytes.Buffer
-			if err := json.Indent(&expanded, raw, "", "  "); err != nil {
-				docs[blk.Labels[1]] = cty.DynamicVal
-				continue
-			}
 			docs[blk.Labels[1]] = cty.ObjectVal(map[string]cty.Value{
-				"json":          cty.StringVal(expanded.String()),
+				"json":          cty.StringVal(string(raw)),
 				"minified_json": cty.StringVal(string(raw)),
 			})
 			assessable[blk.Labels[1]] = true
@@ -577,12 +571,10 @@ func tfPolicyDocData(m *tfModule, ctx *hcl.EvalContext) (cty.Value, map[string]b
 // read with a missing element would be assessed as something the operator did not write.
 func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocument, bool) {
 	doc := policyDocument{Version: "2012-10-17"}
-	// Only the plain document's version is modeled. Instance collections, composition and other
-	// unmodeled attributes must not be dropped to publish a confident partial document.
-	for name := range body.Attributes {
-		if name != "version" {
-			return doc, false
-		}
+	// The bounded model reads only direct statements. Keep composition, explicit versions,
+	// and other unmodeled attributes unknown so literal inspection still sees the document.
+	if len(body.Attributes) != 0 {
+		return doc, false
 	}
 	str := func(b *hclsyntax.Body, name string) (string, bool, bool) {
 		attr, ok := b.Attributes[name]
@@ -617,11 +609,6 @@ func policyDocFromHCL(body *hclsyntax.Body, ctx *hcl.EvalContext) (policyDocumen
 			out = append(out, ev.AsString())
 		}
 		return out, true, true
-	}
-	if version, present, ok := str(body, "version"); !ok {
-		return doc, false
-	} else if present {
-		doc.Version = version
 	}
 	for _, blk := range body.Blocks {
 		if blk.Type != "statement" {

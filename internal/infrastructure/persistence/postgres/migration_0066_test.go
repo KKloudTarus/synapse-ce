@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,16 +12,23 @@ import (
 )
 
 func TestMigration0066PreservesLegacyAssessmentGraph(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0066")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
 	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", 65); err != nil {
-		t.Fatalf("up to 65: %v", err)
+	deleteV2AuditRowsForMigrationRollback(t, db)
+	if err := goose.DownTo(db, ".", 65); err != nil {
+		t.Fatalf("down to 65: %v", err)
 	}
 
 	pool, err := Connect(ctx, dsn)

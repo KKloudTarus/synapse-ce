@@ -20,7 +20,7 @@ import (
 const templateChecksum = "0000000000000000000000000000000000000000000000000000000000000000"
 
 func TestMigration0195NotificationTemplatesSchema(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 194, 195, nil)
+	_, db := ownershipTestDatabase(t, 194, nil)
 	for _, table := range []string{"notification_templates", "notification_template_versions"} {
 		requireMigrationTable(t, db, table, true)
 		requireMigrationRLS(t, db, table)
@@ -148,7 +148,7 @@ func TestMigration0195NotificationTemplatesSchema(t *testing.T) {
 }
 
 func TestNotificationTemplateStoreConformancePostgres(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 194, 0, nil)
+	pool, db := ownershipTestDatabase(t, 194, nil)
 	for _, id := range []shared.ID{notificationtemplatetest.TenantA, notificationtemplatetest.TenantB} {
 		if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING`, id); err != nil {
 			t.Fatal(err)
@@ -156,6 +156,8 @@ func TestNotificationTemplateStoreConformancePostgres(t *testing.T) {
 	}
 	notificationtemplatetest.Run(t, func(t *testing.T) ports.NotificationTemplateStore {
 		// TRUNCATE fires no row triggers, so the owner can reset the append-only table between cases.
+		// CASCADE also empties notification_channels, whose template binding (0200) references
+		// notification_templates; the conformance cases create no channel.
 		if _, err := db.Exec(`TRUNCATE notification_template_versions, notification_templates CASCADE`); err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +169,7 @@ func TestNotificationTemplateStoreConformancePostgres(t *testing.T) {
 // does not bypass RLS, tenant t-b can neither read, write nor activate tenant t-a's templates, even
 // with raw SQL that names t-a.
 func TestNotificationTemplateStoreIsTenantIsolated(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 194, 0, nil)
+	pool, db := ownershipTestDatabase(t, 194, nil)
 	for _, id := range []string{"t-a", "t-b"} {
 		if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING`, id); err != nil {
 			t.Fatal(err)
@@ -238,7 +240,7 @@ func TestNotificationTemplateStoreIsTenantIsolated(t *testing.T) {
 // templates for one key. Each either wins, archiving the one before it, or is refused with
 // ErrConflict when the unique index catches it; the key never ends with two active templates.
 func TestNotificationTemplateConcurrentActivationKeepsOneActive(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 194, 0, nil)
+	pool, db := ownershipTestDatabase(t, 194, nil)
 	if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ('t-race', 'Race') ON CONFLICT DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}

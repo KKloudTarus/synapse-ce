@@ -1,6 +1,8 @@
 package postgres
 
 import (
+	"context"
+	"os"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -9,15 +11,25 @@ import (
 )
 
 func TestMigration0068EdgeConfidence(t *testing.T) {
-	dsn := isolatedMigrationDSN(t, testDSN(t), "0068")
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 67); err != nil {
-		t.Fatalf("up to 67: %v", err)
+	// One below THIS migration (renumbered 0067 -> 0068 after #481 took 0067); going lower would
+	// also revert an unrelated feature and change what this test exercises.
+	deleteV2AuditRowsForMigrationRollback(t, db)
+	if err := goose.DownTo(db, ".", 67); err != nil {
+		t.Fatalf("down to 66: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO tenants (id, name) VALUES ('edge-66', 'edge-66') ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatalf("seed tenant: %v", err)

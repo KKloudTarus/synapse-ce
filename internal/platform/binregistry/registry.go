@@ -23,7 +23,7 @@ var ErrIntegrity = errors.New("binary integrity check failed")
 // Registry pins resolved binary paths to expected sha256 hashes.
 type Registry struct {
 	mu       sync.Mutex
-	expected map[string]string // authoritative pins keyed by requested/resolved path or basename
+	expected map[string]string // authoritative pins (resolved path -> hex sha256) from config
 	seen     map[string]string // trust-on-first-use pins recorded at first execution
 	tofu     bool              // when true, pin-on-first-use and detect any later change
 }
@@ -62,17 +62,17 @@ func (r *Registry) Verify(path string) (string, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Every applicable authoritative pin must match, including aliases changed by symlink resolution.
-	pinned := false
-	for _, key := range [...]string{path, filepath.Base(path), resolved, filepath.Base(resolved)} {
-		if want, ok := r.expected[key]; ok {
-			pinned = true
-			if err := matchOrErr(resolved, want, sum); err != nil {
-				return "", err
-			}
+	// Authoritative pin keyed by resolved path or by basename (so config can pin "naabu").
+	if want, ok := r.expected[resolved]; ok {
+		if err := matchOrErr(resolved, want, sum); err != nil {
+			return "", err
 		}
+		return resolved, nil
 	}
-	if pinned {
+	if want, ok := r.expected[filepath.Base(resolved)]; ok {
+		if err := matchOrErr(resolved, want, sum); err != nil {
+			return "", err
+		}
 		return resolved, nil
 	}
 	if r.tofu {
