@@ -170,8 +170,6 @@ broker DaemonSet enabled and an execution node selector.
   value: production
 - name: SYNAPSE_SANDBOX_ENABLED
   value: "true"
-- name: SYNAPSE_TOOL_EXECUTION_MODE
-  value: dispatch-only
 {{- end }}
 - name: SYNAPSE_DB_AUTO_MIGRATE
   value: "false"
@@ -181,12 +179,8 @@ broker DaemonSet enabled and an execution node selector.
   value: {{ required "objectStore.bucket is required" .Values.objectStore.bucket | quote }}
 - name: SYNAPSE_BLOB_USE_SSL
   value: {{ .Values.objectStore.useSSL | quote }}
-- name: SYNAPSE_API_TOKEN
-  valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.apiToken.name is required" .Values.existingSecrets.apiToken.name }}, key: {{ required "existingSecrets.apiToken.key is required" .Values.existingSecrets.apiToken.key }}}}
 - name: SYNAPSE_DB_DSN
   valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.database.runtime.name is required" .Values.existingSecrets.database.runtime.name }}, key: {{ required "existingSecrets.database.runtime.key is required" .Values.existingSecrets.database.runtime.key }}}}
-- name: SYNAPSE_DB_MIGRATION_DSN
-  valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.database.migration.name is required" .Values.existingSecrets.database.migration.name }}, key: {{ required "existingSecrets.database.migration.key is required" .Values.existingSecrets.database.migration.key }}}}
 - name: SYNAPSE_BLOB_ACCESS_KEY
   valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.objectStore.accessKey.name is required" .Values.existingSecrets.objectStore.accessKey.name }}, key: {{ required "existingSecrets.objectStore.accessKey.key is required" .Values.existingSecrets.objectStore.accessKey.key }}}}
 - name: SYNAPSE_BLOB_SECRET_KEY

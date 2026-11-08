@@ -50,6 +50,12 @@ spec:
             {{- end }}
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
+            - name: SYNAPSE_API_TOKEN
+              valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.apiToken.name is required" .Values.existingSecrets.apiToken.name }}, key: {{ required "existingSecrets.apiToken.key is required" .Values.existingSecrets.apiToken.key }}}}
+            {{- if ne (include "synapse.executionMode" .) "controlPlaneOnly" }}
+            - name: SYNAPSE_TOOL_EXECUTION_MODE
+              value: dispatch-only
+            {{- end }}
             {{- $maintenance := .Values.vulnerabilityIntelligence.maintenance.interval | toString | trim -}}
             {{- $syncScheduler := .Values.vulnerabilityIntelligence.syncSchedulerInterval | toString | trim -}}
             {{- if or (and $maintenance (ne $maintenance "0")) (and $syncScheduler (ne $syncScheduler "0")) }}

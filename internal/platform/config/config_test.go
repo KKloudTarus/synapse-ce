@@ -968,7 +968,16 @@ func TestValidateResponseExecutionPostureRequiresSeparatedHaltWriter(t *testing.
 	if err := cfg.ValidateResponseExecutionPosture(); err != nil {
 		t.Fatalf("separate response database identities rejected: %v", err)
 	}
-	cfg.DBHaltWriterDSN = cfg.DBDSN
+	// The production API holds runtime and halt-writer identities, never the DDL credential.
+	cfg.DBMigrationDSN = ""
+	if err := cfg.ValidateResponseExecutionPosture(); err != nil {
+		t.Fatalf("API authority without a migration DSN rejected: %v", err)
+	}
+	cfg.DBMigrationDSN = cfg.DBHaltWriterDSN
+	if err := cfg.ValidateResponseExecutionPosture(); err == nil {
+		t.Fatal("a configured migration DSN must not share the halt-writer user")
+	}
+	cfg.DBMigrationDSN, cfg.DBHaltWriterDSN = "", cfg.DBDSN
 	if err := cfg.ValidateResponseExecutionPosture(); err == nil {
 		t.Fatal("runtime and halt-writer database users must be distinct")
 	}

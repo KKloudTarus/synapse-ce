@@ -1588,7 +1588,7 @@ func (c Config) ValidateResponseExecutionPosture() error {
 	if c.DBDSN == "" || c.DBHaltWriterDSN == "" {
 		return errors.New("SYNAPSE_DB_DSN and SYNAPSE_DB_HALT_WRITER_DSN are required when live response execution is enabled")
 	}
-	if err := validateResponseDatabaseRoleSeparation(c.MigrationDSN(), c.DBDSN, c.DBHaltWriterDSN); err != nil {
+	if err := validateResponseDatabaseRoleSeparation(c.DBMigrationDSN, c.DBDSN, c.DBHaltWriterDSN); err != nil {
 		return err
 	}
 	return nil
@@ -1918,11 +1918,9 @@ func validOIDCFrontendURL(value string) bool {
 	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }
 
+// validateResponseDatabaseRoleSeparation checks the identities a process holds. Services
+// without schema authority omit the migration DSN; synapse-migrate always checks all three.
 func validateResponseDatabaseRoleSeparation(migrationDSN, runtimeDSN, haltWriterDSN string) error {
-	migrationUser, err := postgresDSNUser(migrationDSN)
-	if err != nil {
-		return fmt.Errorf("parse migration database DSN: %w", err)
-	}
 	runtimeUser, err := postgresDSNUser(runtimeDSN)
 	if err != nil {
 		return fmt.Errorf("parse runtime database DSN: %w", err)
@@ -1931,7 +1929,17 @@ func validateResponseDatabaseRoleSeparation(migrationDSN, runtimeDSN, haltWriter
 	if err != nil {
 		return fmt.Errorf("parse halt-writer database DSN: %w", err)
 	}
-	if migrationUser == runtimeUser || migrationUser == haltUser || runtimeUser == haltUser {
+	if runtimeUser == haltUser {
+		return errors.New("runtime and halt-writer DSNs must use distinct database users")
+	}
+	if migrationDSN == "" {
+		return nil
+	}
+	migrationUser, err := postgresDSNUser(migrationDSN)
+	if err != nil {
+		return fmt.Errorf("parse migration database DSN: %w", err)
+	}
+	if migrationUser == runtimeUser || migrationUser == haltUser {
 		return errors.New("migration, runtime, and halt-writer DSNs must use distinct database users")
 	}
 	return nil
