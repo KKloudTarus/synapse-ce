@@ -20,11 +20,11 @@ type identifiedGenerator struct {
 	generated   int
 }
 
-func (g *identifiedGenerator) SBOMProducerIdentity(context.Context) (string, error) {
+func (g *identifiedGenerator) SBOMProducerIdentity(context.Context, string) (string, bool, error) {
 	if g.identityErr != nil {
-		return "", g.identityErr
+		return "", false, g.identityErr
 	}
-	return g.identity, nil
+	return g.identity, true, nil
 }
 
 func (g *identifiedGenerator) Generate(context.Context, string) (*sbom.SBOM, error) {
@@ -170,28 +170,25 @@ func TestUnavailableProducerIsNeverServedFromCache(t *testing.T) {
 	}
 }
 
-// TestLegacyProducerKeepsTheProvenanceKey keeps a producer that predates the identity port working:
-// it falls back to the provenance-derived key, and an empty provenance disables the cache rather
-// than sharing one empty key across producers.
-func TestLegacyProducerKeepsTheProvenanceKey(t *testing.T) {
+func TestUnknownProducerNeverUsesProvenanceCache(t *testing.T) {
 	cache := newRecordingCache()
 	ctx := context.Background()
-	svc := identityService(&legacyGenerator{}, cache)
+	known := &identifiedGenerator{identity: "ownsbom/0.8.0", source: "known"}
+	svc := identityService(known, cache)
 	svc.prov.ToolVersions["sbom-generator"] = "ownsbom/0.8.0"
-	if _, hit, err := svc.loadOrGenerateSBOM(ctx, "/ws"); err != nil || hit {
-		t.Fatalf("first legacy scan: hit=%v err=%v", hit, err)
+	if _, _, err := svc.loadOrGenerateSBOM(ctx, "/ws"); err != nil {
+		t.Fatal(err)
 	}
-	if len(cache.storeKey) != 1 || cache.storeKey[0] == "" {
-		t.Fatalf("a legacy producer must still address a non-empty key: %q", cache.storeKey)
+	unknown := &legacyGenerator{}
+	svc = identityService(unknown, cache)
+	svc.prov.ToolVersions["sbom-generator"] = "ownsbom/0.8.0"
+	for range 2 {
+		doc, hit, err := svc.loadOrGenerateSBOM(ctx, "/ws")
+		if err != nil || hit || doc.Source != "legacy" {
+			t.Fatalf("unknown producer: doc=%+v hit=%v err=%v", doc, hit, err)
+		}
 	}
-
-	bare := identityService(&legacyGenerator{}, cache)
-	bare.prov = ports.Provenance{}
-	before := len(cache.loadKeys)
-	if _, hit, err := bare.loadOrGenerateSBOM(ctx, "/ws"); err != nil || hit {
-		t.Fatalf("an unidentifiable legacy producer must generate: hit=%v err=%v", hit, err)
-	}
-	if len(cache.loadKeys) != before {
-		t.Fatalf("an empty identity must not look the cache up: %q", cache.loadKeys)
+	if unknown.generated != 2 || len(cache.loadKeys) != 1 || len(cache.storeKey) != 1 {
+		t.Fatalf("unknown producer used cache: generations=%d loads=%v stores=%v", unknown.generated, cache.loadKeys, cache.storeKey)
 	}
 }

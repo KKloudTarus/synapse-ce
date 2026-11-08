@@ -1736,11 +1736,10 @@ type SBOMWarningReporter interface {
 // generation, so a cache lookup made before it would read the same key for every producer and hand
 // one producer's inventory to another (#1638).
 //
-// An implementation returns an error when the identity cannot be established, for example when the
-// selected external binary is absent. The caller must then skip the cache rather than reuse an
-// inventory it cannot attribute.
+// cacheable is false when external inputs cannot be safely represented by the cache key.
+// An error means identity or eligibility could not be established; either disables caching.
 type SBOMProducerIdentity interface {
-	SBOMProducerIdentity(ctx context.Context) (string, error)
+	SBOMProducerIdentity(ctx context.Context, dir string) (identity string, cacheable bool, err error)
 }
 
 type SBOMCache interface {

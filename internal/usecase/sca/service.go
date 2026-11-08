@@ -408,11 +408,6 @@ func (s *Service) SetArtifactCataloger(c ports.ArtifactCataloger) { s.artifactCa
 // miss or error never affects correctness, only whether the cataloging step is skipped.
 func (s *Service) SetSBOMCache(c ports.SBOMCache) { s.sbomCache = c }
 
-// sbomProducerVersion is the SBOM-producer identity used as the cache-invalidation version: the versions of
-// the components that determine SBOM OUTPUT – the syft binary, the language classifier, and the synapse
-// binary that carries the owned parsers/enrichers. It deliberately excludes advisory/KEV/EPSS DB versions
-// (they don't change the generated SBOM). Empty when no producer version is known, which keeps the cache
-// off rather than serving an SBOM that can't be soundly version-keyed.
 // sbomGeneratorKey names the SBOM producer's version by the role it fills rather than by one
 // implementation of it. The owned parsers are the default producer, and filing their version under
 // "syft" made the manifest contradict itself: `"syft": "ownsbom/0.8.0"`, naming a tool that did not
@@ -432,30 +427,15 @@ func sbomGeneratorVersion(tv map[string]string) string {
 	return tv[legacySBOMGeneratorKey]
 }
 
-func sbomProducerVersion(tv map[string]string) string {
-	if tv == nil {
-		return ""
-	}
-	v := sbomGeneratorVersion(tv) + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
-	if strings.Trim(v, "\x00") == "" {
-		return ""
-	}
-	return v
-}
-
-// sbomProducerIdentity resolves the selected producer's cache identity before generation. ok is
-// false when the producer cannot say who it is, which disables the cache for this scan rather than
-// reusing an inventory this scan cannot attribute. A producer that does not implement the optional
-// port keeps the legacy provenance-derived key, which stays correct for a single-producer
-// deployment and is still combined with the classifier and binary versions below.
-func (s *Service) sbomProducerIdentity(ctx context.Context) (string, bool) {
+// sbomProducerIdentity resolves the selected producer and its input eligibility before lookup.
+// Unknown identities and inputs that cannot be represented by the key disable caching.
+func (s *Service) sbomProducerIdentity(ctx context.Context, dir string) (string, bool) {
 	identified, ok := s.sbomGen.(ports.SBOMProducerIdentity)
 	if !ok {
-		legacy := sbomProducerVersion(s.prov.ToolVersions)
-		return legacy, legacy != ""
+		return "", false
 	}
-	id, err := identified.SBOMProducerIdentity(ctx)
-	if err != nil || strings.TrimSpace(id) == "" {
+	id, cacheable, err := identified.SBOMProducerIdentity(ctx, dir)
+	if err != nil || !cacheable || strings.TrimSpace(id) == "" {
 		return "", false
 	}
 	return id + "\x00" + s.prov.ToolVersions["go-enry"] + "\x00" + s.prov.ToolVersions["synapse"], true
@@ -470,8 +450,11 @@ func (s *Service) sbomProducerIdentity(ctx context.Context) (string, bool) {
 // hands one producer's inventory to another. A producer that cannot say who it is disables the
 // cache for this scan rather than being served someone else's components.
 func (s *Service) loadOrGenerateSBOM(ctx context.Context, dir string) (*sbom.SBOM, bool, error) {
-	producerVer, producerKnown := s.sbomProducerIdentity(ctx)
-	cacheEligible := s.sbomCache != nil && producerKnown
+	var producerVer string
+	cacheEligible := false
+	if s.sbomCache != nil {
+		producerVer, cacheEligible = s.sbomProducerIdentity(ctx, dir)
+	}
 	if cacheEligible {
 		if cached, ok, _ := s.sbomCache.Load(ctx, dir, producerVer); ok && cached != nil {
 			return cached, true, nil

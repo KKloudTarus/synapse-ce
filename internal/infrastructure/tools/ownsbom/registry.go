@@ -71,9 +71,18 @@ var (
 	_ ports.SBOMProducerIdentity = (*Registry)(nil)
 )
 
-// SBOMProducerIdentity reports the owned producer's identity. The parsers are compiled into this
-// binary, so the identity is known without running anything and never fails (#1638).
-func (r *Registry) SBOMProducerIdentity(context.Context) (string, error) { return ownsbomVersion, nil }
+// SBOMProducerIdentity identifies the registry, but Maven resolution can depend on external state.
+func (r *Registry) SBOMProducerIdentity(ctx context.Context, dir string) (string, bool, error) {
+	cacheable := true
+	err := r.walkManifests(ctx, dir, func(path string, _ EcosystemParser) error {
+		if strings.EqualFold(filepath.Base(path), "pom.xml") {
+			cacheable = false
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return ownsbomVersion, cacheable && err == nil, err
+}
 
 // New builds a registry from the given parsers. Two parsers claiming the same marker is a configuration
 // error (ambiguous dispatch), not a silent last-wins. Markers are matched case-insensitively (a Gemfile
@@ -157,18 +166,53 @@ func (r *Registry) MarkerEcosystems() map[string]string {
 // edges are concatenated. Hardened against a hostile tree: non-regular files are skipped (no symlink
 // escape), each manifest is size-capped, and the total manifest count is bounded.
 func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, error) {
-	info, err := os.Stat(targetRef)
-	if err != nil {
-		return nil, fmt.Errorf("stat target: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("%w: ownsbom target must be a directory, got %q", shared.ErrValidation, targetRef)
-	}
 	var comps []sbom.Component
 	var deps []sbom.Dependency
 	seen := map[string]bool{}
+	walkErr := r.walkManifests(ctx, targetRef, func(path string, parser EcosystemParser) error {
+		content, err := os.ReadFile(path) // #nosec G304 -- WalkDir entry under the target root, re-verified regular (non-symlink) via Lstat immediately above
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		pcomps, pdeps, perr := parser.Parse(ctx, ParseInput{Dir: filepath.Dir(path), Path: path, Content: decodeManifestText(content)})
+		if perr != nil {
+			return fmt.Errorf("parse %s: %w", path, perr)
+		}
+		for _, c := range pcomps {
+			id := sbom.ComponentID(c.Name, c.Version, c.PURL)
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			c.Supplier, c.SupplierSource = sbom.SupplierWithSource(c.Supplier, c.PURL)
+			comps = append(comps, c)
+		}
+		deps = append(deps, pdeps...)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	return &sbom.SBOM{
+		TargetRef:        targetRef,
+		Source:           "ownsbom",
+		GeneratorVersion: ownsbomVersion,
+		Components:       comps,
+		Dependencies:     deps,
+	}, nil
+}
+
+// walkManifests applies the same traversal and size boundaries to generation and cache eligibility.
+func (r *Registry) walkManifests(ctx context.Context, targetRef string, visit func(string, EcosystemParser) error) error {
+	info, err := os.Stat(targetRef)
+	if err != nil {
+		return fmt.Errorf("stat target: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: ownsbom target must be a directory, got %q", shared.ErrValidation, targetRef)
+	}
 	manifests := 0
-	walkErr := filepath.WalkDir(targetRef, func(path string, d fs.DirEntry, err error) error {
+	return filepath.WalkDir(targetRef, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -204,36 +248,8 @@ func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, 
 		if manifests++; manifests > maxManifests {
 			return fmt.Errorf("%w: target exceeds %d manifests; refusing to scan", shared.ErrValidation, maxManifests)
 		}
-		content, rerr := os.ReadFile(path) // #nosec G304 -- WalkDir entry under the target root, re-verified regular (non-symlink) via Lstat immediately above
-		if rerr != nil {
-			return fmt.Errorf("read %s: %w", path, rerr)
-		}
-		pcomps, pdeps, perr := parser.Parse(ctx, ParseInput{Dir: filepath.Dir(path), Path: path, Content: decodeManifestText(content)})
-		if perr != nil {
-			return fmt.Errorf("parse %s: %w", path, perr)
-		}
-		for _, c := range pcomps {
-			id := sbom.ComponentID(c.Name, c.Version, c.PURL)
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			c.Supplier, c.SupplierSource = sbom.SupplierWithSource(c.Supplier, c.PURL) // lockfiles carry no supplier; derive from the PURL namespace
-			comps = append(comps, c)
-		}
-		deps = append(deps, pdeps...)
-		return nil
+		return visit(path, parser)
 	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
-	return &sbom.SBOM{
-		TargetRef:        targetRef,
-		Source:           "ownsbom",
-		GeneratorVersion: ownsbomVersion,
-		Components:       comps,
-		Dependencies:     deps,
-	}, nil
 }
 
 // skipDir prunes dependency-cache + VCS directories so the registry parses only top-level manifests, not
