@@ -9,7 +9,7 @@ import (
 )
 
 func TestMigration0184ConsumesChallengesAndRestoresTenantSetting(t *testing.T) {
-	pool, owner := ownershipTestDatabase(t, 183, nil)
+	pool, owner := ownershipTestDatabase(t, 183, 0, nil)
 	ctx := context.Background()
 	if _, err := owner.Exec(`INSERT INTO tenants(id,name) VALUES('contact-owner','Contact owner')`); err != nil {
 		t.Fatal(err)

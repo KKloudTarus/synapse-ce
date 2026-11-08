@@ -14,7 +14,7 @@ import (
 )
 
 func TestMigration0191TenantSettingsSchema(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 186, nil)
+	_, db := ownershipTestDatabase(t, 186, 191, nil)
 	requireMigrationTable(t, db, "tenant_settings", true)
 	requireMigrationRLS(t, db, "tenant_settings")
 	if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ('t-schema', 'Schema') ON CONFLICT DO NOTHING`); err != nil {
@@ -40,7 +40,7 @@ func TestMigration0191TenantSettingsSchema(t *testing.T) {
 // TestTenantSettingsStoreIsTenantIsolated is the hostile case: under the runtime role, which does
 // not bypass RLS, a tenant can neither read nor overwrite another tenant's settings.
 func TestTenantSettingsStoreIsTenantIsolated(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 186, nil)
+	pool, db := ownershipTestDatabase(t, 186, 0, nil)
 	for _, id := range []string{"t-a", "t-b"} {
 		if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING`, id); err != nil {
 			t.Fatal(err)

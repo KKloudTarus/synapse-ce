@@ -2,15 +2,12 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
-
-	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
 const migration0190Tenant = "t-migration-0190"
@@ -20,25 +17,15 @@ const migration0190Tenant = "t-migration-0190"
 // defaults, that well-formed new event and channel types are accepted and malformed ones refused,
 // and that the migration rolls back and forward cleanly.
 func TestMigration0190OpensTheNotificationSchema(t *testing.T) {
-	sharedDSN := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if sharedDSN == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
-	dsn := isolatedMigrationDSN(t, sharedDSN, "0190")
+	isolated := newIsolatedMigrationDB(t, 190, 186)
+	db := isolated.db
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
+	config, err := pgxpool.ParseConfig(isolated.dsn)
+	if err != nil {
+		t.Fatalf("parse pool config: %v", err)
 	}
-	db := openLockedGooseDB(t, dsn)
-	t.Cleanup(func() { _ = db.Close() })
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		t.Fatalf("dialect: %v", err)
-	}
-	if err := goose.DownTo(db, ".", 186); err != nil {
-		t.Fatalf("down to 186 (before 0190): %v", err)
-	}
-	pool, err := Connect(ctx, dsn)
+	config.ConnConfig.RuntimeParams["app.current_tenant"] = migration0190Tenant
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -57,7 +44,7 @@ func TestMigration0190OpensTheNotificationSchema(t *testing.T) {
 	if err := goose.DownTo(db, ".", 186); err != nil {
 		t.Fatalf("down to 186 after apply: %v", err)
 	}
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.UpTo(db, ".", 190); err != nil {
 		t.Fatalf("up after down: %v", err)
 	}
 }

@@ -26,7 +26,7 @@ func TestMigration0222NotificationDataClasses(t *testing.T) {
 		}
 		return tx.Commit()
 	}
-	_, db := ownershipTestDatabase(t, migration0222Base, func(db *sql.DB) {
+	_, db := ownershipTestDatabase(t, migration0222Base, 0, func(db *sql.DB) {
 		if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('t-class','Class') ON CONFLICT DO NOTHING`); err != nil {
 			t.Fatal(err)
 		}

@@ -569,29 +569,31 @@ func TestMigration0125FleetAuditIntentRLSIsolation(t *testing.T) {
 // A pending audit obligation must survive a rollback attempt: dropping the table
 // would erase the only record that committed state still owes an audit entry.
 func TestMigration0125RefusesRollbackWithIntentHistory(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
-	f := newFleetAuditFixture(t)
-	repo := f.repo(t)
-	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-rollback", f.at)); err != nil {
-		t.Fatalf("seed intention: %v", err)
-	}
+	dsn := isolatedMigrationDSN(t, testDSN(t), "0125")
 	db := openLockedGooseDB(t, dsn)
-	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	// DownTo unwinds every migration above the target. 0125 is currently newest so nothing
-	// above it exists, but re-apply on the way out so adding a 0126 cannot silently leave
-	// the rest of the suite running against a partial schema.
-	t.Cleanup(func() {
-		if err := goose.Up(db, "."); err != nil {
-			t.Errorf("restore migrations after rollback probe: %v", err)
-		}
-	})
+	if err := goose.UpTo(db, ".", 125); err != nil {
+		t.Fatalf("up to 0125: %v", err)
+	}
+	pool, err := Connect(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	tenant := shared.ID("fleetaudit-" + randHex(t))
+	if _, err := pool.Exec(context.Background(), `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant.String()); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	f := fleetAuditFixture{pool: pool, tenant: tenant, ctx: shared.WithTenant(context.Background(), tenant), at: time.Now().UTC().Truncate(time.Microsecond)}
+	repo := f.repo(t)
+	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-rollback", f.at)); err != nil {
+		t.Fatalf("seed intention: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	// The owned database is already at 0125, so this reaches its guard directly.
 	if err := goose.DownTo(db, ".", 124); err == nil || !strings.Contains(err.Error(), "cannot roll back 0125") {
 		t.Fatalf("down migration error=%v, want audit intention history refusal", err)
 	}

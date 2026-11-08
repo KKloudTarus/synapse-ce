@@ -9,7 +9,7 @@ import (
 )
 
 func TestUserPickerScopesMembershipAndKeepsDuplicateNamesDistinct(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 181, nil)
+	pool, db := ownershipTestDatabase(t, 181, 0, nil)
 	if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('other','Other')`); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestUserPickerScopesMembershipAndKeepsDuplicateNamesDistinct(t *testing.T) 
 }
 
 func TestUserPickerMentionChoicesIncludeEveryActiveHumanViewerOnly(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 182, nil)
+	pool, db := ownershipTestDatabase(t, 182, 0, nil)
 	if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('other-picker','Other picker')`); err != nil {
 		t.Fatal(err)
 	}

@@ -19,9 +19,8 @@ import (
 func TestMigration0157VisibleProjectBoundaryAndRollbackGuard(t *testing.T) {
 	ctx := context.Background()
 	db, dsn := newAssessmentMigrationDB(t)
-	// Migrate to the latest schema: this test drives the production repositories, which target the
-	// current columns. The migration-157 down-guard it asserts is still exercised by the DownTo below,
-	// which steps back through 157.
+	// Repository assertions exercise the current schema; the rollback probe below owns a
+	// separate database pinned to 0157.
 	if err := goose.Up(db, "."); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +91,16 @@ func TestMigration0157VisibleProjectBoundaryAndRollbackGuard(t *testing.T) {
 	if err := engagements.Create(ctx, wrong); err == nil {
 		t.Fatal("cross-tenant Project FK not enforced")
 	}
-	if err := goose.DownTo(db, ".", 156); err == nil || !strings.Contains(err.Error(), "associations exist") {
+	guardDB, _ := newAssessmentMigrationDB(t)
+	if err := goose.UpTo(guardDB, ".", 157); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := guardDB.Exec(`INSERT INTO tenants(id,name) VALUES ('guard-tenant','Guard');
+		INSERT INTO projects(id,tenant_id,name,key,source_binding) VALUES ('guard-project','guard-tenant','Guard','guard-project','{}');
+		INSERT INTO engagements(id,tenant_id,name,assessment_project_id) VALUES ('guard-assessment','guard-tenant','Guard','guard-project')`); err != nil {
+		t.Fatalf("seed 0157 association: %v", err)
+	}
+	if err := goose.DownTo(guardDB, ".", 156); err == nil || !strings.Contains(err.Error(), "associations exist") {
 		t.Fatalf("unsafe rollback accepted: %v", err)
 	}
 }

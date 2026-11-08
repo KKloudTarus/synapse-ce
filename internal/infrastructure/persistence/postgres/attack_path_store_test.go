@@ -12,8 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 
-	"github.com/KKloudTarus/synapse-ce/migrations"
-
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
@@ -188,27 +186,10 @@ func TestAttackPathStoreReplaceBindingsSerializesProducer(t *testing.T) {
 }
 
 func TestMigration0069DownDeduplicatesProducers(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	db, dsn := newAssessmentMigrationDB(t)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := MigrateLocked(context.Background(), dsn); err != nil {
-			t.Errorf("restore migrations: %v", err)
-		}
-	})
-	db := openLockedGooseDB(t, dsn)
-	defer db.Close()
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.DownTo(db, ".", 69); err != nil {
-		t.Fatalf("down to 68: %v", err)
+	if err := goose.UpTo(db, ".", 69); err != nil {
+		t.Fatalf("up to 69: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
@@ -225,7 +206,7 @@ func TestMigration0069DownDeduplicatesProducers(t *testing.T) {
 		}
 	}
 	if err := goose.DownTo(db, ".", 68); err != nil {
-		t.Fatalf("down to 67: %v", err)
+		t.Fatalf("down to 68: %v", err)
 	}
 	var count int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attack_path_edges WHERE tenant_id=$1 AND provenance='same'`, tenant.String()).Scan(&count); err != nil {

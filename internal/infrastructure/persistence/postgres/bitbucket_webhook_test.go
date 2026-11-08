@@ -24,16 +24,12 @@ import (
 
 func TestMigration0221BitbucketWebhookLifecycle(t *testing.T) {
 	isolated := newIsolatedMigrationDB(t, 221, 220)
-	// Upgrade a database already at shipped 0220 through the production entry point.
-	// requireIdentityMigrationReadiness is not called here: it asserts the database sits at exactly
-	// the identity chain's ceiling (218), which stopped being true once 0219 and 0220 shipped. The
-	// identity chain's own conformance test owns that invariant; this test owns the Bitbucket lane.
-	if err := Migrate(context.Background(), isolated.dsn); err != nil {
+	// Exercise the 0221 upgrade without applying later forward-only migrations.
+	if err := goose.UpTo(isolated.db, ".", 221); err != nil {
 		t.Fatal(err)
 	}
-	// Migrate runs every embedded migration, so a later one can sit above 0221.
-	if version, err := goose.GetDBVersion(isolated.db); err != nil || version < 221 {
-		t.Fatalf("migration version=%d (%v), want at least 221", version, err)
+	if version, err := goose.GetDBVersion(isolated.db); err != nil || version != 221 {
+		t.Fatalf("migration version=%d (%v), want 221", version, err)
 	}
 	requireMigrationIndexes(t, isolated.db, "inbound_webhook_events_payload_unique", "notification_events_type_recent_idx")
 	for _, fn := range []string{"synapse_lock_bitbucket_inbound_webhook(text,text,text)", "synapse_provision_bitbucket_inbound_webhook(text,text,text,text,integer)", "synapse_rotate_bitbucket_inbound_webhook(text,text,text,integer,text,timestamp with time zone)"} {

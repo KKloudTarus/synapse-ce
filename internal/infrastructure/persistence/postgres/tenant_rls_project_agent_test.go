@@ -60,6 +60,11 @@ type rls817Fixture struct {
 func newRLS817Fixture(t *testing.T) *rls817Fixture {
 	t.Helper()
 	dsn := testDSN(t)
+	return newTenantRLSFixtureWithDSN(t, dsn)
+}
+
+func newTenantRLSFixtureWithDSN(t *testing.T, dsn string) *rls817Fixture {
+	t.Helper()
 	ctx := context.Background()
 	if err := MigrateLocked(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)

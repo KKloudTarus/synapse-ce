@@ -6,7 +6,7 @@ import (
 )
 
 func TestMigration0182CanonicalAssigneeBackfillAndLegacyBridge(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 181, func(db *sql.DB) {
+	_, db := ownershipTestDatabase(t, 181, 0, func(db *sql.DB) {
 		for _, row := range []struct{ id, name, disabled string }{
 			{"assignee-exact", "Exact", "false"}, {"assignee-bob", "Bob", "false"},
 			{"assignee-alex-1", "Alex", "false"}, {"assignee-alex-2", "Alex", "false"},

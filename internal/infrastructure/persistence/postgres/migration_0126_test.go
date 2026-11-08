@@ -66,18 +66,8 @@ func TestMigration0126AssessmentCyclesSchema(t *testing.T) {
 }
 
 func TestMigration0126RollbackAndReapply(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationDSN(t, testDSN(t), "0126")
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = MigrateLocked(context.Background(), dsn)
-	})
-
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
@@ -85,6 +75,9 @@ func TestMigration0126RollbackAndReapply(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := goose.UpTo(db, ".", 126); err != nil {
+		t.Fatalf("up to 126: %v", err)
+	}
 	// 1. Rollback migration 0126 to 0125
 	if err := goose.DownTo(db, ".", 125); err != nil {
 		t.Fatalf("down to 125: %v", err)

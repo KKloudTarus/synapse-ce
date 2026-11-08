@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -11,27 +10,16 @@ import (
 )
 
 func TestMigration0101AdvisoryRevisionSyncRuns(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationDSN(t, testDSN(t), "0101")
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := MigrateLocked(context.Background(), dsn); err != nil {
-			t.Errorf("restore migrations: %v", err)
-		}
-	})
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.DownTo(db, ".", 100); err != nil {
-		t.Fatalf("down to 0100: %v", err)
+	if err := goose.UpTo(db, ".", 100); err != nil {
+		t.Fatalf("up to 0100: %v", err)
 	}
 	if err := goose.UpTo(db, ".", 101); err != nil {
 		t.Fatalf("up 0101: %v", err)

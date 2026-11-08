@@ -106,14 +106,8 @@ func TestFleetAssetsRLS(t *testing.T) {
 // TestMigration0058 exercises the migration down and back up and asserts the table is gone after
 // down and present after up.
 func TestMigration0058(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationDSN(t, testDSN(t), "0058")
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
@@ -121,7 +115,9 @@ func TestMigration0058(t *testing.T) {
 		t.Fatalf("dialect: %v", err)
 	}
 
-	deleteV2AuditRowsForMigrationRollback(t, db)
+	if err := goose.UpTo(db, ".", 58); err != nil {
+		t.Fatalf("up to 58: %v", err)
+	}
 	if err := goose.DownTo(db, ".", 57); err != nil {
 		t.Fatalf("down to 57: %v", err)
 	}

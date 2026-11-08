@@ -16,7 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func ownershipTestDatabase(t *testing.T, base int64, before func(*sql.DB)) (*pgxpool.Pool, *sql.DB) {
+func ownershipTestDatabase(t *testing.T, base, target int64, before func(*sql.DB)) (*pgxpool.Pool, *sql.DB) {
 	t.Helper()
 	isolated := newIsolatedMigrationDB(t, 164, base)
 	if before != nil {
@@ -33,9 +33,14 @@ func ownershipTestDatabase(t *testing.T, base int64, before func(*sql.DB)) (*pgx
 	u.Path = "/" + database
 	u.RawPath = ""
 	u.User = url.UserPassword(role, "migration-test-password")
-	// Exercise the real startup entry point and its complete embedded migration set.
-	if err := Migrate(context.Background(), u.String()); err != nil {
-		t.Fatalf("startup migrate: %v", err)
+	// Repository conformance uses startup migration; rollback probes pin their version.
+	if target == 0 {
+		err = Migrate(context.Background(), u.String())
+	} else {
+		err = goose.UpTo(isolated.db, ".", target)
+	}
+	if err != nil {
+		t.Fatalf("migrate to %d (0 means latest): %v", target, err)
 	}
 	admin, err := Connect(context.Background(), os.Getenv("SYNAPSE_TEST_DB_DSN"))
 	if err != nil {
@@ -101,7 +106,7 @@ func TestOwnershipMigrationVersionsUnique(t *testing.T) {
 }
 
 func TestMigration0168OwnershipFresh(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 0, nil)
+	_, db := ownershipTestDatabase(t, 0, 0, nil)
 	for _, table := range []string{"ownership_teams", "ownership_memberships", "ownership_mappings", "ownership_asset_mappings", "ownership_snapshots", "ownership_policies", "ownership_policy_versions", "ownership_policy_team_refs", "ownership_policy_project_refs", "ownership_policy_asset_refs", "ownership_assignments", "ownership_decisions", "ownership_intents", "ownership_runs", "ownership_run_items"} {
 		requireMigrationTable(t, db, table, true)
 		requireMigrationRLS(t, db, table)
@@ -110,7 +115,7 @@ func TestMigration0168OwnershipFresh(t *testing.T) {
 }
 
 func TestMigration0168OwnershipUpgradePreservesLegacy(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 163, func(db *sql.DB) {
+	_, db := ownershipTestDatabase(t, 163, 168, func(db *sql.DB) {
 		if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('legacy-bootstrap','Admin','admin','ownership-upgrade-key','')`); err != nil {
 			t.Fatal(err)
 		}

@@ -28,7 +28,7 @@ func (m *contactTestMailer) SendContactVerification(_ context.Context, recipient
 }
 
 func TestUserContactVerificationDurableScopedAndSingleUse(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 180, nil)
+	pool, db := ownershipTestDatabase(t, 180, 0, nil)
 	ctx := context.Background()
 	for _, id := range []string{"contact-a", "contact-b"} {
 		if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES($1,$1,'consultant',$1,'default')`, id); err != nil {
@@ -118,7 +118,7 @@ func TestUserContactVerificationDurableScopedAndSingleUse(t *testing.T) {
 }
 
 func TestUserContactResendAndOIDCVersionFences(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 180, nil)
+	pool, db := ownershipTestDatabase(t, 180, 0, nil)
 	ctx := context.Background()
 	if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('contact-oidc','OIDC','reviewer','contact-oidc-key','default')`); err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestUserContactResendAndOIDCVersionFences(t *testing.T) {
 }
 
 func TestDisableUserConsumesOpenContactChallenges(t *testing.T) {
-	pool, db := ownershipTestDatabase(t, 180, nil)
+	pool, db := ownershipTestDatabase(t, 180, 0, nil)
 	ctx := context.Background()
 	if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('contact-disable','Disable','consultant','contact-disable','default')`); err != nil {
 		t.Fatal(err)

@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -13,18 +12,8 @@ import (
 )
 
 func TestMigration0044(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationDSN(t, testDSN(t), "0044")
 	ctx := context.Background()
-
-	// Start from the current schema so this test is safe to run against the same CI database as the
-	// rest of the integration suite. The cleanup below restores current HEAD again before returning.
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("initial migrate up: %v", err)
-	}
-
 	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -32,17 +21,8 @@ func TestMigration0044(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("goose set dialect: %v", err)
 	}
-	// A migration test must not leave the shared integration database pinned to an old version even
-	// when an assertion fails midway through the test.
-	t.Cleanup(func() {
-		if err := Migrate(context.Background(), dsn); err != nil {
-			t.Errorf("restore latest schema: %v", err)
-		}
-	})
-
-	deleteV2AuditRowsForMigrationRollback(t, db)
-	if err := goose.DownTo(db, ".", 43); err != nil {
-		t.Fatalf("goose down to 43: %v", err)
+	if err := goose.UpTo(db, ".", 43); err != nil {
+		t.Fatalf("goose up to 43: %v", err)
 	}
 
 	pool, err := Connect(ctx, dsn)
@@ -119,7 +99,6 @@ func TestMigration0044(t *testing.T) {
 		}
 	}
 
-	deleteV2AuditRowsForMigrationRollback(t, db)
 	if err := goose.DownTo(db, ".", 43); err != nil {
 		t.Fatalf("goose down to 43: %v", err)
 	}
