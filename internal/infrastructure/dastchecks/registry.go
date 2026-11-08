@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -96,18 +98,18 @@ func evaluate(o ports.DASTObservation, endpoint string, allowed map[string]bool)
 	}
 	path := strings.ToLower(mustPath(endpoint))
 	body := strings.ToLower(o.BodyExcerpt)
-	// A path alone is not a published artifact. The response has to have served it, and when an
-	// excerpt was captured it has to look like a source map rather than an error page (#1638).
-	if strings.HasSuffix(path, ".map") && servedSuccessfully(o.Status) && (body == "" || looksSourceMap(body)) {
+	// A published artifact needs captured content, not just a successful path.
+	artifactServed := servedSuccessfully(o.Status) && !strings.EqualFold(o.BodySHA256, emptyBodySHA256)
+	if strings.HasSuffix(path, ".map") && artifactServed && looksSourceMap(body) {
 		add("sensitive-public-artifact", "public_artifact", nil, "source_map_path")
-	} else if strings.Contains(path, "/.well-known/") && servedSuccessfully(o.Status) && strings.Contains(body, "source") {
+	} else if strings.Contains(path, "/.well-known/") && artifactServed && strings.Contains(body, "source") {
 		add("sensitive-public-artifact", "public_artifact", nil, "well_known_path", "body:source")
-	} else if strings.Contains(path, "/.well-known/") && servedSuccessfully(o.Status) && strings.Contains(body, "private") {
+	} else if strings.Contains(path, "/.well-known/") && artifactServed && strings.Contains(body, "private") {
 		add("sensitive-public-artifact", "public_artifact", nil, "well_known_path", "body:private")
 	}
 	if strings.Contains(body, "synapse-auth-weakness") {
 		add("auth-configured-weakness", "configured_auth_weakness", nil, "body:synapse-auth-weakness")
-	} else if hasPrefix(headers, "x-synapse-auth-weakness:") {
+	} else if slices.Contains(headers, "x-synapse-auth-weakness") || hasPrefix(headers, "x-synapse-auth-weakness:") {
 		add("auth-configured-weakness", "configured_auth_weakness", nil, "header:x-synapse-auth-weakness")
 	}
 	return results
@@ -126,7 +128,11 @@ func cookieAttributes(header string) map[string]bool {
 		return nil
 	}
 	attrs := map[string]bool{}
-	for _, part := range strings.Split(payload, ";") {
+	parts := strings.Split(payload, ";")
+	if strings.Contains(parts[0], "=") {
+		parts = parts[1:]
+	}
+	for _, part := range parts {
 		key, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(part)), "=")
 		switch strings.TrimSpace(key) {
 		case "secure", "httponly", "samesite":
@@ -136,9 +142,12 @@ func cookieAttributes(header string) map[string]bool {
 	return attrs
 }
 
-// servedSuccessfully reports whether the response actually delivered the resource. A 404 for a
-// .map path is the server saying the artifact is absent.
-func servedSuccessfully(status int) bool { return status >= 200 && status < 300 }
+// servedSuccessfully excludes statuses that cannot deliver an artifact body.
+func servedSuccessfully(status int) bool {
+	return status >= 200 && status < 300 && status != http.StatusNoContent && status != http.StatusResetContent
+}
+
+const emptyBodySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 // looksSourceMap checks the captured excerpt for the source-map document shape, so an HTML error
 // page served with 200 at a .map path is not reported as a published source map.
@@ -148,7 +157,7 @@ func looksSourceMap(body string) bool {
 
 // proofVersion is the current closed-proof contract. Version 2 carries the corrected cookie,
 // artifact-evidence and header-capture predicates and binds HeadersCaptured into the hash. Version
-// 1 proofs stay verifiable against their own recorded content (#1638).
+// 1 proofs stay verifiable against their own recorded content.
 const proofVersion = 2
 
 func newFinding(id, endpoint string, o ports.DASTObservation, signature string, headers []string, predicateTokens ...string) ports.DASTFinding {
@@ -209,10 +218,9 @@ func (e *Evaluator) VerifyProof(p ports.DASTProof) error {
 		if !valid {
 			return fmt.Errorf("%w: DAST artifact predicate did not match", shared.ErrValidation)
 		}
-		// A published artifact has to have been served. The status is already recorded, so a
-		// corrected proof is checked against it rather than against the path alone.
-		if p.Version >= 2 && !servedSuccessfully(p.Observation.Status) {
-			return fmt.Errorf("%w: DAST artifact proof records an unserved response", shared.ErrValidation)
+		// Current artifact proofs must record a served, nonempty response.
+		if p.Version >= 2 && (!servedSuccessfully(p.Observation.Status) || strings.EqualFold(p.Observation.BodySHA256, emptyBodySHA256)) {
+			return fmt.Errorf("%w: DAST artifact proof records an unserved or empty response", shared.ErrValidation)
 		}
 	case "auth-configured-weakness":
 		if p.Observation.Signature != "configured_auth_weakness" || len(p.Observation.Headers) != 0 || len(p.Observation.PredicateTokens) != 1 || p.Observation.PredicateTokens[0] != "body:synapse-auth-weakness" && p.Observation.PredicateTokens[0] != "header:x-synapse-auth-weakness" {

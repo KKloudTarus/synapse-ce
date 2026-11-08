@@ -1,6 +1,7 @@
 package dastchecks
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -44,7 +45,12 @@ func TestCookieAttributesAreParsedNotSearched(t *testing.T) {
 		{"value is the word secure, attribute absent", "set-cookie: sid=secure; httponly; samesite=strict", true},
 		{"value is the word secure, attribute absent, mixed case", "set-cookie: sid=secure; HttpOnly; SameSite=Strict", true},
 		{"value contains the words", "set-cookie: sid=secure-httponly-samesite=strict", true},
-		{"name is an attribute word", "set-cookie: secure=abc123", true},
+		{"secure cookie name cannot supply missing secure", "set-cookie: secure=abc123; HttpOnly; SameSite=Strict", true},
+		{"httponly cookie name cannot supply missing httponly", "set-cookie: httponly=abc123; Secure; SameSite=Strict", true},
+		{"samesite cookie name cannot supply missing samesite", "set-cookie: samesite=abc123; Secure; HttpOnly", true},
+		{"secure cookie name with attributes", "set-cookie: secure=abc123; Secure; HttpOnly; SameSite=Strict", false},
+		{"httponly cookie name with attributes", "set-cookie: httponly=abc123; Secure; HttpOnly; SameSite=Strict", false},
+		{"samesite cookie name with attributes", "set-cookie: samesite=abc123; Secure; HttpOnly; SameSite=Strict", false},
 		{"missing samesite", "set-cookie: sid=abc123; Secure; HttpOnly", true},
 		{"missing httponly", "set-cookie: sid=abc123; Secure; SameSite=Lax", true},
 		{"all three present", "set-cookie: sid=abc123; Secure; HttpOnly; SameSite=Strict", false},
@@ -56,6 +62,18 @@ func TestCookieAttributesAreParsedNotSearched(t *testing.T) {
 			fired := firedChecks(t, observed("https://app.test/c", 200, true, "", sts, tc.cookie))
 			if fired["cookie-security-flags"] != tc.want {
 				t.Fatalf("cookie finding = %v, want %v for %q", fired["cookie-security-flags"], tc.want, tc.cookie)
+			}
+			findings, err := NewEvaluator().Evaluate([]ports.DASTObservation{observed("https://app.test/c", 200, true, "", sts, tc.cookie)}, []string{"cookie-security-flags"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (len(findings) == 1) != tc.want {
+				t.Fatalf("selected cookie finding count = %d, want finding %v", len(findings), tc.want)
+			}
+			for _, finding := range findings {
+				if finding.CheckID != "cookie-security-flags" || NewEvaluator().VerifyProof(finding.Proof) != nil {
+					t.Fatalf("invalid selected cookie proof: %+v", finding)
+				}
 			}
 		})
 	}
@@ -72,7 +90,9 @@ func TestPublicArtifactNeedsAServedResponse(t *testing.T) {
 		want   bool
 	}{
 		{"served source map", 200, sourceMap, true},
-		{"served, no body captured", 200, "", true},
+		{"successful but empty", 200, "", false},
+		{"no content", 204, "", false},
+		{"reset content", 205, "", false},
 		{"not found", 404, "not found", false},
 		{"server error", 500, "", false},
 		{"redirect", 302, "", false},
@@ -112,21 +132,22 @@ func TestProofVersionsStayVerifiable(t *testing.T) {
 	legacy := newVersionedFinding(1, "security-headers", "https://app.test/legacy",
 		ports.DASTObservation{Method: "GET", Status: 200, BodySHA256: strings.Repeat("a", 64)},
 		"missing:strict-transport-security", nil)
-	if legacy.Proof.Version != 1 {
-		t.Fatalf("version = %d", legacy.Proof.Version)
-	}
-	if err := evaluator.VerifyProof(legacy.Proof); err != nil {
-		t.Fatalf("a sealed version-1 proof must stay verifiable: %v", err)
-	}
 
 	current := newFinding("security-headers", "https://app.test/current",
 		ports.DASTObservation{Method: "GET", Status: 200, BodySHA256: strings.Repeat("b", 64), HeadersCaptured: true},
 		"missing:strict-transport-security", nil)
-	if current.Proof.Version != proofVersion || !current.Proof.Observation.HeadersCaptured {
-		t.Fatalf("current proof = %+v", current.Proof)
-	}
-	if err := evaluator.VerifyProof(current.Proof); err != nil {
-		t.Fatalf("verify current proof: %v", err)
+	for _, proof := range []ports.DASTProof{legacy.Proof, current.Proof} {
+		sealed, err := json.Marshal(proof)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored ports.DASTProof
+		if err := json.Unmarshal(sealed, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if err := evaluator.VerifyProof(restored); err != nil {
+			t.Fatalf("stored version-%d proof must remain verifiable after JSON decoding: %v", proof.Version, err)
+		}
 	}
 	tampered := current.Proof
 	tampered.Observation.HeadersCaptured = false
@@ -160,6 +181,51 @@ func TestWellKnownArtifactRequiresAServedResponse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := firedChecks(t, tc.o)["sensitive-public-artifact"]; got != tc.want {
 				t.Fatalf("public-artifact reported=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestArtifactProofRequiresNonemptyServedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int
+		status  int
+		hash    string
+		valid   bool
+	}{
+		{"served current proof", proofVersion, 200, strings.Repeat("a", 64), true},
+		{"empty current proof", proofVersion, 200, emptyBodySHA256, false},
+		{"uppercase empty digest", proofVersion, 200, strings.ToUpper(emptyBodySHA256), false},
+		{"no-content current proof", proofVersion, 204, strings.Repeat("a", 64), false},
+		{"reset-content current proof", proofVersion, 205, strings.Repeat("a", 64), false},
+		{"legacy proof retains recorded contract", 1, 200, emptyBodySHA256, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			finding := newVersionedFinding(tc.version, "sensitive-public-artifact", "https://app.test/app.js.map",
+				ports.DASTObservation{Method: "GET", Status: tc.status, BodySHA256: tc.hash, HeadersCaptured: true},
+				"public_artifact", nil, "source_map_path")
+			if err := NewEvaluator().VerifyProof(finding.Proof); (err == nil) != tc.valid {
+				t.Fatalf("proof validity=%v want=%v: %v", err == nil, tc.valid, err)
+			}
+		})
+	}
+}
+
+func TestConfiguredAuthMarkerRequiresExactHeaderName(t *testing.T) {
+	for _, tc := range []struct {
+		header string
+		want   bool
+	}{
+		{"X-Synapse-Auth-Weakness", true},
+		{"x-synapse-auth-weakness: configured", true},
+		{"X-Synapse-Auth-Weakness-Other: configured", false},
+		{"X-Other: x-synapse-auth-weakness", false},
+	} {
+		t.Run(tc.header, func(t *testing.T) {
+			fired := firedChecks(t, observed("https://app.test/login", 200, true, "", tc.header))
+			if fired["auth-configured-weakness"] != tc.want {
+				t.Fatalf("header %q configured weakness=%v want=%v", tc.header, fired["auth-configured-weakness"], tc.want)
 			}
 		})
 	}
