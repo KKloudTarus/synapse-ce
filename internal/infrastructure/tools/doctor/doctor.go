@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -14,15 +15,18 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
 )
 
 const (
-	defaultMaxFiles   = 20000
-	defaultMaxEntries = 100000
-	defaultMaxDepth   = 64
-	versionTimeout    = 2 * time.Second
+	defaultMaxFiles       = 20000
+	defaultMaxEntries     = 100000
+	defaultMaxDepth       = 64
+	maxChartMetadataBytes = 1 << 20
+	versionTimeout        = 2 * time.Second
 )
 
 // Status is a readiness value for one scan dimension.
@@ -50,13 +54,17 @@ type ToolProbe struct {
 	Path    string `json:"path,omitempty"`
 	Version string `json:"version,omitempty"`
 	Detail  string `json:"detail,omitempty"`
+
+	versionFailed bool
 }
 
 // Inventory is the bounded target-tree inventory used to explain readiness.
 type Inventory struct {
-	Markers   []MarkerHit `json:"markers"`
-	Languages []Language  `json:"languages"`
-	Truncated bool        `json:"truncated"`
+	Markers        []MarkerHit `json:"markers"`
+	Languages      []Language  `json:"languages"`
+	Truncated      bool        `json:"truncated"`
+	helmInput      bool
+	kustomizeInput bool
 }
 
 // MarkerHit is a recognized dependency marker in the target tree.
@@ -157,6 +165,8 @@ func probeTools(ctx context.Context, opts Options) []ToolProbe {
 		{name: "gradle", command: "gradle", args: []string{"--version"}},
 		{name: "java", command: "java", args: []string{"-version"}},
 		{name: "javac", command: "javac", args: []string{"-version"}},
+		{name: "helm", command: "helm", args: []string{"version", "--short"}},
+		{name: "kustomize", command: "kustomize", args: []string{"version"}},
 	}
 	out := make([]ToolProbe, 0, len(specs)+2)
 	for _, spec := range specs {
@@ -179,6 +189,9 @@ func probeCommand(ctx context.Context, opts Options, spec toolSpec) ToolProbe {
 	if len(spec.args) > 0 {
 		if v, err := opts.Version(ctx, path, spec.args...); err == nil {
 			p.Version = firstLine(v)
+		} else if spec.name == "helm" || spec.name == "kustomize" {
+			p.versionFailed = true
+			p.Detail = "version command failed; repair or reinstall this renderer"
 		}
 	}
 	return p
@@ -283,6 +296,7 @@ func inventory(ctx context.Context, root string, opts Options) (Inventory, error
 	files := 0
 	entries := 0
 	truncated := false
+	helmInput, kustomizeInput := false, false
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -322,6 +336,12 @@ func inventory(ctx context.Context, root string, opts Options) (Inventory, error
 		}
 		name := d.Name()
 		lower := strings.ToLower(name)
+		if name == "Chart.yaml" && !strings.Contains(string(filepath.Separator)+rel, string(filepath.Separator)+"charts"+string(filepath.Separator)) && !isLibraryChart(path) {
+			helmInput = true
+		}
+		if name == "kustomization.yaml" || name == "kustomization.yml" || name == "Kustomization" {
+			kustomizeInput = true
+		}
 		if ecosystem, ok := markers[lower]; ok {
 			key := rel + "\x00" + lower
 			if !seenHits[key] {
@@ -353,7 +373,27 @@ func inventory(ctx context.Context, root string, opts Options) (Inventory, error
 		languages = append(languages, Language{Name: name, Files: count})
 	}
 	sort.Slice(languages, func(i, j int) bool { return languages[i].Name < languages[j].Name })
-	return Inventory{Markers: hits, Languages: languages, Truncated: truncated}, nil
+	return Inventory{Markers: hits, Languages: languages, Truncated: truncated, helmInput: helmInput, kustomizeInput: kustomizeInput}, nil
+}
+
+// Invalid or unreadable metadata remains an ordinary chart, so a gap is not hidden.
+func isLibraryChart(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxChartMetadataBytes+1))
+	if err != nil || len(data) > maxChartMetadataBytes {
+		return false
+	}
+	var meta struct {
+		Type string `yaml:"type"`
+	}
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(meta.Type), "library")
 }
 
 func depth(rel string) int {
@@ -437,9 +477,39 @@ func readiness(inv Inventory, tools []ToolProbe) []DimensionReadiness {
 		scaReadiness(inv, tools),
 		{Dimension: "sast", Status: StatusFull, Reason: "pure-Go source analysis does not require external setup"},
 		{Dimension: "secret", Status: StatusFull, Reason: "secret scanning runs in-process without external setup"},
-		{Dimension: "misconfig", Status: StatusFull, Reason: "misconfiguration checks run in-process without external setup"},
+		misconfigReadiness(inv, tools),
 		codeQualityReadiness(tools),
 	}
+}
+
+func misconfigReadiness(inv Inventory, tools []ToolProbe) DimensionReadiness {
+	var missing []string
+	if helm := toolByName(tools, "helm"); inv.helmInput && (!helm.Found || helm.versionFailed) {
+		missing = append(missing, "helm")
+	}
+	if kustomize := toolByName(tools, "kustomize"); inv.kustomizeInput && (!kustomize.Found || kustomize.versionFailed) {
+		missing = append(missing, "kustomize")
+	}
+	if len(missing) > 0 {
+		reason := "render inputs were found but required renderers are missing or unusable: " + strings.Join(missing, ", ")
+		next := "Install or repair " + strings.Join(missing, " and ") + " on the CLI host and rerun doctor."
+		if inv.Truncated {
+			reason += "; target inventory was truncated and other requirements may be undiscovered"
+			next += " Also run doctor on a smaller target tree."
+		}
+		return DimensionReadiness{
+			Dimension: "misconfig", Status: StatusPartial,
+			Reason: reason, NextStep: next,
+		}
+	}
+	if inv.Truncated {
+		return DimensionReadiness{
+			Dimension: "misconfig", Status: StatusPartial,
+			Reason:   "target inventory was truncated; renderer requirements may be undiscovered",
+			NextStep: "Run doctor on a smaller target tree.",
+		}
+	}
+	return DimensionReadiness{Dimension: "misconfig", Status: StatusFull, Reason: "local prerequisites for discovered misconfiguration inputs are available"}
 }
 
 func scaReadiness(inv Inventory, tools []ToolProbe) DimensionReadiness {
