@@ -57,15 +57,23 @@ RUN CGO_ENABLED=1 go build -trimpath -o /out/synapse-ast ./cmd/synapse-ast
 FROM golang:1.27.3-alpine AS grype
 RUN apk add --no-cache git
 ARG GRYPE_VERSION=v0.121.2
-RUN git clone -q --depth 1 -b "$GRYPE_VERSION" https://github.com/anchore/grype /src \
-    && cd /src && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
+# The commit the tag points at: a tag can move, and tool_versions must name the bytes that were built.
+ARG GRYPE_COMMIT=82d7a0ea911946b99343c672056867d372f9b319
+RUN git init -q /src \
+    && cd /src && git remote add origin https://github.com/anchore/grype \
+    && git fetch -q --depth 1 origin "$GRYPE_COMMIT" && git checkout -q FETCH_HEAD \
+    && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
     && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GRYPE_VERSION#v}" -o /grype ./cmd/grype
 
 FROM golang:1.27.3-alpine AS syft
 RUN apk add --no-cache git
 ARG SYFT_VERSION=v1.57.0
-RUN git clone -q --depth 1 -b "$SYFT_VERSION" https://github.com/anchore/syft /src \
-    && cd /src && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
+# The commit the tag points at: a tag can move, and tool_versions must name the bytes that were built.
+ARG SYFT_COMMIT=30f4bce762f31136e055f2965185f12eb95fbe47
+RUN git init -q /src \
+    && cd /src && git remote add origin https://github.com/anchore/syft \
+    && git fetch -q --depth 1 origin "$SYFT_COMMIT" && git checkout -q FETCH_HEAD \
+    && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
     && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${SYFT_VERSION#v}" -o /syft ./cmd/syft
 
 # ---------------------------------------------------------------------------
