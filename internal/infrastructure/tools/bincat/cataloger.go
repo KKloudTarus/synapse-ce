@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"context"
 	"debug/buildinfo"
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -81,7 +82,11 @@ func (Cataloger) CatalogInstalledReport(ctx context.Context, rootfsDir string) (
 	var out []sbom.Component
 	seen := map[string]bool{} // dedup within this catalog by PURL
 	var curPath string        // the evidence file of the component(s) being added, for layer attribution
-	add := func(c sbom.Component, ok bool) {
+	add := func(c sbom.Component, ok bool, readErr error) {
+		if readErr != nil {
+			report.Unreadable++
+			return
+		}
 		if !ok || seen[c.PURL] {
 			return
 		}
@@ -123,12 +128,27 @@ func (Cataloger) CatalogInstalledReport(ctx context.Context, rootfsDir string) (
 		case isInstalledGemspec(path):
 			add(gemComponent(path))
 		case isJar(path):
-			for _, c := range jarComponents(path) {
-				add(c, true)
+			components, err := jarComponents(path)
+			if err != nil {
+				report.Unreadable++
 			}
-		case looksLikeBinary(path):
-			for _, c := range goBinaryComponents(path) {
-				add(c, true)
+			for _, c := range components {
+				add(c, true, nil)
+			}
+		default:
+			binary, err := looksLikeBinary(path)
+			if err != nil {
+				report.Unreadable++
+				break
+			}
+			if binary {
+				components, err := goBinaryComponents(path)
+				if err != nil {
+					report.Unreadable++
+				}
+				for _, c := range components {
+					add(c, true, nil)
+				}
 			}
 		}
 		return nil
@@ -149,10 +169,10 @@ func isPythonMetadata(path string) bool {
 }
 
 // pythonComponent parses an installed Python distribution's metadata into a pkg:pypi component.
-func pythonComponent(path string) (sbom.Component, bool) {
-	data := readBounded(path, maxMetaBytes)
-	if data == nil {
-		return sbom.Component{}, false
+func pythonComponent(path string) (sbom.Component, bool, error) {
+	data, err := readBounded(path, maxMetaBytes)
+	if err != nil {
+		return sbom.Component{}, false, err
 	}
 	var name, version string
 	for _, line := range strings.Split(string(data), "\n") {
@@ -175,15 +195,14 @@ func pythonComponent(path string) (sbom.Component, bool) {
 		}
 	}
 	if !validIdent(name) || !validIdent(version) {
-		return sbom.Component{}, false
+		return sbom.Component{}, false, nil
 	}
-	return sbom.Component{Name: name, Version: version, PURL: "pkg:pypi/" + name + "@" + version, Scope: sbom.ScopeProduction}, true
+	return sbom.Component{Name: name, Version: version, PURL: "pkg:pypi/" + name + "@" + version, Scope: sbom.ScopeProduction}, true, nil
 }
 
-// goBinaryComponents reads a Go binary's embedded build info into pkg:golang components: the main module (when
-// it carries a resolved version) and every dependency (following a replacement). A non-Go / unreadable file
-// yields nothing.
-func goBinaryComponents(path string) (comps []sbom.Component) {
+// goBinaryComponents reads a Go binary's resolved main module and dependencies from build info.
+// A non-Go file yields nothing; filesystem failures remain inventory coverage gaps.
+func goBinaryComponents(path string) (comps []sbom.Component, readErr error) {
 	// A crafted ELF/PE/Mach-O can PANIC the stdlib debug/* parsers (malformed header counts/offsets turn into
 	// index/slice-bounds panics, not errors). Recover so one poisoned binary in an untrusted image contributes
 	// nothing – preserving the best-effort contract – rather than unwinding out of the walk and crashing the
@@ -194,10 +213,17 @@ func goBinaryComponents(path string) (comps []sbom.Component) {
 		}
 	}()
 	bi, err := buildinfo.ReadFile(path)
-	if err != nil || bi == nil {
-		return nil
+	if err != nil {
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			return nil, err
+		}
+		return nil, nil
 	}
-	return buildInfoComponents(bi)
+	if bi == nil {
+		return nil, nil
+	}
+	return buildInfoComponents(bi), nil
 }
 
 // buildInfoComponents maps a Go binary's build info to pkg:golang components: the main module (when it carries
@@ -231,27 +257,30 @@ func buildInfoComponents(bi *debug.BuildInfo) []sbom.Component {
 
 // looksLikeBinary cheaply pre-checks the executable magic (ELF / PE / Mach-O) so the buildinfo read is
 // attempted only on plausible binaries, not every text file in the rootfs.
-func looksLikeBinary(path string) bool {
+func looksLikeBinary(path string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer func() { _ = f.Close() }()
 	var m [4]byte
 	if _, err := io.ReadFull(f, m[:]); err != nil {
-		return false
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return false, nil
+		}
+		return false, err
 	}
 	switch {
 	case m[0] == 0x7f && m[1] == 'E' && m[2] == 'L' && m[3] == 'F': // ELF
-		return true
+		return true, nil
 	case m[0] == 'M' && m[1] == 'Z': // PE
-		return true
+		return true, nil
 	case m[0] == 0xfe && m[1] == 0xed && m[2] == 0xfa && (m[3] == 0xce || m[3] == 0xcf): // Mach-O (big-endian magic)
-		return true
+		return true, nil
 	case (m[0] == 0xce || m[0] == 0xcf) && m[1] == 0xfa && m[2] == 0xed && m[3] == 0xfe: // Mach-O (little-endian)
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 // normalizePyPI applies PEP 503 name normalization: lowercase, and any run of "-_." becomes a single "-".
@@ -308,20 +337,20 @@ func hasControl(s string) bool {
 	return false
 }
 
-// readBounded reads a regular file up to max bytes; a missing/irregular/symlink path or error → nil.
-func readBounded(path string, max int64) []byte {
+// readBounded reads a regular file up to max bytes. Irregular/symlink paths yield nothing;
+// filesystem failures remain distinguishable from metadata that contains no recognized package.
+func readBounded(path string, max int64) ([]byte, error) {
 	fi, err := os.Lstat(path)
-	if err != nil || !fi.Mode().IsRegular() {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(bufio.NewReader(f), max))
-	if err != nil {
-		return nil
-	}
-	return data
+	return io.ReadAll(io.LimitReader(bufio.NewReader(f), max))
 }

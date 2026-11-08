@@ -42,11 +42,11 @@ func TestLooksLikeBinary(t *testing.T) {
 	if err := os.WriteFile(txt, []byte("#!/bin/sh\necho hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !looksLikeBinary(elf) {
-		t.Error("ELF magic must be recognized")
+	if binary, err := looksLikeBinary(elf); err != nil || !binary {
+		t.Errorf("ELF magic must be recognized: err=%v", err)
 	}
-	if looksLikeBinary(txt) {
-		t.Error("a shell script must not look like a binary")
+	if binary, err := looksLikeBinary(txt); err != nil || binary {
+		t.Errorf("a shell script must not look like a binary: err=%v", err)
 	}
 }
 

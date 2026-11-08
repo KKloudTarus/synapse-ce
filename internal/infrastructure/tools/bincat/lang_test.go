@@ -65,7 +65,7 @@ func TestJarComponents(t *testing.T) {
 		"META-INF/MANIFEST.MF":  "Manifest-Version: 1.0\n",
 		"org/example/App.class": "not-real-bytecode",
 	})
-	comps := jarComponents(jar)
+	comps, _ := jarComponents(jar)
 	sort.Slice(comps, func(i, j int) bool { return comps[i].Name < comps[j].Name })
 	want := []sbom.Component{
 		{Name: "com.google.guava:guava", Version: "31.1-jre", PURL: "pkg:maven/com.google.guava/guava@31.1-jre", Scope: sbom.ScopeProduction},
@@ -82,7 +82,7 @@ func TestJarComponents(t *testing.T) {
 	// A jar with no embedded Maven coordinate yields nothing (no guessing from a filename).
 	plain := filepath.Join(dir, "plain.jar")
 	writeJar(t, plain, map[string]string{"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\n"})
-	if got := jarComponents(plain); len(got) != 0 {
+	if got, _ := jarComponents(plain); len(got) != 0 {
 		t.Errorf("a jar without pom.properties must yield nothing, got %+v", got)
 	}
 	// A non-zip file with a .jar name is not a false coordinate.
@@ -90,7 +90,7 @@ func TestJarComponents(t *testing.T) {
 	if err := os.WriteFile(bogus, []byte("this is not a zip"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := jarComponents(bogus); got != nil {
+	if got, _ := jarComponents(bogus); got != nil {
 		t.Errorf("a non-zip .jar must yield nothing, got %+v", got)
 	}
 }
@@ -124,15 +124,15 @@ func TestNodePackageManifest(t *testing.T) {
 		t.Error("the project-root package.json (not under node_modules) must NOT be cataloged")
 	}
 
-	c, ok := nodeComponent(unscoped)
+	c, ok, _ := nodeComponent(unscoped)
 	if !ok || c.PURL != "pkg:npm/lodash@4.17.21" || c.Name != "lodash" {
 		t.Errorf("nodeComponent(unscoped) = %+v, ok=%v", c, ok)
 	}
-	c, ok = nodeComponent(scoped)
+	c, ok, _ = nodeComponent(scoped)
 	if !ok || c.PURL != "pkg:npm/%40babel/core@7.22.0" || c.Name != "@babel/core" {
 		t.Errorf("nodeComponent(scoped) = %+v, ok=%v", c, ok)
 	}
-	if _, ok := nodeComponent(noVersion); ok {
+	if _, ok, _ := nodeComponent(noVersion); ok {
 		t.Error("a manifest without a version must yield nothing")
 	}
 }
@@ -161,7 +161,7 @@ func TestGemComponent(t *testing.T) {
 	if !isInstalledGemspec(rails) {
 		t.Fatal("a *.gemspec under specifications/ must be recognized")
 	}
-	c, ok := gemComponent(rails)
+	c, ok, _ := gemComponent(rails)
 	if !ok || c.PURL != "pkg:gem/rails@7.0.4" || c.Name != "rails" {
 		t.Errorf("gemComponent(rails) = %+v, ok=%v", c, ok)
 	}
@@ -173,14 +173,14 @@ func TestGemComponent(t *testing.T) {
 		"  s.platform = \"x86_64-linux\".freeze\n" +
 		"end\n"
 	noko := write("usr/lib/ruby/gems/3.1.0/specifications/nokogiri-1.15.0-x86_64-linux.gemspec", nokoSpec)
-	if c, ok := gemComponent(noko); !ok || c.PURL != "pkg:gem/nokogiri@1.15.0" {
+	if c, ok, _ := gemComponent(noko); !ok || c.PURL != "pkg:gem/nokogiri@1.15.0" {
 		t.Errorf("gemComponent(platform gem) = %+v, ok=%v; want clean version", c, ok)
 	}
 
 	// The older Gem::Version.new(...) version form is also read.
 	oldSpec := "Gem::Specification.new do |s|\n  s.name = \"rake\".freeze\n  s.version = Gem::Version.new(\"13.0.6\")\nend\n"
 	old := write("usr/lib/ruby/gems/3.1.0/specifications/rake-13.0.6.gemspec", oldSpec)
-	if c, ok := gemComponent(old); !ok || c.PURL != "pkg:gem/rake@13.0.6" {
+	if c, ok, _ := gemComponent(old); !ok || c.PURL != "pkg:gem/rake@13.0.6" {
 		t.Errorf("gemComponent(Gem::Version form) = %+v, ok=%v", c, ok)
 	}
 
@@ -297,7 +297,7 @@ func TestJarNestedArchives(t *testing.T) {
 		"META-INF/MANIFEST.MF":               []byte("Manifest-Version: 1.0\nMain-Class: org.springframework.boot.loader.JarLauncher\n"),
 		"BOOT-INF/classes/App.class":         []byte("x"),
 	})
-	comps := jarComponents(boot)
+	comps, _ := jarComponents(boot)
 	found := false
 	for _, c := range comps {
 		if c.PURL == "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1" && c.Name == "org.apache.logging.log4j:log4j-core" {
@@ -323,12 +323,12 @@ func TestNonConcreteVersionRejected(t *testing.T) {
 	}
 	// A dist-tag / meta version is not a concrete version; emitting it would key a wrong or unmatched CVE.
 	npm := write("app/node_modules/lodash/package.json", `{"name":"lodash","version":"latest"}`)
-	if _, ok := nodeComponent(npm); ok {
+	if _, ok, _ := nodeComponent(npm); ok {
 		t.Error(`npm version "latest" must be rejected`)
 	}
 	gem := write("usr/lib/ruby/gems/3.1.0/specifications/rack-latest.gemspec",
 		"Gem::Specification.new do |s|\n  s.name = \"rack\".freeze\n  s.version = \"latest\".freeze\nend\n")
-	if _, ok := gemComponent(gem); ok {
+	if _, ok, _ := gemComponent(gem); ok {
 		t.Error(`gem version "latest" must be rejected`)
 	}
 }
@@ -345,7 +345,7 @@ func TestDefaultGemCataloged(t *testing.T) {
 	if !isInstalledGemspec(p) {
 		t.Fatal("a default gem under specifications/default/ must be recognized")
 	}
-	if c, ok := gemComponent(p); !ok || c.PURL != "pkg:gem/rexml@3.2.5" {
+	if c, ok, _ := gemComponent(p); !ok || c.PURL != "pkg:gem/rexml@3.2.5" {
 		t.Errorf("gemComponent(default gem) = %+v, ok=%v", c, ok)
 	}
 }
@@ -358,7 +358,7 @@ func TestJarNestedGarbageSkipped(t *testing.T) {
 		"BOOT-INF/lib/notazip.jar":          []byte("this is not a zip archive at all"),
 		"META-INF/maven/g/a/pom.properties": []byte("groupId=g\nartifactId=a\nversion=1.0.0\n"),
 	})
-	comps := jarComponents(outer) // must not panic; the valid top-level coordinate still surfaces
+	comps, _ := jarComponents(outer) // must not panic; the valid top-level coordinate still surfaces
 	found := false
 	for _, c := range comps {
 		if c.PURL == "pkg:maven/g/a@1.0.0" {
@@ -382,7 +382,7 @@ func TestGemDuplicateVersionRejected(t *testing.T) {
 	if err := os.WriteFile(p, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if c, ok := gemComponent(p); ok {
+	if c, ok, _ := gemComponent(p); ok {
 		t.Errorf("a gemspec with two s.version lines must be rejected, got %+v", c)
 	}
 }
@@ -395,7 +395,7 @@ func TestJarOversizePomSkipped(t *testing.T) {
 	// A valid early version, then filler pushing a later version past the 64KiB cap.
 	body := "groupId=com.example\nartifactId=demo\nversion=1.0.0\n" + strings.Repeat("# pad\n", 20000) + "version=2.0.0\n"
 	writeJar(t, jar, map[string]string{"META-INF/maven/com.example/demo/pom.properties": body})
-	if got := jarComponents(jar); len(got) != 0 {
+	if got, _ := jarComponents(jar); len(got) != 0 {
 		t.Errorf("an over-cap pom.properties must be skipped, got %+v", got)
 	}
 }

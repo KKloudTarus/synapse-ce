@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,9 @@ func TestCompleteCatalogReportsNoTruncation(t *testing.T) {
 
 // An entry the walk could not read is a package that may exist and was never examined, so it is counted.
 func TestUnreadableEntriesAreCounted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits cannot stage read denial on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads every directory, so an unreadable entry cannot be staged")
 	}

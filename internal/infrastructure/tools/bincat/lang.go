@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -62,8 +63,8 @@ type jarBudget struct {
 // pom.properties, the coordinate Maven itself writes) into pkg:maven components. A fat/shaded jar embeds one
 // pom.properties per bundled dependency; a Spring Boot / WAR / EAR archive instead NESTS its dependency jars
 // (BOOT-INF/lib, WEB-INF/lib, lib/), each carrying its own pom.properties, so nested archives are scanned to
-// a bounded depth. A non-zip or unreadable file yields nothing.
-func jarComponents(path string) (comps []sbom.Component) {
+// a bounded depth. A non-zip file yields nothing; filesystem failures also return an error.
+func jarComponents(path string) (comps []sbom.Component, readErr error) {
 	// archive/zip reads attacker-controlled offsets; recover so one malformed archive in an untrusted image
 	// contributes nothing rather than unwinding out of the rootfs walk.
 	defer func() {
@@ -72,18 +73,26 @@ func jarComponents(path string) (comps []sbom.Component) {
 		}
 	}()
 	// Reject an entry-bomb archive BEFORE archive/zip allocates a record per central-directory entry.
-	if n, ok := zipEntryCount(path, maxJarFileBytes); !ok || n > maxJarEntries {
-		return nil
+	n, ok, err := zipEntryCount(path, maxJarFileBytes)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || n > maxJarEntries {
+		return nil, nil
 	}
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return nil
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			return nil, err
+		}
+		return nil, nil
 	}
 	defer func() { _ = zr.Close() }()
 	seen := map[string]bool{}
 	budget := &jarBudget{}
 	scanArchiveForMaven(&zr.Reader, 0, seen, budget, &comps)
-	return comps
+	return comps, nil
 }
 
 // scanArchiveForMaven appends a component for every pom.properties in zr (deduped by PURL via seen) and
@@ -156,17 +165,19 @@ func scanNestedArchive(f *zip.File, depth int, seen map[string]bool, budget *jar
 
 // zipEntryCount opens path and returns its central-directory entry count via zipCentralDirEntries. Returns
 // ok=false when the file is larger than sizeCap or the central directory cannot be parsed.
-func zipEntryCount(path string, sizeCap int64) (int, bool) {
+// Filesystem failures are returned separately so the caller retains the inventory gap.
+func zipEntryCount(path string, sizeCap int64) (int, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, false
+		return 0, false, err
 	}
 	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil {
-		return 0, false
+		return 0, false, err
 	}
-	return zipCentralDirEntries(f, fi.Size(), sizeCap)
+	n, ok := zipCentralDirEntries(f, fi.Size(), sizeCap)
+	return n, ok, nil
 }
 
 // zipCentralDirEntries counts the central-directory records in a zip so an entry-bomb archive is rejected
@@ -324,24 +335,24 @@ func isNodePackageManifest(path string) bool {
 // nodeComponent parses an installed package.json into a pkg:npm component, trusting the manifest's own name
 // (scope preserved) and version. Only a concrete name+version pair is accepted; a workspace/private root
 // manifest without a version, or a dist-tag such as "latest", yields nothing.
-func nodeComponent(path string) (sbom.Component, bool) {
-	data := readBounded(path, maxPackageBytes)
-	if data == nil {
-		return sbom.Component{}, false
+func nodeComponent(path string) (sbom.Component, bool, error) {
+	data, err := readBounded(path, maxPackageBytes)
+	if err != nil {
+		return sbom.Component{}, false, err
 	}
 	var manifest struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return sbom.Component{}, false
+		return sbom.Component{}, false, nil
 	}
 	name := strings.TrimSpace(manifest.Name)
 	version := strings.TrimSpace(manifest.Version)
 	if !validNpmName(name) || !sbom.IsResolvedVersion(version) || !validIdent(version) {
-		return sbom.Component{}, false
+		return sbom.Component{}, false, nil
 	}
-	return sbom.Component{Name: name, Version: version, PURL: "pkg:npm/" + npmPURLName(name) + "@" + version, Scope: sbom.ScopeProduction}, true
+	return sbom.Component{Name: name, Version: version, PURL: "pkg:npm/" + npmPURLName(name) + "@" + version, Scope: sbom.ScopeProduction}, true, nil
 }
 
 // npmPURLName percent-encodes the leading '@' of a scoped npm name (@scope/name -> %40scope/name) per the
@@ -401,10 +412,10 @@ var (
 // gemComponent parses an installed, serialized gemspec into a pkg:gem component from its literal name and
 // version assignments. The version is the clean Gem::Version string (no platform suffix, which lives on a
 // separate s.platform line). Only a concrete name+version pair is accepted.
-func gemComponent(path string) (sbom.Component, bool) {
-	data := readBounded(path, maxGemspecBytes)
-	if data == nil {
-		return sbom.Component{}, false
+func gemComponent(path string) (sbom.Component, bool, error) {
+	data, err := readBounded(path, maxGemspecBytes)
+	if err != nil {
+		return sbom.Component{}, false, err
 	}
 	// Require EXACTLY ONE literal s.name and s.version assignment. A serialized (to_ruby) spec has exactly
 	// one of each; two or more means this is not a standard installed spec, so fail closed rather than pick a
@@ -412,12 +423,12 @@ func gemComponent(path string) (sbom.Component, bool) {
 	nameMatches := gemNameRE.FindAllSubmatch(data, 2)
 	versionMatches := gemVersionRE.FindAllSubmatch(data, 2)
 	if len(nameMatches) != 1 || len(versionMatches) != 1 {
-		return sbom.Component{}, false
+		return sbom.Component{}, false, nil
 	}
 	name := strings.TrimSpace(string(nameMatches[0][1]))
 	version := strings.TrimSpace(string(versionMatches[0][1]))
 	if !validIdent(name) || !sbom.IsResolvedVersion(version) || !validIdent(version) {
-		return sbom.Component{}, false
+		return sbom.Component{}, false, nil
 	}
-	return sbom.Component{Name: name, Version: version, PURL: "pkg:gem/" + name + "@" + version, Scope: sbom.ScopeProduction}, true
+	return sbom.Component{Name: name, Version: version, PURL: "pkg:gem/" + name + "@" + version, Scope: sbom.ScopeProduction}, true, nil
 }
