@@ -144,6 +144,14 @@ call the network. It reports optional toolchain availability, dependency markers
 target tree, and whether SCA, SAST, secret, misconfig, and code-quality coverage is full,
 partial, or unavailable.
 
+Misconfig readiness checks for Helm charts and Kustomize inputs in the bounded target
+inventory and reports missing or unusable CLI-host renderers as partial. Discovery alone
+does not imply readiness: a required renderer's bounded version command must succeed.
+A truncated inventory is also partial because it may omit render inputs. Plain manifests
+and native Terraform do not require those renderers. This is a local prerequisite check,
+not proof that a chart or overlay will render successfully, or that an API or worker host
+is ready. Doctor does not render charts or fetch dependencies.
+
 ```bash
 # preview what Synapse can analyze before scanning the current tree
 synapse-cli doctor .

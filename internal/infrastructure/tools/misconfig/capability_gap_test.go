@@ -124,6 +124,88 @@ spec:
 	}
 }
 
+func TestKustomizationsWithoutRenderRootsRemainUnassessed(t *testing.T) {
+	const pod = `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app
+      securityContext:
+        privileged: true
+`
+	tests := []struct {
+		name       string
+		files      map[string]string
+		unassessed int
+		rawFinding bool
+	}{
+		{
+			name: "cycle only",
+			files: map[string]string{
+				"a/kustomization.yaml": "resources:\n  - ../b\n  - ../pod.yaml\n",
+				"b/kustomization.yaml": "resources:\n  - ../a\n",
+				"pod.yaml":             pod,
+			},
+			unassessed: 2,
+			rawFinding: true,
+		},
+		{
+			name: "cycle shares a manifest with a rendered nested overlay",
+			files: map[string]string{
+				"a/kustomization.yaml":       "resources:\n  - ../b\n  - ../pod.yaml\n",
+				"b/kustomization.yaml":       "resources:\n  - ../a\n",
+				"base/kustomization.yaml":    "resources:\n  - ../pod.yaml\n",
+				"overlay/kustomization.yaml": "resources:\n  - ../base\n",
+				"pod.yaml":                   pod,
+			},
+			unassessed: 2,
+			rawFinding: true,
+		},
+		{
+			name: "ordinary nested overlay",
+			files: map[string]string{
+				"base/kustomization.yaml":    "resources:\n  - ../pod.yaml\n",
+				"overlay/kustomization.yaml": "resources:\n  - ../base\n",
+				"pod.yaml":                   pod,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for name, body := range tt.files {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runner := mockKustomizeRunner{rendered: []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: rendered\n")}
+			report, err := New().WithKustomizeRunner(runner).ScanConfigsReport(context.Background(), root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.UnassessedInputs != tt.unassessed {
+				t.Fatalf("unassessed inputs: got %d, want %d", report.UnassessedInputs, tt.unassessed)
+			}
+			privileged := countRule(report.Findings, "kubernetes-privileged")
+			if tt.rawFinding {
+				if len(privileged) != 1 || privileged[0].File != "pod.yaml" {
+					t.Fatalf("expected retained raw privileged finding, got %+v", privileged)
+				}
+			} else if len(privileged) != 0 {
+				t.Fatalf("successfully rendered nested overlay must suppress raw findings, got %+v", privileged)
+			}
+		})
+	}
+}
+
 // A tree with no templated input has no capability gap, or the warning becomes noise on every repository.
 func TestNoTemplatedInputMeansNoCapabilityGap(t *testing.T) {
 	root := t.TempDir()

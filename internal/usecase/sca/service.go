@@ -408,11 +408,6 @@ func (s *Service) SetArtifactCataloger(c ports.ArtifactCataloger) { s.artifactCa
 // miss or error never affects correctness, only whether the cataloging step is skipped.
 func (s *Service) SetSBOMCache(c ports.SBOMCache) { s.sbomCache = c }
 
-// sbomProducerVersion is the SBOM-producer identity used as the cache-invalidation version: the versions of
-// the components that determine SBOM OUTPUT – the syft binary, the language classifier, and the synapse
-// binary that carries the owned parsers/enrichers. It deliberately excludes advisory/KEV/EPSS DB versions
-// (they don't change the generated SBOM). Empty when no producer version is known, which keeps the cache
-// off rather than serving an SBOM that can't be soundly version-keyed.
 // sbomGeneratorKey names the SBOM producer's version by the role it fills rather than by one
 // implementation of it. The owned parsers are the default producer, and filing their version under
 // "syft" made the manifest contradict itself: `"syft": "ownsbom/0.8.0"`, naming a tool that did not
@@ -432,30 +427,15 @@ func sbomGeneratorVersion(tv map[string]string) string {
 	return tv[legacySBOMGeneratorKey]
 }
 
-func sbomProducerVersion(tv map[string]string) string {
-	if tv == nil {
-		return ""
-	}
-	v := sbomGeneratorVersion(tv) + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
-	if strings.Trim(v, "\x00") == "" {
-		return ""
-	}
-	return v
-}
-
-// sbomProducerIdentity resolves the selected producer's cache identity before generation. ok is
-// false when the producer cannot say who it is, which disables the cache for this scan rather than
-// reusing an inventory this scan cannot attribute. A producer that does not implement the optional
-// port keeps the legacy provenance-derived key, which stays correct for a single-producer
-// deployment and is still combined with the classifier and binary versions below.
-func (s *Service) sbomProducerIdentity(ctx context.Context) (string, bool) {
+// sbomProducerIdentity resolves the selected producer and its input eligibility before lookup.
+// Unknown identities and inputs that cannot be represented by the key disable caching.
+func (s *Service) sbomProducerIdentity(ctx context.Context, dir string) (string, bool) {
 	identified, ok := s.sbomGen.(ports.SBOMProducerIdentity)
 	if !ok {
-		legacy := sbomProducerVersion(s.prov.ToolVersions)
-		return legacy, legacy != ""
+		return "", false
 	}
-	id, err := identified.SBOMProducerIdentity(ctx)
-	if err != nil || strings.TrimSpace(id) == "" {
+	id, cacheable, err := identified.SBOMProducerIdentity(ctx, dir)
+	if err != nil || !cacheable || strings.TrimSpace(id) == "" {
 		return "", false
 	}
 	return id + "\x00" + s.prov.ToolVersions["go-enry"] + "\x00" + s.prov.ToolVersions["synapse"], true
@@ -470,8 +450,11 @@ func (s *Service) sbomProducerIdentity(ctx context.Context) (string, bool) {
 // hands one producer's inventory to another. A producer that cannot say who it is disables the
 // cache for this scan rather than being served someone else's components.
 func (s *Service) loadOrGenerateSBOM(ctx context.Context, dir string) (*sbom.SBOM, bool, error) {
-	producerVer, producerKnown := s.sbomProducerIdentity(ctx)
-	cacheEligible := s.sbomCache != nil && producerKnown
+	var producerVer string
+	cacheEligible := false
+	if s.sbomCache != nil {
+		producerVer, cacheEligible = s.sbomProducerIdentity(ctx, dir)
+	}
 	if cacheEligible {
 		if cached, ok, _ := s.sbomCache.Load(ctx, dir, producerVer); ok && cached != nil {
 			return cached, true, nil
@@ -4465,7 +4448,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 				} else {
 					rootfsReport, rerr := s.secretScanner.ScanFiles(ctx, ws.RootFS)
 					if rerr != nil {
-						result.mergeEnginePassError("secrets", rerr)
+						result.mergeEnginePassError("secrets", rerr, nil)
 						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan skipped: "+rerr.Error())
 						if errors.Is(rerr, context.Canceled) {
 							return result, rerr
@@ -4581,15 +4564,34 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 						rootfsReport.Findings, rerr = s.misconfig.ScanConfigs(ctx, ws.RootFS)
 					}
 					counts := map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(rootfsReport.Findings)), scanrun.MeasureUnrenderedCharts: int64(rootfsReport.UnrenderedCharts)}
+					if rootfsReport.UnassessedInputs > 0 {
+						counts[scanrun.MeasureFilesUnscanned] = int64(rootfsReport.UnassessedInputs)
+						warning := fmt.Sprintf("%d image-filesystem infrastructure-as-code input(s) were NOT evaluated by the capability that owns them", rootfsReport.UnassessedInputs)
+						if len(rootfsReport.UnassessedReasons) > 0 {
+							warning += ": " + strings.Join(rootfsReport.UnassessedReasons, "; ")
+						}
+						result.SourceWarnings = append(result.SourceWarnings, warning)
+					}
+					if n := len(rootfsReport.UnresolvedInputs); n > 0 {
+						shown := rootfsReport.UnresolvedInputs
+						if len(shown) > maxUnresolvedInputsReported {
+							shown = shown[:maxUnresolvedInputsReported]
+						}
+						result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+							"%d image-filesystem infrastructure-as-code attribute(s) did not resolve to a value, so the rules read their source text: %s",
+							n, strings.Join(shown, "; ")))
+					}
 					switch {
 					case rerr != nil:
-						result.mergeEnginePassError("iac", rerr)
+						result.mergeEnginePassError("iac", rerr, counts)
 						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem misconfig scan skipped: "+rerr.Error())
 						if errors.Is(rerr, context.Canceled) {
 							return result, rerr
 						}
 					case rootfsReport.Truncated || rootfsReport.UnrenderedCharts > 0:
 						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonTruncated, counts)
+					case rootfsReport.UnassessedInputs > 0:
+						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonAnalysisIncomplete, counts)
 					case !hasMisconfigReport:
 						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoverageUnknown, scanrun.ReasonLegacyReporter, counts)
 					default:
@@ -5349,7 +5351,7 @@ func (r *ScanResult) mergeEnginePass(engine string, execution scanrun.EngineExec
 	r.updateEngine(engine, execution, coverage, reason, combined)
 }
 
-func (r *ScanResult) mergeEnginePassError(engine string, err error) {
+func (r *ScanResult) mergeEnginePassError(engine string, err error, counts map[scanrun.EngineMeasure]int64) {
 	execution, reason := scanrun.EngineFailed, scanrun.ReasonEngineError
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -5357,7 +5359,7 @@ func (r *ScanResult) mergeEnginePassError(engine string, err error) {
 	case budgetExpired(err):
 		execution, reason = scanrun.EngineTimedOut, scanrun.ReasonDeadlineExceeded
 	}
-	r.mergeEnginePass(engine, execution, scanrun.CoveragePartial, reason, nil)
+	r.mergeEnginePass(engine, execution, scanrun.CoveragePartial, reason, counts)
 }
 
 func (r *ScanResult) completeEngine(engine string) {
@@ -6466,6 +6468,7 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 			LicensePct:              res.LicenseCoverage.Pct,
 			Confident:               res.Completeness.Confident,
 			CompletenessNote:        res.Completeness.Warning,
+			CoverageWarnings:        reportCoverageWarnings(res.SourceWarnings),
 			EngineOutcomes:          scanrun.CloneEngineOutcomes(res.EngineOutcomes),
 			EngineCoverage:          coverage,
 			ExecutionMode:           res.ExecutionMode,
@@ -6504,6 +6507,31 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 		ins.EvidenceKeyID = ev.Attestation.KeyID
 	}
 	return ins, nil
+}
+
+// reportCoverageWarnings selects the existing persisted coverage messages for report
+// consumers. Other source diagnostics can contain internal tool or filesystem errors.
+func reportCoverageWarnings(warnings []string) []string {
+	var out []string
+	for _, warning := range warnings {
+		if strings.HasPrefix(warning, "the installed-package catalog did not cover ") ||
+			strings.HasPrefix(warning, "infrastructure-as-code scan hit its file cap,") ||
+			warning == stageBudgetWarning("infrastructure-as-code scan") {
+			out = append(out, warning)
+			continue
+		}
+		count, message, _ := strings.Cut(warning, " ")
+		if n, err := strconv.Atoi(count); err != nil || n <= 0 {
+			continue
+		}
+		message = strings.TrimPrefix(message, "image-filesystem ")
+		if strings.HasPrefix(message, "infrastructure-as-code input(s) were NOT evaluated ") ||
+			strings.HasPrefix(message, "infrastructure-as-code attribute(s) did not resolve ") ||
+			strings.HasPrefix(message, "Helm chart(s) could not be rendered,") {
+			out = append(out, warning)
+		}
+	}
+	return out
 }
 
 // EvidenceReport is the engagement's evidence ledger plus its verification status.

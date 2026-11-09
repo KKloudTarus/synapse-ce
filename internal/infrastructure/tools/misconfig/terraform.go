@@ -1,6 +1,7 @@
 package misconfig
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -219,10 +220,13 @@ func tfAttributeLiteral(body string, re *regexp.Regexp) (string, bool) {
 
 // scanTerraform runs the owned Terraform checks over one .tf file on its own. The file is parsed and its
 // own variable defaults and locals are resolved before the rules run; nothing outside the file is read.
-func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
-	ws := buildTFWorkspace([]tfInputFile{{rel: rel, data: data}}, nil)
-	out, _, _ := ws.scanWorkspace()
-	return out
+func scanTerraform(ctx context.Context, rel string, data []byte) ([]ports.MisconfigRawFinding, error) {
+	ws, err := buildTFWorkspace(ctx, []tfInputFile{{rel: rel, data: data}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	out, _, _, err := ws.scanWorkspace(ctx)
+	return out, err
 }
 
 // scanTerraformText runs the owned Terraform checks over one file's NORMALIZED source: the text produced by

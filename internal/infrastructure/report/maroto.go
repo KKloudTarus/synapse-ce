@@ -252,6 +252,9 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 			note = "Dependency versions resolved with confidence."
 		}
 		m.AddAutoRow(text.NewCol(12, note, props.Text{Size: 9, Color: gray()}))
+		for _, warning := range insight.CoverageWarnings {
+			m.AddAutoRow(text.NewCol(12, warning, props.Text{Size: 9, Color: gray()}))
+		}
 		if outcomes := reportEngineOutcomes(insight.EngineOutcomes); len(outcomes) > 0 {
 			m.AddRow(5,
 				text.NewCol(3, "ENGINE", hdr()),

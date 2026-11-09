@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -153,6 +154,157 @@ func TestProbeTruncatesOnDirectoryEntryCap(t *testing.T) {
 	}
 	if !rep.Inventory.Truncated {
 		t.Fatal("Inventory.Truncated = false, want true when directory entry cap is exceeded")
+	}
+}
+
+func TestProbeMisconfigRendererReadiness(t *testing.T) {
+	tests := []struct {
+		name     string
+		files    map[string]string
+		tools    map[string]string
+		want     Status
+		nextTool string
+	}{
+		{"chart missing helm", map[string]string{"Chart.yaml": "apiVersion: v2\nname: app\n"}, nil, StatusPartial, "helm"},
+		{"chart with helm", map[string]string{"Chart.yaml": "apiVersion: v2\nname: app\n"}, map[string]string{"helm": "/bin/helm"}, StatusFull, ""},
+		{"overlay missing kustomize", map[string]string{"overlay/kustomization.yaml": "resources:\n- ../base\n"}, nil, StatusPartial, "kustomize"},
+		{"overlay with kustomize", map[string]string{"overlay/Kustomization": "resources: []\n"}, map[string]string{"kustomize": "/bin/kustomize"}, StatusFull, ""},
+		{"ordinary manifests", map[string]string{"pod.yaml": "kind: Pod\n", "config.json": "{}", "main.tf": "terraform {}\n"}, nil, StatusFull, ""},
+		{"library only", map[string]string{"Chart.yaml": "type: library\n"}, nil, StatusFull, ""},
+		{"invalid metadata is a gap", map[string]string{"Chart.yaml": "type: [\n"}, nil, StatusPartial, "helm"},
+		{"vendored chart only", map[string]string{"charts/child/Chart.yaml": "name: child\n"}, nil, StatusFull, ""},
+		{"nested independent chart", map[string]string{"app/Chart.yaml": "name: app\n", "app/charts/child/Chart.yaml": "name: child\n"}, nil, StatusPartial, "helm"},
+		{"both renderers missing", map[string]string{"Chart.yaml": "name: app\n", "overlay/kustomization.yml": "resources: []\n"}, nil, StatusPartial, "helm"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, body := range tt.files {
+				writeFile(t, filepath.Join(dir, name), body)
+			}
+			rep, err := Probe(context.Background(), dir, Options{
+				LookPath: fakeLookPath(tt.tools), Version: fakeVersion("v1"),
+				JavaHomePath: filepath.Join(dir, "missing-java-home"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := dimension(rep, "misconfig")
+			if got.Status != tt.want || (tt.nextTool != "" && !strings.Contains(strings.ToLower(got.NextStep), tt.nextTool)) {
+				t.Fatalf("misconfig = %#v, want %s and guidance for %q", got, tt.want, tt.nextTool)
+			}
+			if hasMarker(rep.Inventory.Markers, "Chart.yaml") {
+				t.Fatal("Chart.yaml must not become a dependency marker")
+			}
+			if sca := dimension(rep, "sca"); sca.Status != StatusUnavailable {
+				t.Fatalf("SCA readiness changed by render inputs: %#v", sca)
+			}
+		})
+	}
+}
+
+func TestProbeMisconfigRendererExecutionReadiness(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("renderer fixtures require POSIX executable scripts")
+	}
+	for _, renderer := range []struct {
+		name   string
+		marker string
+		body   string
+	}{
+		{"helm", "Chart.yaml", "name: app\n"},
+		{"kustomize", "kustomization.yaml", "resources: []\n"},
+	} {
+		for _, fixture := range []struct {
+			name string
+			body string
+			want Status
+		}{
+			{"invalid executable", "not an executable image\n", StatusPartial},
+			{"nonzero exit", "#!/bin/sh\nprintf 'secret renderer output\\n' >&2\nexit 1\n", StatusPartial},
+			{"timeout", "#!/bin/sh\nexec sleep 10\n", StatusPartial},
+			{"successful empty version", "#!/bin/sh\nexit 0\n", StatusFull},
+		} {
+			t.Run(renderer.name+"/"+fixture.name, func(t *testing.T) {
+				dir := t.TempDir()
+				writeFile(t, filepath.Join(dir, renderer.marker), renderer.body)
+				executable := filepath.Join(t.TempDir(), renderer.name)
+				if err := os.WriteFile(executable, []byte(fixture.body), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				rep, err := Probe(context.Background(), dir, Options{
+					LookPath:     fakeLookPath(map[string]string{renderer.name: executable}),
+					JavaHomePath: filepath.Join(dir, "missing-java-home"),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				tool := toolByName(rep.Tools, renderer.name)
+				got := dimension(rep, "misconfig")
+				if !tool.Found || tool.Path != executable || got.Status != fixture.want {
+					t.Fatalf("tool = %#v, misconfig = %#v; want found path and %s", tool, got, fixture.want)
+				}
+				if fixture.want == StatusPartial && (!strings.Contains(strings.ToLower(got.NextStep), renderer.name) || tool.Detail == "") {
+					t.Fatalf("unusable renderer needs detail and actionable guidance: tool = %#v, misconfig = %#v", tool, got)
+				}
+				if strings.Contains(tool.Detail+got.Reason+got.NextStep, "secret renderer output") {
+					t.Fatal("renderer output leaked into readiness report")
+				}
+				if fixture.want == StatusPartial {
+					if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					restored, err := Probe(context.Background(), dir, Options{
+						LookPath:     fakeLookPath(map[string]string{renderer.name: executable}),
+						JavaHomePath: filepath.Join(dir, "missing-java-home"),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := dimension(restored, "misconfig"); got.Status != StatusFull {
+						t.Fatalf("repaired renderer must restore readiness: %#v", got)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestProbePlainManifestsIgnoreUnusableRenderers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("renderer fixtures require POSIX executable scripts")
+	}
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "pod.yaml"), "kind: Pod\n")
+	executable := filepath.Join(t.TempDir(), "broken")
+	if err := os.WriteFile(executable, []byte("invalid executable image\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Probe(context.Background(), dir, Options{
+		LookPath:     fakeLookPath(map[string]string{"helm": executable, "kustomize": executable}),
+		JavaHomePath: filepath.Join(dir, "missing-java-home"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dimension(rep, "misconfig"); got.Status != StatusFull {
+		t.Fatalf("plain manifests do not need renderers: %#v", got)
+	}
+}
+
+func TestProbeMisconfigTruncatedInventoryIsPartial(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.yaml"), "kind: Pod\n")
+	writeFile(t, filepath.Join(dir, "z", "Chart.yaml"), "name: app\n")
+	rep, err := Probe(context.Background(), dir, Options{
+		LookPath: fakeLookPath(nil), Version: fakeVersion(""),
+		JavaHomePath: filepath.Join(dir, "missing-java-home"), MaxEntries: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Inventory.Truncated || dimension(rep, "misconfig").Status != StatusPartial {
+		t.Fatalf("truncated inventory must not imply full readiness: %#v", rep)
 	}
 }
 

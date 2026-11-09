@@ -44,6 +44,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- New DAST public-artifact proofs use v3 and include the version in the proof
+  hash. Existing v1 and v2 proofs remain verifiable. In a mixed-version rollout,
+  update proof readers and verifiers before deploying producers that emit v3 (#1638).
+
+- `synapse-cli doctor` reports misconfiguration readiness as Partial when
+  discovered Helm or Kustomize inputs need a missing or unusable renderer, or
+  when the target inventory is truncated (#1638).
+
+- HTML, DOCX and PDF scan reports include stored IaC and installed-package
+  inventory coverage warnings (#1638).
+
 - **The syslog sink's RFC 5424 timestamp was out of specification (#1458).** `TIME-SECFRAC` is bounded at six digits and the sink wrote nine, because it formatted with `time.RFC3339Nano` and `time.Now` has nanosecond resolution on Linux. Every message a nanosecond clock produced was malformed. The timestamp is now capped at six fractional digits; nothing else about the frame changes, and a receiver that tolerated the nine-digit form keeps working.
 
 - A blocked or throttled Splunk sink now reads plainly in the console. The driver's own wording started with `splunk `, which the diagnostic scrubber treats as a credential marker, so "splunk rejected the credential" reached the operator as "[secret] the credential" (#1459).
