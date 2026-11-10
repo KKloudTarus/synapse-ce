@@ -121,7 +121,8 @@ func componentsByPURL(comps []sbom.Component) map[string]sbom.Component {
 // run executes Grype (sandboxed when a runner is set, else direct) and returns its stdout
 // + whether it ran. The GRYPE_DB_* pins make it offline + reproducible.
 func (s *Source) run(ctx context.Context, sbomPath string) ([]byte, bool) {
-	args := []string{"sbom:" + sbomPath, "-o", "json", "-q"}
+	// Reconstructed SBOMs lack the CPEs needed to find advisories outside distro fix feeds.
+	args := []string{"sbom:" + sbomPath, "-o", "json", "-q", "--add-cpes-if-none"}
 	var env []string
 	if s.dbDir != "" {
 		env = []string{"GRYPE_DB_CACHE_DIR=" + s.dbDir, "GRYPE_DB_AUTO_UPDATE=false", "GRYPE_DB_VALIDATE_AGE=false"}
@@ -179,6 +180,7 @@ type cdxComponent struct {
 	Name       string        `json:"name"`
 	Version    string        `json:"version,omitempty"`
 	PURL       string        `json:"purl,omitempty"`
+	CPE        string        `json:"cpe,omitempty"`
 	Properties []cdxProperty `json:"properties,omitempty"`
 }
 
@@ -203,7 +205,7 @@ func writeCycloneDX(doc *sbom.SBOM) (path string, cleanup func(), err error) {
 			if c.PURL == "" {
 				continue // grype matches by PURL/CPE; un-purled entries cannot match
 			}
-			bom.Components = append(bom.Components, cdxComponent{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL})
+			bom.Components = append(bom.Components, cdxComponent{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL, CPE: c.CPE})
 		}
 		if id != "" {
 			bom.Components = append(bom.Components, osComponent(id, ver))
