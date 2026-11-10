@@ -89,12 +89,12 @@ func TestJSServerImportContext(t *testing.T) {
 				files = append(files, sourceFile{Rel: rel, Ext: path.Ext(rel), Lines: strings.Split(source, "\n")})
 			}
 			sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
-			server, err := buildJSServerRequestFiles(context.Background(), files, tc.limit)
+			runtime, err := buildJSRuntimeContext(context.Background(), files, tc.limit)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var got []string
-			for rel, marked := range server {
+			for rel, marked := range runtime.server {
 				if marked {
 					got = append(got, rel)
 				}
@@ -110,7 +110,7 @@ func TestJSServerImportContext(t *testing.T) {
 func TestJSServerImportContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := buildJSServerRequestFiles(ctx, []sourceFile{{Rel: "client.ts", Ext: ".ts"}}, 1)
+	_, err := buildJSRuntimeContext(ctx, []sourceFile{{Rel: "client.ts", Ext: ".ts"}}, 1)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got err=%v", err)
 	}

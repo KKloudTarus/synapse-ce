@@ -109,6 +109,13 @@ func ObserveSourceImports(ctx context.Context, src []byte, jsxAware bool) (impor
 	return imports, len(observed.hazards) == 0, nil
 }
 
+func IsAssetSpecifier(specifier string) bool {
+	if at := strings.IndexAny(specifier, "?#"); at >= 0 {
+		specifier = specifier[:at]
+	}
+	return assetExtensions[strings.ToLower(path.Ext(specifier))]
+}
+
 // newWithLimits is the test seam for exercising the budget paths.
 func newWithLimits(l scannerLimits) (*Scanner, error) {
 	if err := l.validate(); err != nil {

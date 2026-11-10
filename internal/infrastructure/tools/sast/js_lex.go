@@ -90,6 +90,8 @@ func jsRuleMatches(r *rule, raw, code string) bool {
 	return r.re.MatchString(code) && !r.skip(code)
 }
 
+var jsWebRequestContextRe = regexp.MustCompile(`\brequest\s*\.\s*(?:url|headers)\b|:\s*(?:Request|NextRequest)\b`)
+
 // jsRequestContextFile ignores commented examples of server request handling.
 func jsRequestContextFile(lines []string) bool {
 	var lex jsLexState
@@ -102,7 +104,7 @@ func jsRequestContextFile(lines []string) bool {
 		code.WriteByte('\n')
 	}
 	text := code.String()
-	return requestContextRe.MatchString(text)
+	return requestContextRe.MatchString(text) || jsWebRequestContextRe.MatchString(text)
 }
 
 // browserGlobalRe marks a file that runs in the browser. A bare fetch(x) there is a client-side

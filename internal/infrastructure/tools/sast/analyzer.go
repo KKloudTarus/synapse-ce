@@ -360,6 +360,7 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	// already full. They differ from skippedFiles, which are files deliberately excluded as vendored,
 	// minified or generated.
 	unscannedFiles := 0
+	runtimeSourcesComplete := true
 	appendFile := func(file sourceFile, bytes int64) bool {
 		if len(files) >= maxFiles || bytes > maxBytes-retainedBytes {
 			// The tree outgrew the retained-source budget. Saying only "lower bound" leaves the reader
@@ -376,6 +377,7 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	}
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			runtimeSourcesComplete = false
 			return nil // skip unreadable entries; don't abort the engagement's scan
 		}
 		if err := ctx.Err(); err != nil {
@@ -388,9 +390,15 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			return nil
 		}
 		if !d.Type().IsRegular() { // never follow symlinks/devices
+			if jsExts[sastSourceExt(path)] {
+				runtimeSourcesComplete = false
+			}
 			return nil
 		}
 		if skippedSourceFile(path) {
+			if jsExts[sastSourceExt(path)] {
+				runtimeSourcesComplete = false
+			}
 			// Counted like every other policy exclusion. A .min.js dropped on its name is exactly
 			// as invisible to the reader as one dropped on its content, so the report must say so.
 			skippedFiles++
@@ -431,10 +439,16 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			return readErr
 		}
 		if len(lines) == 0 {
+			if jsExts[sastSourceExt(path)] {
+				runtimeSourcesComplete = false
+			}
 			return nil
 		}
 		ext := sastSourceExt(path)
 		if vendoredAssetFile(rel, ext, lines) || looksMinified(lines) || isGeneratedSource(lines) {
+			if jsExts[ext] {
+				runtimeSourcesComplete = false
+			}
 			// Report the exclusion. Dropping a file and still returning a complete-looking
 			// report is the failure mode a scanner must never have: the caller cannot tell a
 			// clean tree from an unscanned one, and --fail-on passes either way.
@@ -455,6 +469,9 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	project, err := buildProjectContext(ctx, files)
 	if err != nil {
 		return ports.SASTSourceReport{}, err
+	}
+	if !runtimeSourcesComplete || unscannedFiles > 0 {
+		project.jsBrowserFiles = nil
 	}
 	// The report budget is spent on SECURITY findings before code-quality ones. Walk order alone used to
 	// decide, and on a real 971-file Spring service that meant 417 low-severity code smells consumed the
@@ -687,7 +704,7 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			if r.id == "go-log-fatal-in-code" && insideGoExitFunc {
 				continue // main/init is exactly where ending the process is correct
 			}
-			if r.id == "ssrf-fetch-user-url" && browserFile {
+			if r.id == "ssrf-fetch-user-url" && (browserFile || project.jsBrowserFiles[rel]) {
 				continue // a fetch in a DOM-touching file is a browser request, not server-side SSRF
 			}
 			if r.id == "generic-ssrf-request-url" && isJS && !jsServerFile {

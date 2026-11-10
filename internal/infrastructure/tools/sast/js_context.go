@@ -2,7 +2,6 @@ package sast
 
 import (
 	"context"
-	"path"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jsresolution"
@@ -13,74 +12,78 @@ import (
 // SSRF candidates rather than using an incomplete graph to suppress findings.
 const maxJSContextEdges = 250_000
 
-// buildJSServerRequestFiles resolves only retained source. Node HTTP imports and
-// uncertain module loads propagate to importers; request cues stay file-local.
-// Preparation is O(source bytes + files + edges), with at most 100k source units
-// and maxJSContextEdges retained edges. Each runtime seed is queued once.
-func buildJSServerRequestFiles(ctx context.Context, files []sourceFile, edgeLimit int) (map[string]bool, error) {
+type jsRuntimeContext struct {
+	server  map[string]bool
+	browser map[string]bool
+}
+
+func buildJSRuntimeContext(ctx context.Context, files []sourceFile, edgeLimit int) (jsRuntimeContext, error) {
 	server := make(map[string]bool)
+	browserInput := false
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return jsRuntimeContext{}, err
 		}
 		if jsExts[f.Ext] {
 			server[f.Rel] = false
 		}
+		browserInput = browserInput || f.Ext == ".html" || f.Ext == ".htm"
 	}
+	metadata := jsImportMetadata{}
+	if browserInput {
+		var err error
+		metadata, err = jsRuntimeMetadata(ctx, files)
+		if err != nil {
+			return jsRuntimeContext{}, err
+		}
+	}
+	complete := metadata.complete
+	dependencies := make(map[string][]string)
 	runtime := make(map[string]bool)
 	importers := make(map[string][]string)
 	var queue []string
 	edges := 0
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return jsRuntimeContext{}, err
 		}
 		if !jsExts[f.Ext] {
 			continue
 		}
 		server[f.Rel] = jsRequestContextFile(f.Lines)
 		jsxAware := f.Ext != ".ts" && f.Ext != ".mts" && f.Ext != ".cts"
-		imports, complete, err := jsimports.ObserveSourceImports(ctx, []byte(strings.Join(f.Lines, "\n")), jsxAware)
+		imports, observed, err := jsimports.ObserveSourceImports(ctx, []byte(strings.Join(f.Lines, "\n")), jsxAware)
 		if err != nil {
-			return nil, err
+			return jsRuntimeContext{}, err
 		}
-		possibleNode := !complete
+		possibleNode := !observed
+		complete = complete && observed
 		seen := make(map[string]bool)
 		for _, imp := range imports {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return jsRuntimeContext{}, err
 			}
 			if imp.TypeOnly {
 				continue
 			}
-			switch imp.Specifier {
-			case "http", "https", "node:http", "node:https":
+			if jsresolution.ClassifySpecifier(imp.Specifier).Kind == jsresolution.SpecifierBuiltin {
 				possibleNode = true
 			}
-			if !strings.HasPrefix(imp.Specifier, ".") {
+			candidate, known := jsRuntimeImportTarget(f.Rel, imp.Specifier, server, metadata)
+			complete = complete && known
+			if candidate == "" || seen[candidate] {
 				continue
 			}
-			specifier := imp.Specifier
-			if at := strings.IndexAny(specifier, "?#"); at >= 0 {
-				specifier = specifier[:at]
-			}
-			for _, candidate := range jsresolution.ModuleFileCandidates(path.Join(path.Dir(f.Rel), specifier)) {
-				if _, exists := server[candidate]; !exists {
-					continue
+			if edges >= edgeLimit {
+				for rel := range server {
+					server[rel] = true
 				}
-				if !seen[candidate] {
-					if edges >= edgeLimit {
-						for rel := range server {
-							server[rel] = true
-						}
-						return server, ctx.Err()
-					}
-					importers[candidate] = append(importers[candidate], f.Rel)
-					seen[candidate] = true
-					edges++
-				}
-				break
+				return jsRuntimeContext{server: server}, ctx.Err()
 			}
+			importers[candidate] = append(importers[candidate], f.Rel)
+			dependencies[f.Rel] = append(dependencies[f.Rel], candidate)
+			seen[candidate] = true
+			edges++
 		}
 		if possibleNode {
 			runtime[f.Rel] = true
@@ -90,7 +93,7 @@ func buildJSServerRequestFiles(ctx context.Context, files []sourceFile, edgeLimi
 	}
 	for at := 0; at < len(queue); at++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return jsRuntimeContext{}, err
 		}
 		for _, importer := range importers[queue[at]] {
 			if !runtime[importer] {
@@ -100,5 +103,36 @@ func buildJSServerRequestFiles(ctx context.Context, files []sourceFile, edgeLimi
 			}
 		}
 	}
-	return server, nil
+	result := jsRuntimeContext{server: server}
+	if !complete {
+		return result, nil
+	}
+	entries, err := jsHTMLModuleEntries(ctx, files, server, metadata)
+	if err != nil {
+		return jsRuntimeContext{}, err
+	}
+	if len(entries) == 0 {
+		return result, nil
+	}
+	browser, err := jsForwardClosure(ctx, entries, dependencies)
+	if err != nil {
+		return jsRuntimeContext{}, err
+	}
+	conflicts := make(map[string]bool)
+	for rel, isServer := range server {
+		if isServer || !browser[rel] {
+			conflicts[rel] = true
+		}
+	}
+	conflict, err := jsForwardClosure(ctx, conflicts, dependencies)
+	if err != nil {
+		return jsRuntimeContext{}, err
+	}
+	result.browser = make(map[string]bool)
+	for rel := range browser {
+		if !conflict[rel] {
+			result.browser[rel] = true
+		}
+	}
+	return result, nil
 }
