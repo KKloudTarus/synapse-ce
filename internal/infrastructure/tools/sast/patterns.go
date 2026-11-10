@@ -810,6 +810,7 @@ func builtinRules() []rule {
 			desc:   "A Go outbound HTTP request appears to use a dynamic URL. Validate scheme/host, block private networks/metadata IPs, and apply allowlists.",
 			re:     regexp.MustCompile(`(?i)http\.(Get|Post|Head)\s*\(\s*[A-Za-z_$][\w$]*`),
 			skipFn: commentOnlyLine,
+			exts:   goExts,
 		},
 		{
 			id: "react-dangerous-html", cwe: "CWE-79", severity: shared.SeverityHigh, title: "React renders unsanitized HTML",

@@ -42,8 +42,10 @@ type routeContext struct {
 const maxCallerEvidenceFiles = 150
 
 type projectContext struct {
-	Files     []projectFile
-	Summaries map[string]functionSummary
+	Files          []projectFile
+	Summaries      map[string]functionSummary
+	jsServerFiles  map[string]bool
+	jsBrowserFiles map[string]bool
 	// callerEvidence memoises projectCallerToCurrentWrapperEvidence by the enclosing function it was
 	// asked about. Without it that walk runs once per FINDING, and it reads every other file in the
 	// project line by line, so a tree with many findings does files x findings x lines of regex work.
@@ -95,10 +97,16 @@ var sanitizerTokens = []string{
 }
 
 func buildProjectContext(ctx context.Context, files []sourceFile) (projectContext, error) {
+	jsRuntime, err := buildJSRuntimeContext(ctx, files, maxJSContextEdges)
+	if err != nil {
+		return projectContext{}, err
+	}
 	project := projectContext{
 		Files:          make([]projectFile, 0, len(files)),
 		Summaries:      map[string]functionSummary{},
 		callerEvidence: map[string]string{},
+		jsServerFiles:  jsRuntime.server,
+		jsBrowserFiles: jsRuntime.browser,
 	}
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
