@@ -620,6 +620,7 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 	// So is "does this file handle requests at all": a file reader in a CLI is not a request sink,
 	// whatever the variable is called.
 	requestFile := requestContextFile(lines)
+	jsServerFile := isJS && (project.jsServerFiles == nil || project.jsServerFiles[rel])
 	isPHP := phpExts[ext]
 	// A translation catalogue is text for humans keyed by identifier, so a credential-shaped rule has
 	// nothing to find there. Decided once per file rather than per line.
@@ -688,6 +689,9 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			}
 			if r.id == "ssrf-fetch-user-url" && browserFile {
 				continue // a fetch in a DOM-touching file is a browser request, not server-side SSRF
+			}
+			if r.id == "generic-ssrf-request-url" && isJS && !jsServerFile {
+				continue // a client http.get(BASE_URL) wrapper is not evidence of an inbound request
 			}
 			if requestSinkRules[r.id] && !requestFile {
 				continue // no request reaches this file, so nothing in it reflects or traverses on request data

@@ -90,6 +90,21 @@ func jsRuleMatches(r *rule, raw, code string) bool {
 	return r.re.MatchString(code) && !r.skip(code)
 }
 
+// jsRequestContextFile ignores commented examples of server request handling.
+func jsRequestContextFile(lines []string) bool {
+	var lex jsLexState
+	var code strings.Builder
+	for _, line := range lines {
+		masked := lex.codeOnly(line)
+		if len(line) <= maxLineBytes {
+			code.WriteString(masked)
+		}
+		code.WriteByte('\n')
+	}
+	text := code.String()
+	return requestContextRe.MatchString(text)
+}
+
 // browserGlobalRe marks a file that runs in the browser. A bare fetch(x) there is a client-side
 // request the page already controls, not a server-side fetch an attacker can point at internal
 // hosts, so the SSRF rule has nothing to say about it.

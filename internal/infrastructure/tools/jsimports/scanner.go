@@ -79,6 +79,36 @@ var _ ports.JSImportScanner = (*Scanner)(nil)
 // New returns a Scanner with production bounds.
 func New() *Scanner { return &Scanner{limits: defaultLimits()} }
 
+// SourceImport is one literal module load observed without filesystem resolution.
+type SourceImport struct {
+	Specifier string
+	TypeOnly  bool
+}
+
+// ObserveSourceImports reuses the scanner's lexer on retained source. complete is
+// false when module loads may be unobservable; callers must not infer absence
+// from the returned imports in that case. Symbol-use limits do not affect it.
+func ObserveSourceImports(ctx context.Context, src []byte, jsxAware bool) (imports []SourceImport, complete bool, err error) {
+	if ctx == nil {
+		return nil, false, fmt.Errorf("%w: source import observation requires a context", shared.ErrValidation)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(src) > int(defaultMaxFileBytes) || !utf8.Valid(src) {
+		return nil, false, nil
+	}
+	observed := newExtractor(src, jsxAware).run()
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	imports = make([]SourceImport, 0, len(observed.imports))
+	for _, imp := range observed.imports {
+		imports = append(imports, SourceImport{Specifier: imp.specifier, TypeOnly: imp.typeOnly})
+	}
+	return imports, len(observed.hazards) == 0, nil
+}
+
 // newWithLimits is the test seam for exercising the budget paths.
 func newWithLimits(l scannerLimits) (*Scanner, error) {
 	if err := l.validate(); err != nil {
