@@ -52,7 +52,7 @@ jobs:
       - name: Install syft (pinned, matches deploy/Dockerfile)
         run: |
           set -euo pipefail
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.57.0
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/v1.57.1/install.sh | sh -s -- -b /usr/local/bin v1.57.1
           syft version
 
       - name: Resolve the tag

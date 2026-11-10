@@ -49,8 +49,8 @@ jobs:
       - name: Install syft + grype (pinned, matches deploy/Dockerfile)
         run: |
           set -euo pipefail
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.57.0
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v0.121.2
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/v1.57.1/install.sh | sh -s -- -b /usr/local/bin v1.57.1
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/v0.121.3/install.sh | sh -s -- -b /usr/local/bin v0.121.3
           syft version && grype version
 
       - name: Build the scanner (fail if it cannot be built)

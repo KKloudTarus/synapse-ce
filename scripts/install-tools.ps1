@@ -9,14 +9,12 @@
 #
 # Usage:
 #   pwsh scripts/install-tools.ps1
-#   $env:SYFT_VERSION='v1.57.0'; $env:GRYPE_VERSION='v0.121.2'; pwsh scripts/install-tools.ps1
+#   $env:SYFT_VERSION='v1.57.1'; $env:GRYPE_VERSION='v0.121.3'; pwsh scripts/install-tools.ps1
 #   $env:BINDIR='C:\tools'; pwsh scripts/install-tools.ps1
 $ErrorActionPreference = 'Stop'
 
-# Same tags deploy/Dockerfile builds. These fetch anchore's published binaries, which carry anchore's
-# own dependency versions; the container images rebuild the same tags with a patched x/net and brotli.
-$SyftVersion  = if ($env:SYFT_VERSION)  { $env:SYFT_VERSION }  else { 'v1.57.0' }
-$GrypeVersion = if ($env:GRYPE_VERSION) { $env:GRYPE_VERSION } else { 'v0.121.2' }
+$SyftVersion  = if ($env:SYFT_VERSION)  { $env:SYFT_VERSION }  else { 'v1.57.1' }
+$GrypeVersion = if ($env:GRYPE_VERSION) { $env:GRYPE_VERSION } else { 'v0.121.3' }
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $BinDir   = if ($env:BINDIR) { $env:BINDIR } else { Join-Path $RepoRoot 'bin' }
 

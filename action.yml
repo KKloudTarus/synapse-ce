@@ -65,10 +65,7 @@ runs:
       run: |
         set -euo pipefail
 
-        # Kept at the version the release container image builds. This downloads anchore's published
-        # binary, which carries anchore's own dependency versions; the container image instead rebuilds
-        # grype from this tag with a patched golang.org/x/net and brotli.
-        GRYPE_VERSION="v0.121.2"
+        GRYPE_VERSION="v0.121.3"
         REPO="KKloudTarus/synapse-ce"
         BIN_DIR="${RUNNER_TEMP}/synapse-bin"
         mkdir -p "${BIN_DIR}"

@@ -51,29 +51,24 @@ COPY . .
 RUN CGO_ENABLED=1 go build -trimpath -o /out/synapse-ast ./cmd/synapse-ast
 
 # Pinned SCA tools are copied as standalone binaries.
-# grype/syft are rebuilt from their release tags with a patched golang.org/x/net: the published
-# anchore images still ship x/net v0.61.0 (CVE-2026-78661) and grype pins brotli v1.2.0
-# (GO-2026-6888), which fail the CI image scan.
 FROM golang:1.27.3-alpine AS grype
 RUN apk add --no-cache git
-ARG GRYPE_VERSION=v0.121.2
+ARG GRYPE_VERSION=v0.121.3
 # The commit the tag points at: a tag can move, and tool_versions must name the bytes that were built.
-ARG GRYPE_COMMIT=82d7a0ea911946b99343c672056867d372f9b319
+ARG GRYPE_COMMIT=cd1f23eb50dfb52647090158f453c7359172591f
 RUN git init -q /src \
     && cd /src && git remote add origin https://github.com/anchore/grype \
     && git fetch -q --depth 1 origin "$GRYPE_COMMIT" && git checkout -q FETCH_HEAD \
-    && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
     && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GRYPE_VERSION#v}" -o /grype ./cmd/grype
 
 FROM golang:1.27.3-alpine AS syft
 RUN apk add --no-cache git
-ARG SYFT_VERSION=v1.57.0
+ARG SYFT_VERSION=v1.57.1
 # The commit the tag points at: a tag can move, and tool_versions must name the bytes that were built.
-ARG SYFT_COMMIT=30f4bce762f31136e055f2965185f12eb95fbe47
+ARG SYFT_COMMIT=a0c0d3890a9d79421c403e8fcadec50a2e55bf21
 RUN git init -q /src \
     && cd /src && git remote add origin https://github.com/anchore/syft \
     && git fetch -q --depth 1 origin "$SYFT_COMMIT" && git checkout -q FETCH_HEAD \
-    && go get golang.org/x/net@v0.62.0 github.com/andybalholm/brotli@v1.2.7 && go mod tidy \
     && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${SYFT_VERSION#v}" -o /syft ./cmd/syft
 
 # ---------------------------------------------------------------------------

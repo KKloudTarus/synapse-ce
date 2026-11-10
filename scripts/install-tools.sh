@@ -15,10 +15,8 @@
 set -euo pipefail
 
 # ---- pinned versions (override via env) ----
-# Same tags deploy/Dockerfile builds. These fetch anchore's published binaries, which carry anchore's
-# own dependency versions; the container images rebuild the same tags with a patched x/net and brotli.
-SYFT_VERSION="${SYFT_VERSION:-v1.57.0}"
-GRYPE_VERSION="${GRYPE_VERSION:-v0.121.2}"
+SYFT_VERSION="${SYFT_VERSION:-v1.57.1}"
+GRYPE_VERSION="${GRYPE_VERSION:-v0.121.3}"
 SUBFINDER_VERSION="${SUBFINDER_VERSION:-v2.6.6}"
 HTTPX_VERSION="${HTTPX_VERSION:-v1.6.9}"
 NAABU_VERSION="${NAABU_VERSION:-v2.3.3}"
