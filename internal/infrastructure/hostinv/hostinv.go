@@ -12,7 +12,9 @@ package hostinv
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -99,6 +101,26 @@ func addPackageCoverage(root string, inv *hostinventory.HostInventory) {
 			inv.AddIssue(hostinventory.CoverageUnreadableDB, rel+": "+oerr.Error())
 		} else {
 			_ = fh.Close()
+		}
+	}
+	for _, rel := range ospkg.SupportedDBDirectories() {
+		p := filepath.Join(root, rel)
+		info, err := os.Lstat(p)
+		if err != nil {
+			continue
+		}
+		found = true
+		if !info.IsDir() {
+			inv.AddIssue(hostinventory.CoverageUnreadableDB, rel+": not a regular directory")
+			continue
+		}
+		fh, err := os.Open(p)
+		if err == nil {
+			_, err = fh.ReadDir(1)
+			_ = fh.Close()
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			inv.AddIssue(hostinventory.CoverageUnreadableDB, rel+": directory is not readable")
 		}
 	}
 	if !found {

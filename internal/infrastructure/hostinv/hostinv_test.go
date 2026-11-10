@@ -97,3 +97,26 @@ func TestCollectNoPackageDBIsIncomplete(t *testing.T) {
 		t.Fatalf("expected a no-package-db coverage issue, got %v", inv.Coverage)
 	}
 }
+
+func TestDpkgDirectoryPackageCoverage(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "var/lib/dpkg/status.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "base-files"), []byte("Package: base-files\nVersion: 12.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := Collect(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Packages) != 1 || inv.Packages[0].Name != "base-files" {
+		t.Fatalf("directory DB not cataloged: %+v", inv.Packages)
+	}
+	for _, issue := range inv.Coverage {
+		if issue.Kind == hostinventory.CoverageNoPackageDB || issue.Kind == hostinventory.CoverageUnreadableDB {
+			t.Fatalf("readable directory DB reported as missing or unreadable: %+v", issue)
+		}
+	}
+}

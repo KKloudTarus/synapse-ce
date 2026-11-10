@@ -1,5 +1,5 @@
 // Package ospkg catalogs installed OS packages from a materialized image root filesystem: Debian/Ubuntu dpkg
-// (/var/lib/dpkg/status), Alpine apk (/lib/apk/db/installed), and RHEL-family rpm (/var/lib/rpm/rpmdb.sqlite),
+// (/var/lib/dpkg/status and status.d), Alpine apk (/lib/apk/db/installed), and RHEL-family rpm (/var/lib/rpm/rpmdb.sqlite),
 // with the distro release read from /etc/os-release. It is the OWNED (detection-independent) alternative to relying on the SBOM generator for
 // OS packages, and emits components tagged with a Syft-style "distro" qualifier so the existing advisory
 // matcher keys them to the right OS ecosystem. It only READS the rootfs (already assembled within the
@@ -35,10 +35,11 @@ const (
 // DB paths (relative to a rootfs) this cataloger reads. Exported so a coverage probe (the fleet host
 // collector) can enumerate exactly what is read without re-hardcoding the list and silently drifting.
 const (
-	dpkgDBPath = "var/lib/dpkg/status"
-	apkDBPath  = "lib/apk/db/installed"
-	rpmDBPath  = "var/lib/rpm/rpmdb.sqlite" // RHEL9+/Fedora/UBI9 sqlite backend
-	rpmBDBPath = "var/lib/rpm/Packages"     // RHEL<=8/CentOS/UBI8/Amazon Linux 2 BerkeleyDB backend
+	dpkgDBPath    = "var/lib/dpkg/status"
+	dpkgStatusDir = "var/lib/dpkg/status.d"
+	apkDBPath     = "lib/apk/db/installed"
+	rpmDBPath     = "var/lib/rpm/rpmdb.sqlite" // RHEL9+/Fedora/UBI9 sqlite backend
+	rpmBDBPath    = "var/lib/rpm/Packages"     // RHEL<=8/CentOS/UBI8/Amazon Linux 2 BerkeleyDB backend
 	// Fedora and RHEL9+ also relocate the rpmdb under /usr/lib/sysimage/rpm and symlink /var/lib/rpm to it; a
 	// live host resolves the symlink through the primary path, but an offline/extracted rootfs may carry only
 	// the relocated file, so the sqlite backend probes both locations.
@@ -56,6 +57,9 @@ const (
 func SupportedDBPaths() []string {
 	return []string{dpkgDBPath, apkDBPath, rpmDBPath, rpmSqliteSysimagePath, rpmBDBPath, rpmNDBPath, rpmNDBSysimagePath}
 }
+
+// SupportedDBDirectories returns package databases stored as directories of control files.
+func SupportedDBDirectories() []string { return []string{dpkgStatusDir} }
 
 // debianFamilyIDs are the dpkg os-release IDs the advisory matcher can key (osDistroEcosystem handles Debian +
 // Ubuntu); only these get a distro tag, so any other/garbled/mismatched ID yields an unresolved result.
@@ -92,6 +96,28 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	}
 	if len(comps) > 0 {
 		res.Components = append(res.Components, comps...)
+		if debTag == "" {
+			res.DistroResolved = false
+		}
+	}
+	fragments, err := parseDpkgFragments(ctx, rootfsDir, debNS, debTag, maxPackages, maxDBBytes)
+	if err != nil {
+		return res, err
+	}
+	if len(fragments) > 0 {
+		seenDeb := make(map[string]bool, len(comps)+len(fragments))
+		for _, c := range comps {
+			seenDeb[c.PURL] = true
+		}
+		for _, c := range fragments {
+			if !seenDeb[c.PURL] {
+				if len(seenDeb) >= maxPackages {
+					return res, fmt.Errorf("dpkg inventory exceeds the %d-package limit", maxPackages)
+				}
+				res.Components = append(res.Components, c)
+				seenDeb[c.PURL] = true
+			}
+		}
 		if debTag == "" {
 			res.DistroResolved = false
 		}
@@ -209,6 +235,9 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 				res.UnsupportedDistro = id
 			}
 		}
+	}
+	if len(res.Components) == 0 && id != "" {
+		res.InventoryWarning = fmt.Sprintf("OS packages were not inventoried for distro %s: no supported package database yielded installed packages; OS vulnerability coverage is incomplete", id)
 	}
 	return res, nil
 }
@@ -367,8 +396,16 @@ func parseOSDB(ctx context.Context, path string, fieldKeys map[string]bool, extr
 		return nil, nil
 	}
 	defer func() { _ = f.Close() }()
+	out, err := parseOSDBReader(ctx, f, path, fieldKeys, extract, typ, namespace, tag)
+	if err != nil && ctx.Err() == nil {
+		// Preserve the existing best-effort behavior for monolithic databases.
+		return nil, nil
+	}
+	return out, err
+}
 
-	sc := bufio.NewScanner(io.LimitReader(f, maxDBBytes))
+func parseOSDBReader(ctx context.Context, reader io.Reader, path string, fieldKeys map[string]bool, extract func(map[string]string) (string, string, string, string, bool), typ, namespace, tag string) ([]sbom.Component, error) {
+	sc := bufio.NewScanner(io.LimitReader(reader, maxDBBytes))
 	sc.Buffer(make([]byte, 0, 64*1024), maxDBLine)
 	var out []sbom.Component
 	cur := map[string]string{}
@@ -415,7 +452,7 @@ func parseOSDB(ctx context.Context, path string, fieldKeys map[string]bool, extr
 	flush()
 	// A scanner error (e.g. a line over maxDBLine) abandons the DB rather than emitting a partial/odd set.
 	if sc.Err() != nil {
-		return nil, nil
+		return nil, sc.Err()
 	}
 	return out, nil
 }
