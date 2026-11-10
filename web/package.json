@@ -70,6 +70,11 @@
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
+  "pnpm": {
+    "overrides": {
+      "zod": ">=4.6.6 <5"
+    }
+  },
   "msw": {
     "workerDirectory": [
       "public"

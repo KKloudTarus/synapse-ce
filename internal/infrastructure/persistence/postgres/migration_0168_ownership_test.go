@@ -18,6 +18,11 @@ import (
 
 func ownershipTestDatabase(t *testing.T, base int64, before func(*sql.DB)) (*pgxpool.Pool, *sql.DB) {
 	t.Helper()
+	return ownershipMigrationDatabase(t, base, 0, before)
+}
+
+func ownershipMigrationDatabase(t *testing.T, base, ceiling int64, before func(*sql.DB)) (*pgxpool.Pool, *sql.DB) {
+	t.Helper()
 	isolated := newIsolatedMigrationDB(t, 164, base)
 	if before != nil {
 		before(isolated.db)
@@ -33,9 +38,14 @@ func ownershipTestDatabase(t *testing.T, base int64, before func(*sql.DB)) (*pgx
 	u.Path = "/" + database
 	u.RawPath = ""
 	u.User = url.UserPassword(role, "migration-test-password")
-	// Exercise the real startup entry point and its complete embedded migration set.
-	if err := Migrate(context.Background(), u.String()); err != nil {
-		t.Fatalf("startup migrate: %v", err)
+	if ceiling > 0 {
+		if err := goose.UpTo(isolated.db, ".", ceiling); err != nil {
+			t.Fatalf("migrate to %d: %v", ceiling, err)
+		}
+	} else {
+		if err := Migrate(context.Background(), u.String()); err != nil {
+			t.Fatalf("startup migrate: %v", err)
+		}
 	}
 	admin, err := Connect(context.Background(), os.Getenv("SYNAPSE_TEST_DB_DSN"))
 	if err != nil {
@@ -110,38 +120,51 @@ func TestMigration0168OwnershipFresh(t *testing.T) {
 }
 
 func TestMigration0168OwnershipUpgradePreservesLegacy(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 163, func(db *sql.DB) {
-		if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('legacy-bootstrap','Admin','admin','ownership-upgrade-key','')`); err != nil {
-			t.Fatal(err)
-		}
-		withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
-			if _, err := tx.Exec(`INSERT INTO engagements(id,tenant_id,name) VALUES('upgrade-e','default','Legacy'); INSERT INTO findings(id,tenant_id,engagement_id,title,assignee) VALUES('upgrade-f','default','upgrade-e','Legacy finding','Old free-text owner')`); err != nil {
-				t.Fatal(err)
+	for _, target := range []struct {
+		name    string
+		version int64
+	}{
+		{"startup", 0},
+		{"rollback", 168},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			_, db := ownershipMigrationDatabase(t, 163, target.version, func(db *sql.DB) {
+				if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('legacy-bootstrap','Admin','admin','ownership-upgrade-key','')`); err != nil {
+					t.Fatal(err)
+				}
+				withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
+					if _, err := tx.Exec(`INSERT INTO engagements(id,tenant_id,name) VALUES('upgrade-e','default','Legacy'); INSERT INTO findings(id,tenant_id,engagement_id,title,assignee) VALUES('upgrade-f','default','upgrade-e','Legacy finding','Old free-text owner')`); err != nil {
+						t.Fatal(err)
+					}
+				})
+			})
+			var raw, normalized string
+			if err := db.QueryRow(`SELECT tenant_id,ownership_tenant_id FROM users WHERE id='legacy-bootstrap'`).Scan(&raw, &normalized); err != nil || raw != "" || normalized != "default" {
+				t.Fatalf("legacy user changed: %q %q %v", raw, normalized, err)
+			}
+			withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
+				var assignee string
+				var count int
+				if err := tx.QueryRow(`SELECT assignee FROM findings WHERE id='upgrade-f'`).Scan(&assignee); err != nil || assignee != "Old free-text owner" {
+					t.Fatalf("legacy assignee=%s %v", assignee, err)
+				}
+				if err := tx.QueryRow(`SELECT count(*) FROM ownership_assignments`).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("migration reassigned findings: %d %v", count, err)
+				}
+				if _, err := tx.Exec(`INSERT INTO ownership_teams(tenant_id,id,slug,name,revision,created_at,updated_at) VALUES('default','default-team','default-team','Default',1,now(),now()); INSERT INTO ownership_memberships(tenant_id,team_id,user_id,created_at) VALUES('default','default-team','legacy-bootstrap',now())`); err != nil {
+					t.Fatalf("default tenant FK: %v", err)
+				}
+			})
+			if target.version == 0 {
+				return
+			}
+			if err := goose.DownTo(db, ".", 163); err != nil {
+				t.Fatalf("down: %v", err)
+			}
+			requireMigrationTable(t, db, "ownership_teams", false)
+			if err := db.QueryRow(`SELECT tenant_id FROM users WHERE id='legacy-bootstrap'`).Scan(&raw); err != nil || raw != "" {
+				t.Fatalf("rollback changed user: %q %v", raw, err)
 			}
 		})
-	})
-	var raw, normalized string
-	if err := db.QueryRow(`SELECT tenant_id,ownership_tenant_id FROM users WHERE id='legacy-bootstrap'`).Scan(&raw, &normalized); err != nil || raw != "" || normalized != "default" {
-		t.Fatalf("legacy user changed: %q %q %v", raw, normalized, err)
-	}
-	withMigrationTenant(t, db, "default", func(tx *sql.Tx) {
-		var assignee string
-		var count int
-		if err := tx.QueryRow(`SELECT assignee FROM findings WHERE id='upgrade-f'`).Scan(&assignee); err != nil || assignee != "Old free-text owner" {
-			t.Fatalf("legacy assignee=%s %v", assignee, err)
-		}
-		if err := tx.QueryRow(`SELECT count(*) FROM ownership_assignments`).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("migration reassigned findings: %d %v", count, err)
-		}
-		if _, err := tx.Exec(`INSERT INTO ownership_teams(tenant_id,id,slug,name,revision,created_at,updated_at) VALUES('default','default-team','default-team','Default',1,now(),now()); INSERT INTO ownership_memberships(tenant_id,team_id,user_id,created_at) VALUES('default','default-team','legacy-bootstrap',now())`); err != nil {
-			t.Fatalf("default tenant FK: %v", err)
-		}
-	})
-	if err := goose.DownTo(db, ".", 163); err != nil {
-		t.Fatalf("down: %v", err)
-	}
-	requireMigrationTable(t, db, "ownership_teams", false)
-	if err := db.QueryRow(`SELECT tenant_id FROM users WHERE id='legacy-bootstrap'`).Scan(&raw); err != nil || raw != "" {
-		t.Fatalf("rollback changed user: %q %v", raw, err)
 	}
 }

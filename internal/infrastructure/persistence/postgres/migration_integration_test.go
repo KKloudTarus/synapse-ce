@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -19,6 +20,25 @@ import (
 type isolatedMigrationDB struct {
 	db  *sql.DB
 	dsn string
+}
+
+// Legacy fixtures retain the configured administrator's historical seeding privileges.
+func isolatedMigrationAt(t *testing.T, version int64) string {
+	t.Helper()
+	dsn := isolatedMigrationDSN(t, testDSN(t), strconv.FormatInt(version, 10))
+	db, err := goose.OpenDBWithDriver("pgx", dsnForMigrate(dsn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", version); err != nil {
+		t.Fatalf("migrate isolated database to %04d: %v", version, err)
+	}
+	return dsn
 }
 
 // newIsolatedMigrationDB creates a database and non-superuser owner dedicated to one migration test.

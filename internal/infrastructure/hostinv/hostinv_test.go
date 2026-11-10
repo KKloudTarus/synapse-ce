@@ -97,3 +97,52 @@ func TestCollectNoPackageDBIsIncomplete(t *testing.T) {
 		t.Fatalf("expected a no-package-db coverage issue, got %v", inv.Coverage)
 	}
 }
+
+func TestDpkgDirectoryPackageCoverage(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "var/lib/dpkg/status.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "base-files"), []byte("Package: base-files\nVersion: 12.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := Collect(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Packages) != 1 || inv.Packages[0].Name != "base-files" {
+		t.Fatalf("directory DB not cataloged: %+v", inv.Packages)
+	}
+	for _, issue := range inv.Coverage {
+		if issue.Kind == hostinventory.CoverageNoPackageDB || issue.Kind == hostinventory.CoverageUnreadableDB {
+			t.Fatalf("readable directory DB reported as missing or unreadable: %+v", issue)
+		}
+	}
+}
+
+func TestDpkgDirectoryRejectsRegularFile(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "var/lib/dpkg/status.d")
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, []byte("Package: base-files\nVersion: 12.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Collect(context.Background(), root); err == nil {
+		t.Fatal("catalog accepted a regular file as a directory database")
+	}
+	var inv hostinventory.HostInventory
+	addPackageCoverage(root, &inv)
+	var unreadable bool
+	for _, issue := range inv.Coverage {
+		unreadable = unreadable || issue.Kind == hostinventory.CoverageUnreadableDB
+		if issue.Kind == hostinventory.CoverageNoPackageDB {
+			t.Fatalf("present malformed directory DB reported as missing: %+v", issue)
+		}
+	}
+	if !unreadable || !inv.Degraded() {
+		t.Fatalf("malformed directory DB must report degraded coverage: %+v", inv)
+	}
+}

@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -16,15 +15,8 @@ import (
 // TestMigration0185DisablesRulesThatCanNeverMatch seeds rules at version 184, applies 0185 and
 // checks that only engagement-scoped rules for event types without an engagement were disabled.
 func TestMigration0185DisablesRulesThatCanNeverMatch(t *testing.T) {
-	sharedDSN := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if sharedDSN == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
-	dsn := isolatedMigrationDSN(t, sharedDSN, "0185")
+	dsn := isolatedMigrationAt(t, 185)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
