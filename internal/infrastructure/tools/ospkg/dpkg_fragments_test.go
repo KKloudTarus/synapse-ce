@@ -97,6 +97,9 @@ func TestDpkgFragmentBoundsAndCancellation(t *testing.T) {
 		"var/lib/dpkg/status.d/a": "Package: alpha\nVersion: 1\n",
 		"var/lib/dpkg/status.d/b": "Package: beta\nVersion: 2\n",
 	})
+	if components, err := parseDpkgFragments(context.Background(), filepath.Join(root, "missing"), "debian", "debian-12", 2, maxDBBytes); err == nil || len(components) != 0 {
+		t.Fatalf("missing root must fail without emitting packages: components=%+v err=%v", components, err)
+	}
 	for _, tc := range []struct {
 		name           string
 		entries, bytes int

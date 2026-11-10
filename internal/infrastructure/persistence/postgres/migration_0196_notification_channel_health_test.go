@@ -18,86 +18,99 @@ import (
 const migration0196Base = 194
 
 func TestMigration0196NotificationChannelHealthSchema(t *testing.T) {
-	_, db := ownershipTestDatabase(t, migration0196Base, nil)
-	requireMigrationTable(t, db, "notification_channel_health_events", true)
-	requireMigrationRLS(t, db, "notification_channel_health_events")
-	requireMigrationIndexes(t, db, "notification_channel_health_events_channel")
-	if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('t-schema','Schema') ON CONFLICT DO NOTHING`); err != nil {
-		t.Fatal(err)
-	}
-	// RLS is forced even for the owner, so each statement runs in its own tenant-bound transaction.
-	exec := func(stmt string) error {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		if _, err := tx.Exec(`SELECT set_config('app.current_tenant','t-schema',true)`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(stmt); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
-	if err := exec(`INSERT INTO notification_channels(tenant_id,id,name,channel_type,created_at,updated_at) VALUES('t-schema','c1','Hook','webhook',now(),now())`); err != nil {
-		t.Fatal(err)
-	}
-	var failures int
-	var code string
-	var pausedAt *time.Time
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(`SELECT set_config('app.current_tenant','t-schema',true)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.QueryRow(`SELECT consecutive_permanent_failures,last_failure_code,paused_at FROM notification_channels WHERE id='c1'`).Scan(&failures, &code, &pausedAt); err != nil || failures != 0 || code != "" || pausedAt != nil {
-		t.Fatalf("existing channels must start active with no failures: %d %q %v %v", failures, code, pausedAt, err)
-	}
-	_ = tx.Rollback()
-	// Codes are bounded identifiers, so a URL or raw error text cannot be stored as health.
-	for name, stmt := range map[string]string{
-		"URL as failure code":        `UPDATE notification_channels SET last_failure_code='https://hooks.example/x?token=1' WHERE id='c1'`,
-		"error text as pause reason": `UPDATE notification_channels SET paused_at=now(),paused_reason='Post "https://x": dial tcp' WHERE id='c1'`,
-		"pause without reason":       `UPDATE notification_channels SET paused_at=now() WHERE id='c1'`,
-		"reason without pause":       `UPDATE notification_channels SET paused_reason='consecutive_permanent_failures' WHERE id='c1'`,
-		"negative count":             `UPDATE notification_channels SET consecutive_permanent_failures=-1 WHERE id='c1'`,
-		"pause without its attempt":  `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,reason,actor,occurred_at) VALUES('t-schema','h0','c1','paused','consecutive_permanent_failures','system',now())`,
-		"unknown action":             `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,actor,occurred_at) VALUES('t-schema','h0','c1','deleted','system',now())`,
-		"URL in history code":        `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,failure_code,actor,occurred_at) VALUES('t-schema','h0','c1','resumed','https://x/y','admin',now())`,
-		"history for no channel":     `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,actor,occurred_at) VALUES('t-schema','h0','missing','resumed','admin',now())`,
+	for _, target := range []struct {
+		name    string
+		version int64
+	}{
+		{"startup", 0},
+		{"rollback", 196},
 	} {
-		if err := exec(stmt); err == nil {
-			t.Errorf("%s: the schema accepted it", name)
-		}
-	}
-	if err := exec(`UPDATE notification_channels SET paused_at=now(),paused_reason='consecutive_permanent_failures',consecutive_permanent_failures=5,last_failure_code='destination_blocked' WHERE id='c1'`); err != nil {
-		t.Fatalf("valid pause: %v", err)
-	}
-	if err := exec(`INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,reason,failure_code,failures,delivery_id,attempt_id,actor,occurred_at)
-		VALUES('t-schema','h1','c1','paused','consecutive_permanent_failures','destination_blocked',5,'d1','a1','system',now())`); err != nil {
-		t.Fatalf("valid pause row: %v", err)
-	}
-	// History is append-only even for the owner.
-	if err := exec(`UPDATE notification_channel_health_events SET actor='someone' WHERE id='h1'`); err == nil {
-		t.Error("health history row was updated")
-	}
-	if err := exec(`DELETE FROM notification_channel_health_events WHERE id='h1'`); err == nil {
-		t.Error("health history row was deleted")
-	}
-	// Downgrading the runtime guards requires a disabled, drained webhook.
-	if err := exec(`UPDATE notification_channels SET enabled=false WHERE id='c1'`); err != nil {
-		t.Fatalf("disable fixture webhook before downgrade: %v", err)
-	}
-	if err := goose.DownTo(db, ".", migration0196Base); err != nil {
-		t.Fatalf("migrate down: %v", err)
-	}
-	requireMigrationTable(t, db, "notification_channel_health_events", false)
-	var columns int
-	if err := db.QueryRow(`SELECT count(*) FROM information_schema.columns WHERE table_name='notification_channels' AND column_name IN ('consecutive_permanent_failures','last_failure_code','last_failure_at','paused_at','paused_reason')`).Scan(&columns); err != nil || columns != 0 {
-		t.Fatalf("down migration left %d health columns: %v", columns, err)
+		t.Run(target.name, func(t *testing.T) {
+			_, db := ownershipMigrationDatabase(t, migration0196Base, target.version, nil)
+			requireMigrationTable(t, db, "notification_channel_health_events", true)
+			requireMigrationRLS(t, db, "notification_channel_health_events")
+			requireMigrationIndexes(t, db, "notification_channel_health_events_channel")
+			if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('t-schema','Schema') ON CONFLICT DO NOTHING`); err != nil {
+				t.Fatal(err)
+			}
+			// RLS is forced even for the owner, so each statement runs in its own tenant-bound transaction.
+			exec := func(stmt string) error {
+				tx, err := db.Begin()
+				if err != nil {
+					return err
+				}
+				defer func() { _ = tx.Rollback() }()
+				if _, err := tx.Exec(`SELECT set_config('app.current_tenant','t-schema',true)`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(stmt); err != nil {
+					return err
+				}
+				return tx.Commit()
+			}
+			if err := exec(`INSERT INTO notification_channels(tenant_id,id,name,channel_type,created_at,updated_at) VALUES('t-schema','c1','Hook','webhook',now(),now())`); err != nil {
+				t.Fatal(err)
+			}
+			var failures int
+			var code string
+			var pausedAt *time.Time
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(`SELECT set_config('app.current_tenant','t-schema',true)`); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.QueryRow(`SELECT consecutive_permanent_failures,last_failure_code,paused_at FROM notification_channels WHERE id='c1'`).Scan(&failures, &code, &pausedAt); err != nil || failures != 0 || code != "" || pausedAt != nil {
+				t.Fatalf("existing channels must start active with no failures: %d %q %v %v", failures, code, pausedAt, err)
+			}
+			_ = tx.Rollback()
+			// Codes are bounded identifiers, so a URL or raw error text cannot be stored as health.
+			for name, stmt := range map[string]string{
+				"URL as failure code":        `UPDATE notification_channels SET last_failure_code='https://hooks.example/x?token=1' WHERE id='c1'`,
+				"error text as pause reason": `UPDATE notification_channels SET paused_at=now(),paused_reason='Post "https://x": dial tcp' WHERE id='c1'`,
+				"pause without reason":       `UPDATE notification_channels SET paused_at=now() WHERE id='c1'`,
+				"reason without pause":       `UPDATE notification_channels SET paused_reason='consecutive_permanent_failures' WHERE id='c1'`,
+				"negative count":             `UPDATE notification_channels SET consecutive_permanent_failures=-1 WHERE id='c1'`,
+				"pause without its attempt":  `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,reason,actor,occurred_at) VALUES('t-schema','h0','c1','paused','consecutive_permanent_failures','system',now())`,
+				"unknown action":             `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,actor,occurred_at) VALUES('t-schema','h0','c1','deleted','system',now())`,
+				"URL in history code":        `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,failure_code,actor,occurred_at) VALUES('t-schema','h0','c1','resumed','https://x/y','admin',now())`,
+				"history for no channel":     `INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,actor,occurred_at) VALUES('t-schema','h0','missing','resumed','admin',now())`,
+			} {
+				if err := exec(stmt); err == nil {
+					t.Errorf("%s: the schema accepted it", name)
+				}
+			}
+			if err := exec(`UPDATE notification_channels SET paused_at=now(),paused_reason='consecutive_permanent_failures',consecutive_permanent_failures=5,last_failure_code='destination_blocked' WHERE id='c1'`); err != nil {
+				t.Fatalf("valid pause: %v", err)
+			}
+			if err := exec(`INSERT INTO notification_channel_health_events(tenant_id,id,channel_id,action,reason,failure_code,failures,delivery_id,attempt_id,actor,occurred_at)
+				VALUES('t-schema','h1','c1','paused','consecutive_permanent_failures','destination_blocked',5,'d1','a1','system',now())`); err != nil {
+				t.Fatalf("valid pause row: %v", err)
+			}
+			// History is append-only even for the owner.
+			if err := exec(`UPDATE notification_channel_health_events SET actor='someone' WHERE id='h1'`); err == nil {
+				t.Error("health history row was updated")
+			}
+			if err := exec(`DELETE FROM notification_channel_health_events WHERE id='h1'`); err == nil {
+				t.Error("health history row was deleted")
+			}
+			// Downgrading the runtime guards requires a disabled, drained webhook.
+			if err := exec(`UPDATE notification_channels SET enabled=false WHERE id='c1'`); err != nil {
+				t.Fatalf("disable fixture webhook before downgrade: %v", err)
+			}
+			if target.version == 0 {
+				return
+			}
+			if err := goose.DownTo(db, ".", migration0196Base); err != nil {
+				t.Fatalf("migrate down: %v", err)
+			}
+			requireMigrationTable(t, db, "notification_channel_health_events", false)
+			var columns int
+			if err := db.QueryRow(`SELECT count(*) FROM information_schema.columns WHERE table_name='notification_channels' AND column_name IN ('consecutive_permanent_failures','last_failure_code','last_failure_at','paused_at','paused_reason')`).Scan(&columns); err != nil || columns != 0 {
+				t.Fatalf("down migration left %d health columns: %v", columns, err)
+			}
+		})
 	}
 }
 

@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -20,15 +19,8 @@ const migration0190Tenant = "t-migration-0190"
 // defaults, that well-formed new event and channel types are accepted and malformed ones refused,
 // and that the migration rolls back and forward cleanly.
 func TestMigration0190OpensTheNotificationSchema(t *testing.T) {
-	sharedDSN := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if sharedDSN == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
-	dsn := isolatedMigrationDSN(t, sharedDSN, "0190")
+	dsn := isolatedMigrationAt(t, 190)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	db := openLockedGooseDB(t, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)

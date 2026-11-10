@@ -14,27 +14,40 @@ import (
 )
 
 func TestMigration0191TenantSettingsSchema(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 186, nil)
-	requireMigrationTable(t, db, "tenant_settings", true)
-	requireMigrationRLS(t, db, "tenant_settings")
-	if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ('t-schema', 'Schema') ON CONFLICT DO NOTHING`); err != nil {
-		t.Fatal(err)
-	}
-	for _, bad := range []struct{ name, locale, zone string }{
-		{"free-text locale", "fr", "UTC"},
-		{"empty zone", "en", ""},
-		{"server-local zone", "en", "Local"},
-		{"zone with a path traversal", "en", "../etc/passwd"},
+	for _, target := range []struct {
+		name    string
+		version int64
+	}{
+		{"startup", 0},
+		{"rollback", 191},
 	} {
-		if _, err := db.Exec(`INSERT INTO tenant_settings(tenant_id, default_locale, time_zone, revision, updated_at, updated_by)
-			VALUES ('t-schema', $1, $2, 1, now(), 'admin')`, bad.locale, bad.zone); err == nil {
-			t.Errorf("%s: the CHECK accepted locale %q zone %q", bad.name, bad.locale, bad.zone)
-		}
+		t.Run(target.name, func(t *testing.T) {
+			_, db := ownershipMigrationDatabase(t, 186, target.version, nil)
+			requireMigrationTable(t, db, "tenant_settings", true)
+			requireMigrationRLS(t, db, "tenant_settings")
+			if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ('t-schema', 'Schema') ON CONFLICT DO NOTHING`); err != nil {
+				t.Fatal(err)
+			}
+			for _, bad := range []struct{ name, locale, zone string }{
+				{"free-text locale", "fr", "UTC"},
+				{"empty zone", "en", ""},
+				{"server-local zone", "en", "Local"},
+				{"zone with a path traversal", "en", "../etc/passwd"},
+			} {
+				if _, err := db.Exec(`INSERT INTO tenant_settings(tenant_id, default_locale, time_zone, revision, updated_at, updated_by)
+					VALUES ('t-schema', $1, $2, 1, now(), 'admin')`, bad.locale, bad.zone); err == nil {
+					t.Errorf("%s: the CHECK accepted locale %q zone %q", bad.name, bad.locale, bad.zone)
+				}
+			}
+			if target.version == 0 {
+				return
+			}
+			if err := goose.DownTo(db, ".", 186); err != nil {
+				t.Fatalf("migrate down: %v", err)
+			}
+			requireMigrationTable(t, db, "tenant_settings", false)
+		})
 	}
-	if err := goose.DownTo(db, ".", 186); err != nil {
-		t.Fatalf("migrate down: %v", err)
-	}
-	requireMigrationTable(t, db, "tenant_settings", false)
 }
 
 // TestTenantSettingsStoreIsTenantIsolated is the hostile case: under the runtime role, which does

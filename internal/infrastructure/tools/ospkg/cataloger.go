@@ -38,6 +38,7 @@ const (
 	dpkgDBPath    = "var/lib/dpkg/status"
 	dpkgStatusDir = "var/lib/dpkg/status.d"
 	apkDBPath     = "lib/apk/db/installed"
+	apkUsrDBPath  = "usr/lib/apk/db/installed"
 	rpmDBPath     = "var/lib/rpm/rpmdb.sqlite" // RHEL9+/Fedora/UBI9 sqlite backend
 	rpmBDBPath    = "var/lib/rpm/Packages"     // RHEL<=8/CentOS/UBI8/Amazon Linux 2 BerkeleyDB backend
 	// Fedora and RHEL9+ also relocate the rpmdb under /usr/lib/sysimage/rpm and symlink /var/lib/rpm to it; a
@@ -55,7 +56,7 @@ const (
 // coverage probe never claims a DB the cataloger cannot read. All three rpm backends are covered: sqlite
 // (rpmDBPath), BerkeleyDB (rpmBDBPath), and ndb (rpmNDBPath and its relocated openSUSE location).
 func SupportedDBPaths() []string {
-	return []string{dpkgDBPath, apkDBPath, rpmDBPath, rpmSqliteSysimagePath, rpmBDBPath, rpmNDBPath, rpmNDBSysimagePath}
+	return []string{dpkgDBPath, apkDBPath, apkUsrDBPath, rpmDBPath, rpmSqliteSysimagePath, rpmBDBPath, rpmNDBPath, rpmNDBSysimagePath}
 }
 
 // SupportedDBDirectories returns package databases stored as directories of control files.
@@ -134,14 +135,18 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	case "wolfi", "chainguard":
 		apkNS, apkTag = id, id // rolling: the family name is the whole distro key, with no release version
 	}
-	comps, err = parseOSDB(ctx, filepath.Join(rootfsDir, apkDBPath), apkFieldKeys, apkExtract, "apk", apkNS, apkTag)
-	if err != nil {
-		return ports.OSPackageResult{}, err
-	}
-	if len(comps) > 0 {
-		res.Components = append(res.Components, comps...)
-		if apkTag == "" {
-			res.DistroResolved = false
+	// Extraction omits symlinks, so usr-merged images need their physical DB path.
+	for _, rel := range []string{apkDBPath, apkUsrDBPath} {
+		comps, err = parseOSDB(ctx, filepath.Join(rootfsDir, rel), apkFieldKeys, apkExtract, "apk", apkNS, apkTag)
+		if err != nil {
+			return ports.OSPackageResult{}, err
+		}
+		if len(comps) > 0 {
+			res.Components = append(res.Components, comps...)
+			if apkTag == "" {
+				res.DistroResolved = false
+			}
+			break
 		}
 	}
 
