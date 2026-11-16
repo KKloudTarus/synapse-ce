@@ -224,6 +224,49 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 		t.Fatalf("response attempt deadline trigger count=%d, want 1", triggerCount)
 	}
 
+	if err := goose.UpTo(db, ".", 141); err != nil {
+		t.Fatalf("migrate consolidated response schema: %v", err)
+	}
+	if err := goose.DownTo(db, ".", 137); err != nil {
+		t.Fatalf("roll back consolidated migrations to 0137: %v", err)
+	}
+	for _, table := range []string{
+		"response_halt_fences", "response_attempts", "response_audit_intents", "response_halt_dispatches",
+		"response_verification_observations", "response_observer_bindings", "correlation_checkpoints",
+		"correlation_assignments", "incident_response_links",
+	} {
+		var exists bool
+		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, table).Scan(&exists); err != nil {
+			t.Fatalf("inspect rolled-back table %s: %v", table, err)
+		}
+		if exists {
+			t.Fatalf("rollback through 0138-0141 retained table %s", table)
+		}
+	}
+	for _, column := range []string{"reversibility_class", "authorization_target", "target_fingerprint", "submitted_by", "reversal_requested_by"} {
+		var exists bool
+		if err := db.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema='public' AND table_name='response_actions' AND column_name=$1
+		)`, column).Scan(&exists); err != nil {
+			t.Fatalf("inspect rolled-back response action column %s: %v", column, err)
+		}
+		if exists {
+			t.Fatalf("rollback through 0138 retained response_actions.%s", column)
+		}
+	}
+	for _, column := range []string{"source_agent_id", "source_agent_session_id"} {
+		var exists bool
+		if err := db.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema='public' AND table_name='endpoint_timeline' AND column_name=$1
+		)`, column).Scan(&exists); err != nil {
+			t.Fatalf("inspect rolled-back endpoint timeline column %s: %v", column, err)
+		}
+		if exists {
+			t.Fatalf("rollback through 0141 retained endpoint_timeline.%s", column)
+		}
+	}
 	if err := goose.Up(db, "."); err != nil {
 		t.Fatalf("migrate consolidated database to head: %v", err)
 	}
@@ -280,46 +323,5 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 	}
 	if assignmentMutationTriggers != 2 {
 		t.Fatalf("correlation assignment mutation trigger count=%d, want 2", assignmentMutationTriggers)
-	}
-
-	if err := goose.DownTo(db, ".", 137); err != nil {
-		t.Fatalf("roll back consolidated migrations to 0137: %v", err)
-	}
-	for _, table := range []string{
-		"response_halt_fences", "response_attempts", "response_audit_intents", "response_halt_dispatches",
-		"response_verification_observations", "response_observer_bindings", "correlation_checkpoints",
-		"correlation_assignments", "incident_response_links",
-	} {
-		var exists bool
-		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, table).Scan(&exists); err != nil {
-			t.Fatalf("inspect rolled-back table %s: %v", table, err)
-		}
-		if exists {
-			t.Fatalf("rollback through 0138-0141 retained table %s", table)
-		}
-	}
-	for _, column := range []string{"reversibility_class", "authorization_target", "target_fingerprint", "submitted_by", "reversal_requested_by"} {
-		var exists bool
-		if err := db.QueryRow(`SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns
-			WHERE table_schema='public' AND table_name='response_actions' AND column_name=$1
-		)`, column).Scan(&exists); err != nil {
-			t.Fatalf("inspect rolled-back response action column %s: %v", column, err)
-		}
-		if exists {
-			t.Fatalf("rollback through 0138 retained response_actions.%s", column)
-		}
-	}
-	for _, column := range []string{"source_agent_id", "source_agent_session_id"} {
-		var exists bool
-		if err := db.QueryRow(`SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns
-			WHERE table_schema='public' AND table_name='endpoint_timeline' AND column_name=$1
-		)`, column).Scan(&exists); err != nil {
-			t.Fatalf("inspect rolled-back endpoint timeline column %s: %v", column, err)
-		}
-		if exists {
-			t.Fatalf("rollback through 0141 retained endpoint_timeline.%s", column)
-		}
 	}
 }

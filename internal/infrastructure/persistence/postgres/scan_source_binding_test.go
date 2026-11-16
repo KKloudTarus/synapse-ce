@@ -391,7 +391,13 @@ func TestPostgresScanSourceDoesNotReconstructUnboundHistory(t *testing.T) {
 }
 
 func TestPostgresScanSourceMigrationRollbackGuard(t *testing.T) {
-	ctx, pool := setupTestDB(t)
+	ctx := context.Background()
+	dsn := isolatedMigrationAt(t, 160)
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
 	db, err := goose.OpenDBWithDriver("pgx", pool.Config().ConnString())
 	if err != nil {
 		t.Fatal(err)

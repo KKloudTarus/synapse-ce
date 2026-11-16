@@ -15,6 +15,7 @@ allowBuilds:
 
 # zod <4.6.6 can exhaust memory validating oversized constrained collections (CVE-2023-54404);
 # it arrives transitively through eslint-plugin-react-hooks.
+# pnpm 9 reads the matching package.json override; pnpm 11 reads this one.
 overrides:
   zod: ">=4.6.6 <5"
 # jsdom 31 needs parse5 >= 8.1.0 for tokenizer.flushCharacters, which its parse5-parser-stream

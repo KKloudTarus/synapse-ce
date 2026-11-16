@@ -77,6 +77,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   of these statements now passes. Measured on a 52-case IAM corpus, false positives fall from
   18 to 0 with recall unchanged at 100%.
 
+- **Distroless and usr-merged images are inventoried instead of read as clean (#1619).** An
+  image carrying per-package dpkg fragments under `/var/lib/dpkg/status.d/` rather than a single
+  `status` file previously returned zero OS packages with a confident, complete result, which is
+  a clean verdict on an input nothing assessed. Those fragments are now cataloged, as is
+  `/usr/lib/apk/db/installed` on a usr-merged Alpine or Wolfi image. Expect OS package counts and
+  OS advisory findings to rise on such images, from zero. Where a database or fragment cannot be
+  read, including a fragment that writes an unreadable `Status`, the scan reports a partial
+  inventory with an explicit warning rather than an empty one; a genuinely uninstalled package is
+  still excluded without comment.
+
 - Grype synthesizes missing CPEs when scanning an SBOM, restoring NVD advisories
   outside distro fix feeds, including unfixed Alpine busybox and zlib CVEs (#1618).
   Existing component CPEs are preserved in reconstructed SBOMs. Unfixed advisories
