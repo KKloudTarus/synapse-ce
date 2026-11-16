@@ -63,6 +63,20 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Terraform IAM wildcard statements are assessed in context (#1655).** `Resource = "*"`
+  no longer reports when every action in the statement is an exact, case-insensitive match
+  for `ec2:DescribeInstances` or `ec2:DescribeImages`, which have no resource types in the
+  EC2 Service Authorization Reference and therefore require the wildcard. A pattern such as
+  `ec2:Describe*`, a service wildcard, an unknown action, or any non-exempt action beside an
+  exempt one still reports. An explicit `Deny` effect is now read even when a resource
+  reference stays unresolved or no resource consumes the policy document, so a `Deny` no
+  longer produces an exposure finding in those cases. A JSON `Statement` may now be a single
+  object as well as an array; a singleton whose effect is not `Deny` and which is either not
+  an `Allow` or carries `NotAction`, `NotResource` or `NotPrincipal` is left to literal
+  inspection. Finding counts drop accordingly: a pipeline that failed `--fail-on high` on one
+  of these statements now passes. Measured on a 52-case IAM corpus, false positives fall from
+  18 to 0 with recall unchanged at 100%.
+
 - **Distroless and usr-merged images are inventoried instead of read as clean (#1619).** An
   image carrying per-package dpkg fragments under `/var/lib/dpkg/status.d/` rather than a single
   `status` file previously returned zero OS packages with a confident, complete result, which is

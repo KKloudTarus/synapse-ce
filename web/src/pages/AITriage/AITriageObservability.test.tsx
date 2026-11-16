@@ -72,9 +72,12 @@ describe('AITriageObservability CWE bars', () => {
     for (const width of widths) {
       expect(width).toBeLessThanOrEqual(100)
     }
-    // Largest is the full track; the others are its honest proportion.
+    // Largest is the full track; the others are its honest proportion. Precision is 4 because
+    // jsdom serializes a percentage to four decimal places, so reading style.width back cannot
+    // return more than that. The proportion is what this asserts: scaling against the first row
+    // instead of the largest would put 100 here, not 14.2857.
     expect(Math.max(...widths)).toBe(100)
-    expect(widths[0]).toBeCloseTo((2 / 14) * 100, 5)
-    expect(widths[2]).toBeCloseTo((4 / 14) * 100, 5)
+    expect(widths[0]).toBeCloseTo((2 / 14) * 100, 4)
+    expect(widths[2]).toBeCloseTo((4 / 14) * 100, 4)
   })
 })

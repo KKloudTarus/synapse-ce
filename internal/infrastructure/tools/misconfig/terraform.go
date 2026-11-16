@@ -194,14 +194,16 @@ func (f *tfBucketFacts) apply(in []ports.MisconfigRawFinding) []ports.MisconfigR
 // statements. Outside such a span the line rules still run, so a policy this scan could not evaluate keeps
 // its literal detection rather than disappearing.
 func tfDropStructurallyAssessed(in []ports.MisconfigRawFinding, spans tfPolicySpans, rel string, line int) []ports.MisconfigRawFinding {
-	if spans == nil || !spans.covers(rel, line) {
+	if spans == nil {
 		return in
 	}
 	out := in[:0]
 	for _, f := range in {
 		switch f.RuleID {
 		case "terraform-iam-wildcard", "terraform-iam-wildcard-resource", "terraform-wildcard-principal":
-			continue
+			if spans.covers(rel, line, f.RuleID) {
+				continue
+			}
 		}
 		out = append(out, f)
 	}

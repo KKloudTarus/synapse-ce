@@ -197,6 +197,20 @@ blocks, `policy_id`, and malformed string-list attributes.
   `aws:PrincipalOrgID`, so a principal-org restriction is never recommended for them.
   Those statements are assessed on their destination scope instead: an explicit role ARN,
   `aws:ResourceOrgID`, or `aws:ResourceAccount`.
+- `Resource = "*"` is not a finding when EVERY action in the statement is an exact,
+  case-insensitive match for `ec2:DescribeInstances` or `ec2:DescribeImages`. Those two
+  actions have no resource types in the
+  [EC2 Service Authorization Reference](https://docs.aws.amazon.com/service-authorization/latest/reference/list_ec2.html),
+  so the wildcard is the only form AWS accepts and scoping it is impossible. The match is
+  exact: `ec2:Describe*` is a pattern, not one of those actions, and still reports. One
+  non-exempt action beside an exempt one reports, and an empty, null, malformed or
+  unresolved action list reports, because absence is not an exemption. The exemption covers
+  the resource finding only; a wildcard principal on the same statement still reports.
+- A JSON `Statement` may be a single object as well as an array, because AWS accepts both.
+  A singleton is assessed only when its effect is `Deny`, or when it is an `Allow` carrying
+  no inverted element. Anything else, an unrecognised effect or a `NotAction`,
+  `NotResource` or `NotPrincipal`, is left to the literal line rules, which is the same
+  posture the inverted-element decision above takes for arrays.
 
 ### Severity mapping
 
