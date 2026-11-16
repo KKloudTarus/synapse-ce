@@ -146,6 +146,9 @@ func jsHTMLModuleEntries(ctx context.Context, files []sourceFile, modules map[st
 		if f.Ext != ".html" && f.Ext != ".htm" {
 			continue
 		}
+		if jsNonEntryHTML(f.Rel) {
+			continue // a fixture or build-output page does not declare the application's browser entry
+		}
 		document, err := html.Parse(strings.NewReader(strings.Join(f.Lines, "\n")))
 		if err != nil {
 			return nil, nil
@@ -224,4 +227,18 @@ func jsForwardClosure(ctx context.Context, seeds map[string]bool, dependencies m
 		}
 	}
 	return reached, nil
+}
+
+// jsNonEntryHTML reports whether an HTML file sits where an application entry document does not.
+// Every .html used to count as one, and its module scripts resolved against the repository root
+// whatever directory it lived in, so a page under test/fixtures could mark a handler browser-only
+// and switch off a security rule for it.
+func jsNonEntryHTML(rel string) bool {
+	for _, segment := range strings.Split(path.Dir(rel), "/") {
+		switch segment {
+		case "test", "tests", "__tests__", "fixture", "fixtures", "testdata", "coverage", "dist", "build", "out", "node_modules", ".next", ".nuxt":
+			return true
+		}
+	}
+	return false
 }

@@ -470,8 +470,12 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	if err != nil {
 		return ports.SASTSourceReport{}, err
 	}
+	// Both maps come from the same traversal, so an incomplete one makes both unsafe. Leaving
+	// jsServerFiles populated meant a file dropped for being unreadable could remove the server cue
+	// from a file that WAS scanned, and the fail-open branch that reads a nil map was unreachable.
 	if !runtimeSourcesComplete || unscannedFiles > 0 {
 		project.jsBrowserFiles = nil
+		project.jsServerFiles = nil
 	}
 	// The report budget is spent on SECURITY findings before code-quality ones. Walk order alone used to
 	// decide, and on a real 971-file Spring service that meant 417 low-severity code smells consumed the

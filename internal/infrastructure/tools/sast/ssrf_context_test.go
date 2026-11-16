@@ -196,3 +196,57 @@ func TestSSRFLocalServerWrapperWithBrowserTwin(t *testing.T) {
 		})
 	}
 }
+
+// A file dropped from the scan must not switch a rule off in a file that WAS scanned. The browser
+// and server maps come from one traversal, so an incomplete traversal makes both unusable; nilling
+// only the browser map left the server cue missing for a file whose wrapper was skipped.
+func TestSSRFIncompleteScanDoesNotSuppressScannedFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "package.json", `{"name":"app","dependencies":{}}`)
+	writeFile(t, root, "index.html", "<script type=\"module\" src=\"/src/server/proxy.js\"></script>\n")
+	// One very long line is the shape the scanner drops as minified, which removes the server cue
+	// this wrapper would otherwise give the file below.
+	writeFile(t, root, "src/lib/http.js", "const http=require('node:http');module.exports=http;//"+longLine(40000)+"\n")
+	writeFile(t, root, "src/server/proxy.js", "const http = require('../lib/http');\n"+
+		"exports.proxy = (payload) => http.get(payload.url);\n")
+	if hits := findingsByRule(t, root)["generic-ssrf-request-url"]; len(hits) == 0 {
+		t.Fatal("a skipped wrapper must not suppress the scanned file that imports it")
+	}
+}
+
+// Every .html counted as an application entry document and resolved its module scripts against the
+// repository root, so a page under test/fixtures could mark a handler browser-only and switch off a
+// security rule for it.
+func TestSSRFFixtureHTMLIsNotABrowserEntry(t *testing.T) {
+	handler := "export async function handle(ctx) {\n" +
+		"  const target = new URL(ctx.href).searchParams.get('u');\n" +
+		"  return fetch(target);\n}\n"
+	for _, tc := range []struct {
+		name string
+		page string
+		want int
+	}{
+		{name: "fixture page is not an entry", page: "test/fixtures/page.html", want: 1},
+		{name: "build output is not an entry", page: "dist/index.html", want: 1},
+		{name: "root page is an entry", page: "index.html", want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "package.json", `{"name":"app","dependencies":{}}`)
+			writeFile(t, root, tc.page, "<script type=\"module\" src=\"/src/handler.js\"></script>\n")
+			writeFile(t, root, "src/handler.js", handler)
+			hits := findingsByRule(t, root)["ssrf-fetch-user-url"]
+			if len(hits) != tc.want {
+				t.Fatalf("ssrf-fetch-user-url hits = %d, want %d: %+v", len(hits), tc.want, hits)
+			}
+		})
+	}
+}
+
+func longLine(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = 'a'
+	}
+	return string(b)
+}
