@@ -90,8 +90,15 @@ func parseDpkgFragments(ctx context.Context, rootfsDir, namespace, tag string, e
 			} else {
 				invalid = true
 			}
+			// A status.d fragment usually omits Status entirely, so the installed state is assumed.
+			// A fragment that WRITES the field has to write a readable one: dpkg's status is three
+			// words (want, error flag, state), and only "install ok installed" yields a component.
+			// An empty or malformed value would otherwise be dropped by dpkgExtract and leave no
+			// trace, which reports an unassessed package as an absent one.
 			if _, exists := fields["Status"]; !exists {
 				fields["Status"] = "install ok installed"
+			} else if len(strings.Fields(cleanField(fields["Status"]))) != 3 {
+				invalid = true
 			}
 			return dpkgExtract(fields)
 		}
@@ -101,7 +108,7 @@ func parseDpkgFragments(ctx context.Context, rootfsDir, namespace, tag string, e
 			return nil, fmt.Errorf("parse dpkg status.d entry %q: %w", entry.Name(), err)
 		}
 		if !valid || invalid {
-			return nil, fmt.Errorf("dpkg status.d entry %q has no package name and version", entry.Name())
+			return nil, fmt.Errorf("dpkg status.d entry %q has no readable package name, version and status", entry.Name())
 		}
 		if len(out)+len(components) > maxPackages {
 			return nil, fmt.Errorf("dpkg status.d exceeds the %d-package limit", maxPackages)

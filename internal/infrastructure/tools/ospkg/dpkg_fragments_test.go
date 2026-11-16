@@ -41,6 +41,51 @@ func TestCatalogDpkgFragmentsWithoutStatusDatabase(t *testing.T) {
 	}
 }
 
+// A fragment that writes an unreadable Status must not vanish. dpkgExtract keeps only
+// "install ok installed", so an empty or malformed status produced no component and no error:
+// the package left the inventory and the scan still reported a confident, complete result. A
+// genuinely uninstalled package is different and is still excluded in silence, because its
+// status is readable and says so.
+func TestCatalogDpkgFragmentsRejectUnreadableStatus(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status  string
+		wantErr bool
+		want    int
+	}{
+		"empty status":    {status: "Status:\n", wantErr: true},
+		"one word":        {status: "Status: installed\n", wantErr: true},
+		"two words":       {status: "Status: install ok\n", wantErr: true},
+		"absent status":   {status: "", want: 2},
+		"installed":       {status: "Status: install ok installed\n", want: 2},
+		"deinstalled":     {status: "Status: deinstall ok config-files\n", want: 1},
+		"never installed": {status: "Status: purge ok not-installed\n", want: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := writeRootfs(t, map[string]string{
+				"etc/os-release":                   "ID=debian\nVERSION_ID=12\n",
+				"var/lib/dpkg/status.d/base-files": "Package: base-files\n" + tc.status + "Version: 12.4\nArchitecture: amd64\n",
+				"var/lib/dpkg/status.d/libssl3":    "Package: libssl3\nVersion: 3.0.11-1\nArchitecture: amd64\n",
+			})
+			res, err := New().Catalog(context.Background(), root)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("an unreadable status must be a coverage error, got %d components and no error", len(res.Components))
+				}
+				if !strings.Contains(err.Error(), "base-files") {
+					t.Fatalf("the error must name the entry it could not read: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(res.Components) != tc.want {
+				t.Fatalf("components = %d, want %d: %+v", len(res.Components), tc.want, res.Components)
+			}
+		})
+	}
+}
+
 func TestCatalogDpkgFragmentsRejectsUnsafeAndOversizedInputs(t *testing.T) {
 	for _, kind := range []string{"symlink directory", "symlink package", "ancestor escape", "oversized package", "malformed package"} {
 		t.Run(kind, func(t *testing.T) {
