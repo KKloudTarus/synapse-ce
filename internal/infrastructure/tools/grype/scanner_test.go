@@ -157,6 +157,31 @@ func TestGrypeEmptySBOM(t *testing.T) {
 	}
 }
 
+func TestWriteCycloneDXPreservesCPE(t *testing.T) {
+	const cpe = "cpe:2.3:a:busybox:busybox:1.36.1:*:*:*:*:*:*:*"
+	doc := &sbom.SBOM{Components: []sbom.Component{{Name: "busybox", Version: "1.36.1-r19", PURL: "pkg:apk/alpine/busybox@1.36.1-r19", CPE: cpe}}}
+	path, cleanup, err := writeCycloneDX(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bom struct {
+		Components []struct {
+			CPE string `json:"cpe"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(data, &bom); err != nil {
+		t.Fatal(err)
+	}
+	if len(bom.Components) != 1 || bom.Components[0].CPE != cpe {
+		t.Fatalf("producer CPE must reach Grype without synthesis: %+v", bom.Components)
+	}
+}
+
 // TestWriteCycloneDXCarriesDistro verifies the reconstructed SBOM (doc.Raw empty) puts the OS distro on
 // metadata.component so Grype scopes OS-package matching to the right advisory namespace (e.g. redhat:9).
 // Without it, an el9 package is matched against every RHEL stream's advisories - a large false-positive

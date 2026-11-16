@@ -63,6 +63,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- Grype synthesizes missing CPEs when scanning an SBOM, restoring NVD advisories
+  outside distro fix feeds, including unfixed Alpine busybox and zlib CVEs (#1618).
+  Existing component CPEs are preserved in reconstructed SBOMs. Unfixed advisories
+  remain in the vulnerability inventory; `--ignore-unfixed` suppresses their
+  findings and counts them in `unfixed_suppressed`.
+
 - **The release images ship patched scanner binaries (#1642).** `golang.org/x/net` moves to v0.62.0 for CVE-2026-78661 and CVE-2026-97045. The container images no longer copy anchore's published grype and syft binaries, which carry `x/net` v0.61.0 and brotli v1.2.0; they rebuild grype v0.121.2 and syft v1.57.0 from a pinned upstream commit with `x/net` v0.62.0 and brotli v1.2.7. The recorded `tool_versions` therefore move from grype 0.115.0 and syft 1.45.1 to 0.121.2 and 1.57.0, which changes scan output: expect different finding counts against the same target, and rebaseline any stored comparison before reading a delta. `scripts/install-tools.{sh,ps1}` and the published composite action follow the same tags, but download anchore's own builds, so a CI runner using them keeps upstream's dependency versions. The frontend pins `zod` to >= 4.6.6 for CVE-2023-54404; zod is a development dependency only and never reached the shipped bundle.
 
 - **Terraform is evaluated, not pattern-matched (#1638).** Every `.tf` and `.tf.json` file is parsed with the HCL library Terraform is built on, and each attribute is evaluated against the module's variables, locals, automatically loaded variable files and parent module inputs before the rules run. The same `0.0.0.0/0` reported as high when written as a literal is now reported when it arrives through a list variable, a local, a conditional or a module input, while `slice(["0.0.0.0/0", "10.0.0.0/16"], 1, 2)` no longer reports, because the effective list is private. The contract is bounded and documented in [Infrastructure-as-code evaluation](docs/guide/iac-evaluation.md); anything outside it stays unknown, keeps its source text, and is named on the scan report rather than passing as clean. Two pure-Go dependencies are added: `github.com/hashicorp/hcl/v2` (MPL-2.0) and `github.com/zclconf/go-cty` (MIT).
