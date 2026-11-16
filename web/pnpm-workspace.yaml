@@ -17,3 +17,8 @@ allowBuilds:
 # it arrives transitively through eslint-plugin-react-hooks.
 overrides:
   zod: ">=4.6.6 <5"
+# jsdom 31 needs parse5 >= 8.1.0 for tokenizer.flushCharacters, which its parse5-parser-stream
+# calls on every chunk. parse5-parser-stream 8.1.0 itself only asks for parse5 ^8.0.0, so pnpm
+# satisfied it with 8.0.1 while jsdom took 8.1.0 and every jsdom construction threw
+# "this.parser.tokenizer.flushCharacters is not a function", killing all 217 test files.
+  parse5: "8.1.0"
