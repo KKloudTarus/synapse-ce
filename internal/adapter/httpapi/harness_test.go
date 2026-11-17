@@ -615,6 +615,13 @@ func TestHostileHarness(t *testing.T) {
 		t.Fatalf("siem service: %v", siemErr)
 	}
 	rt.SetSIEM(siemSvc)
+	// Group seeds (harness_seed_test.go) wire more subsystems and plant tenantA data before the
+	// route table is built, so the routes they enable are part of the sweep below.
+	seedMarkers := runHarnessSeeds(&harnessWorld{
+		t: t, rt: rt, engagements: engRepo, engSvc: engagementService, projectRepo: projectRepo,
+		projects: projectSvc, analyses: analysisStore, assets: attackAssets, users: usersSvc, audit: audit,
+		state: map[string]any{},
+	})
 	mux := rt.routes()
 
 	send := func(role, tenant, method, path string, authed bool) (int, string) {
@@ -624,6 +631,17 @@ func TestHostileHarness(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+
+	// sendTenantBound is send for a route whose use case reads the tenant from the request context.
+	// The production auth middleware sets it there (auth.go), and this harness injects the principal
+	// directly, so without it such a use case answers every caller with "tenant context is required".
+	sendTenantBound := func(role, tenant, method, path string) (int, string) {
+		req := httptest.NewRequest(method, path, nil)
+		ctx := context.WithValue(req.Context(), principalKey, Principal{ID: "p", Role: role, TenantID: tenant})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req.WithContext(shared.WithTenant(ctx, shared.ID(tenant))))
 		return rec.Code, rec.Body.String()
 	}
 
@@ -775,9 +793,9 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may get own-tenant engagement", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
 		{"readonly may list projects", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects", http.StatusOK},
 		{"readonly may get own-tenant project", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusOK},
-		{"readonly may read project analysis status", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/analysis-status", http.StatusNotFound},
-		{"readonly may read project dependency graph", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph", http.StatusNotFound},
-		{"readonly may export project dependency graph", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph/export", http.StatusNotFound},
+		{"readonly may read project analysis status", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/analysis-status", http.StatusOK},
+		{"readonly may read project dependency graph", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph", http.StatusOK},
+		{"readonly may export project dependency graph", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph/export", http.StatusOK},
 		{"readonly may list project hotspots", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/hotspots", http.StatusOK},
 		{"machine may not read project dependency graph", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/dependency-graph", http.StatusForbidden},
 		{"machine may not list project hotspots", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/hotspots", http.StatusForbidden},
@@ -1154,7 +1172,7 @@ func TestHostileHarness(t *testing.T) {
 		// Markers seeded into tenantA only. A tenantB caller must never see one of these.
 		// Values the fixture seeds for tenantA only. "tenantA" itself is the broadest: a response
 		// to a tenantB caller that names tenantA is a leak whatever else it contains.
-		markers := []string{"tenantA", "promotion-finding-A", "asset-A", "ag1", "A Admin", "det-A", "ev-A", "agent:A", "host-A"}
+		markers := append([]string{"tenantA", "promotion-finding-A", "asset-A", "ag1", "A Admin", "det-A", "ev-A", "agent:A", "host-A"}, seedMarkers...)
 		containsMarker := func(body string) string {
 			for _, marker := range markers {
 				if strings.Contains(body, marker) {
@@ -1167,38 +1185,64 @@ func TestHostileHarness(t *testing.T) {
 		// deliberately leaves optional subsystems unwired, and their handlers dereference the
 		// dependency the router guarantees them in production, so an unwired route panics here.
 		// That is a gap in the fixture rather than a tenancy finding, so it is counted and skipped.
-		probe := func(tenant, path string) (code int, body string, ran bool) {
+		probe := func(tenant, path string, tenantBound bool) (code int, body string, ran bool) {
 			defer func() {
 				if recover() != nil {
 					ran = false
 				}
 			}()
-			code, body = send("admin", tenant, http.MethodGet, path, true)
+			if tenantBound {
+				code, body = sendTenantBound("admin", tenant, http.MethodGet, path)
+			} else {
+				code, body = send("admin", tenant, http.MethodGet, path, true)
+			}
 			return code, body, true
 		}
 
+		expected := harnessExpectedRoutes()
+		tenantBound := harnessTenantBoundRoutes()
+		queries := harnessRouteQueries()
 		var probed, unwired, servingTenantA int
-		var servingRoutes []string
+		var servingRoutes, unwiredRoutes, vacuousRoutes []string
 		for _, route := range tenantScopedGETRoutes(t) {
 			path := concreteHarnessPath(route)
 			if path == "" {
 				continue
 			}
+			path += queries[route]
+			bind := tenantBound[route]
 			// Control: does this route serve tenantA its own seeded data? A route that answers
 			// nobody proves nothing when it also answers tenantB nothing, so the count below keeps
 			// the sweep from decaying into a set of vacuous passes.
-			code, body, ran := probe("tenantA", path)
+			code, body, ran := probe("tenantA", path, bind)
 			if !ran {
 				unwired++
+				unwiredRoutes = append(unwiredRoutes, route)
+				// The tenantA control panicked because a dependency this route needs is not wired in this
+				// fixture, so its own data cannot be shown. A foreign caller must still be turned away by
+				// the tenant guard before any handler runs, so it never reaches that dependency. That
+				// needs no dependency to check, and it keeps a route that lost its guard from passing
+				// just because it is unwired.
+				t.Run(route+" (guard only)", func(t *testing.T) {
+					code, body, ran := probe("tenantB", path, bind)
+					if !ran {
+						t.Fatalf("%s ran its handler for a tenantB caller; a tenant guard must reject first", route)
+					}
+					if code != http.StatusForbidden && code != http.StatusNotFound {
+						t.Errorf("%s answered a tenantB caller with %d, want 403 or 404: %s", route, code, body)
+					}
+				})
 				continue
 			}
 			probed++
 			if code == http.StatusOK && containsMarker(body) != "" {
 				servingTenantA++
 				servingRoutes = append(servingRoutes, route)
+			} else {
+				vacuousRoutes = append(vacuousRoutes, fmt.Sprintf("%s  [tenantA got %d]", route, code))
 			}
 			t.Run(route, func(t *testing.T) {
-				code, body, ran := probe("tenantB", path)
+				code, body, ran := probe("tenantB", path, bind)
 				if !ran {
 					t.Skip("subsystem is not wired in this fixture")
 				}
@@ -1222,7 +1266,27 @@ func TestHostileHarness(t *testing.T) {
 		if servingTenantA < 5 {
 			t.Errorf("only %d of %d probed routes served tenantA its own seeded data (%v); the sweep is passing vacuously", servingTenantA, probed, servingRoutes)
 		}
+		// A seed names the routes it makes serve tenantA's data. One that no longer does, for example
+		// because two seeds built the same service and the later one replaced the earlier, fails by
+		// name here instead of lowering a count nobody reads.
+		serving := map[string]bool{}
+		for _, route := range servingRoutes {
+			serving[route] = true
+		}
+		declared := make([]string, 0, len(expected))
+		for route := range expected {
+			declared = append(declared, route)
+		}
+		sort.Strings(declared)
+		for _, route := range declared {
+			if !serving[route] {
+				t.Errorf("seed %q declares that %s serves tenantA its own data, but the sweep did not see that; a later seed may have replaced a service it needs", expected[route], route)
+			}
+		}
 		t.Logf("generated sweep probed %d tenant-scoped GET routes (%d serve tenantA real data); %d skipped as unwired in this fixture", probed, servingTenantA, unwired)
+		t.Logf("routes that serve tenantA real data (%d):\n  %s", len(servingRoutes), strings.Join(servingRoutes, "\n  "))
+		t.Logf("routes skipped as unwired (%d):\n  %s", len(unwiredRoutes), strings.Join(unwiredRoutes, "\n  "))
+		t.Logf("routes probed but answering tenantA no seeded data (%d):\n  %s", len(vacuousRoutes), strings.Join(vacuousRoutes, "\n  "))
 	})
 }
 
