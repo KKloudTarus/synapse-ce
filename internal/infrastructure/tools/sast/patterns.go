@@ -60,6 +60,8 @@ func (r *rule) skip(line string) bool { return r.skipFn != nil && r.skipFn(line)
 // means language-agnostic (every file).
 func (r *rule) appliesTo(ext string) bool { return r.exts == nil || r.exts[ext] }
 
+var dynamicHTTPURLRe = regexp.MustCompile(`(?i)http\.(Get|Post|Head)\s*\(\s*[A-Za-z_$][\w$]*`)
+
 // credentialShapedRuleIDs are the rules whose only evidence is a credential-shaped assignment. A
 // localization catalogue produces that shape for every language it ships: `"Password": "Password"` in a
 // Laravel lang file is a UI label, and one such string turned into 26 HIGH findings on one real
@@ -808,8 +810,9 @@ func builtinRules() []rule {
 		{
 			id: "go-ssrf-dynamic-url", cwe: "CWE-918", severity: shared.SeverityHigh, title: "Go server-side request uses dynamic URL",
 			desc:   "A Go outbound HTTP request appears to use a dynamic URL. Validate scheme/host, block private networks/metadata IPs, and apply allowlists.",
-			re:     regexp.MustCompile(`(?i)http\.(Get|Post|Head)\s*\(\s*[A-Za-z_$][\w$]*`),
+			re:     dynamicHTTPURLRe,
 			skipFn: commentOnlyLine,
+			exts:   goExts,
 		},
 		{
 			id: "react-dangerous-html", cwe: "CWE-79", severity: shared.SeverityHigh, title: "React renders unsanitized HTML",
