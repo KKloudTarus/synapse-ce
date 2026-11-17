@@ -132,13 +132,8 @@ func TestMigration0129PinsAgentTenantColumns(t *testing.T) {
 // restores the policies. It is the operator's escape hatch from the deployment-ordering hazard
 // documented in the migration header.
 func TestMigration0129DownIsSafe(t *testing.T) {
-	dsn := testDSN(t)
+	dsn := isolatedMigrationAt(t, 129)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	// Always leave the schema fully migrated, whatever this test does.
-	t.Cleanup(func() { _ = MigrateLocked(context.Background(), dsn) })
 
 	db := openLockedGooseDB(t, dsn)
 	defer func() { _ = db.Close() }()

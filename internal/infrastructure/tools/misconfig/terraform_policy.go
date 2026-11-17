@@ -90,8 +90,28 @@ var tfPolicyAttributes = map[string]map[string]policyKind{
 
 // policyDocument is one parsed AWS policy document.
 type policyDocument struct {
-	Version   string            `json:"Version,omitempty"`
-	Statement []policyStatement `json:"Statement"`
+	Version   string           `json:"Version,omitempty"`
+	Statement policyStatements `json:"Statement"`
+}
+
+type policyStatements []policyStatement
+
+func (s *policyStatements) UnmarshalJSON(raw []byte) error {
+	var many []policyStatement
+	if err := json.Unmarshal(raw, &many); err == nil {
+		*s = many
+		return nil
+	}
+	var one policyStatement
+	if err := json.Unmarshal(raw, &one); err != nil {
+		return err
+	}
+	// Keep literal coverage when the assessor cannot interpret a singleton's effect or inverted elements.
+	if !strings.EqualFold(one.Effect, "Deny") && (!one.allows() || len(one.NotAction) > 0 || len(one.NotResource) > 0 || len(one.NotPrincipal) > 0) {
+		return fmt.Errorf("policy statement requires literal inspection")
+	}
+	*s = policyStatements{one}
+	return nil
 }
 
 // policyStatement is one statement, with each element kept as the document wrote it. A missing element and
@@ -417,6 +437,22 @@ func stsFederationOnly(actions []string) bool {
 	return true
 }
 
+// These actions have no resource types in the EC2 Service Authorization Reference:
+// https://docs.aws.amazon.com/service-authorization/latest/reference/list_ec2.html
+func policyActionsRequireWildcard(actions []string) bool {
+	if len(actions) == 0 {
+		return false
+	}
+	for _, action := range actions {
+		switch strings.ToLower(action) {
+		case "ec2:describeinstances", "ec2:describeimages":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func containsWildcardToken(vals []string) bool {
 	for _, v := range vals {
 		if v == "*" {
@@ -499,7 +535,7 @@ func (s tfPolicySite) assess() []ports.MisconfigRawFinding {
 			}
 		}
 
-		if resourcesOK && containsWildcardToken(resources) && s.kind != policyTrust {
+		if resourcesOK && containsWildcardToken(resources) && s.kind != policyTrust && !policyActionsRequireWildcard(actions) {
 			resourceLevel := restrictionNone
 			if condsOK {
 				resourceLevel, _ = assessConditions(conds, resourceScopingKeys)
@@ -764,8 +800,8 @@ func tfCollectPolicySites(m *tfModule, ctx *hcl.EvalContext) (sites []tfPolicySi
 		}
 	}
 	// A policy document data source that a site actually carries is assessed through that site, so its own
-	// lines must not be reported again from their literal tokens. One that no site consumes keeps its line
-	// rules: it attaches to nothing this scanner recognises, and dropping it would be a silent gap.
+	// lines must not be reported again from their literal tokens. Unconsumed or unresolved documents keep
+	// literal inspection except where the statement itself proves a rule cannot apply.
 	for _, src := range m.sources {
 		body, ok := src.file.Body.(*hclsyntax.Body)
 		if !ok {
@@ -776,6 +812,37 @@ func tfCollectPolicySites(m *tfModule, ctx *hcl.EvalContext) (sites []tfPolicySi
 				continue
 			}
 			if !consumed[blk.Labels[1]] {
+				for _, statement := range blk.Body.Blocks {
+					if statement.Type != "statement" {
+						continue
+					}
+					from, to := statement.DefRange().Start.Line, statement.Body.SrcRange.End.Line
+					if effect := statement.Body.Attributes["effect"]; effect != nil {
+						v, d := tfEval(effect.Expr, ctx)
+						if !d.HasErrors() && v.IsKnown() && !v.IsNull() && v.Type() == cty.String && strings.EqualFold(v.AsString(), "Deny") {
+							docSpans.add(src.rel, from, to)
+							continue
+						}
+					}
+					if attr := statement.Body.Attributes["actions"]; attr != nil {
+						v, d := tfEval(attr.Expr, ctx)
+						if d.HasErrors() || !v.IsWhollyKnown() || v.IsNull() || (!v.Type().IsTupleType() && !v.Type().IsListType() && !v.Type().IsSetType()) {
+							continue
+						}
+						var actions []string
+						for it := v.ElementIterator(); it.Next(); {
+							_, action := it.Element()
+							if action.IsNull() || action.Type() != cty.String {
+								actions = nil
+								break
+							}
+							actions = append(actions, action.AsString())
+						}
+						if policyActionsRequireWildcard(actions) {
+							docSpans.addRule(src.rel, from, to, "terraform-iam-wildcard-resource")
+						}
+					}
+				}
 				continue
 			}
 			docSpans.add(src.rel, blk.DefRange().Start.Line, blk.Body.SrcRange.End.Line)
@@ -790,16 +857,25 @@ func tfCollectPolicySites(m *tfModule, ctx *hcl.EvalContext) (sites []tfPolicySi
 	return sites, unresolved, docSpans
 }
 
-// tfPolicySpans is the set of source lines a structurally assessed policy occupies, per file.
-type tfPolicySpans map[string][][2]int
-
-func (s tfPolicySpans) add(file string, from, to int) {
-	s[file] = append(s[file], [2]int{from, to})
+type tfPolicySpan struct {
+	from, to int
+	rule     string
 }
 
-func (s tfPolicySpans) covers(file string, line int) bool {
+// tfPolicySpans records assessed lines per file; an empty rule covers all policy rules.
+type tfPolicySpans map[string][]tfPolicySpan
+
+func (s tfPolicySpans) add(file string, from, to int) {
+	s.addRule(file, from, to, "")
+}
+
+func (s tfPolicySpans) addRule(file string, from, to int, rule string) {
+	s[file] = append(s[file], tfPolicySpan{from: from, to: to, rule: rule})
+}
+
+func (s tfPolicySpans) covers(file string, line int, rule string) bool {
 	for _, r := range s[file] {
-		if line >= r[0] && line <= r[1] {
+		if line >= r.from && line <= r.to && (r.rule == "" || r.rule == rule) {
 			return true
 		}
 	}

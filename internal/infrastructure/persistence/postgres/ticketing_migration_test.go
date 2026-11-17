@@ -13,6 +13,10 @@ func TestTicketWorkflowMigrationRollbackPreservesTenantPolicy(t *testing.T) {
 	if err := Migrate(context.Background(), isolated.dsn); err != nil {
 		t.Fatal(err)
 	}
+	if version, err := goose.GetDBVersion(isolated.db); err != nil || version < 237 {
+		t.Fatalf("upgraded version=%d err=%v", version, err)
+	}
+	isolated = newIsolatedMigrationDB(t, 237, 237)
 	if err := goose.DownTo(isolated.db, ".", 235); err != nil {
 		t.Fatalf("empty rollback: %v", err)
 	}

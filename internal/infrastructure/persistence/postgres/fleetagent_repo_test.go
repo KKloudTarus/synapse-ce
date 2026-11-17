@@ -130,14 +130,8 @@ func TestFleetAgentRepository(t *testing.T) {
 
 // TestMigration0060 exercises the migration down and back up.
 func TestMigration0060(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationAt(t, 60)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)

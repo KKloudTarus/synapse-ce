@@ -184,14 +184,8 @@ func TestMigration0124TelemetryAgentGapRevisionGuards(t *testing.T) {
 }
 
 func TestMigration0124RefusesRollbackWithSignedGapHistory(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationAt(t, 124)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	db := openLockedGooseDB(t, dsn)
 	const tenant = "migration-0124-probe"
 	const agent = "migration-0124-agent"
@@ -234,15 +228,6 @@ func TestMigration0124RefusesRollbackWithSignedGapHistory(t *testing.T) {
 		tenant, strings.Repeat("c", 64), gap, agent, asset, at, at.UnixNano()); err != nil {
 		t.Fatalf("seed rollback signed revision: %v", err)
 	}
-	// DownTo, not Down: Down rolls back only the NEWEST applied migration, so once a later
-	// migration exists it would absorb this assertion instead of exercising 0124's guard.
-	// DownTo unwinds every migration above the target, which drops those later tables, so
-	// re-apply them before returning or the rest of the suite runs against a partial schema.
-	t.Cleanup(func() {
-		if err := goose.Up(db, "."); err != nil {
-			t.Errorf("restore migrations after rollback probe: %v", err)
-		}
-	})
 	if err := goose.DownTo(db, ".", 123); err == nil || !strings.Contains(err.Error(), "cannot roll back 0124") {
 		t.Fatalf("down migration error=%v, want signed-gap-history refusal", err)
 	}

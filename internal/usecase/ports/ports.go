@@ -1602,6 +1602,9 @@ type Workspace struct {
 type OSPackageResult struct {
 	Components     []sbom.Component
 	DistroResolved bool
+	// InventoryWarning explains this cataloger's empty result for a known OS.
+	// Report it when the combined SBOM has no OS inventory from another producer.
+	InventoryWarning string
 	// UnsupportedDistro names a distro the cataloger RECOGNIZED but deliberately does not match advisories for
 	// (empty otherwise). It distinguishes a by-design coverage gap from a parse failure: CentOS Stream and
 	// CentOS >=8 and the limited CentOS 7 base allowlist are examples. It may

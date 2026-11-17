@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3651,6 +3652,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			osCatalogFailed = true
 		}
 		osPkgsCataloged = len(osRes.Components)
+		if osRes.InventoryWarning != "" && !slices.ContainsFunc(doc.Components, func(c sbom.Component) bool { return isOSPackage(c.PURL) }) {
+			inventoryWarnings = append(inventoryWarnings, osRes.InventoryWarning)
+			inventoryPassIncomplete = true
+		}
 		osPkgsAdded := mergeComponents(doc, osRes.Components)
 		if oerr == nil {
 			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
@@ -4253,7 +4258,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	osCoverageIncomplete := applyOSCoverageCompleteness(&result.Completeness, osUnsupportedDistro, osDistroUnresolved)
 	if inventoryPassIncomplete {
 		result.Completeness.Confident = false
-		const inventoryGap = "image inventory cataloging was incomplete; package coverage is not exhaustive"
+		inventoryGap := strings.Join(inventoryWarnings, "; ")
+		if inventoryGap == "" {
+			inventoryGap = "image inventory cataloging was incomplete; package coverage is not exhaustive"
+		}
 		if result.Completeness.Warning == "" {
 			result.Completeness.Warning = inventoryGap
 		} else {

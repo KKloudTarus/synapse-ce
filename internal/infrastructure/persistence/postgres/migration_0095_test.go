@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -18,19 +17,8 @@ import (
 )
 
 func TestMigration0095ActionOutboxIsolationAndIdempotency(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationAt(t, 95)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := MigrateLocked(context.Background(), dsn); err != nil {
-			t.Errorf("restore migrations: %v", err)
-		}
-	})
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
