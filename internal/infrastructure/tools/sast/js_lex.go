@@ -98,9 +98,7 @@ func jsRequestContextFile(lines []string) bool {
 	var code strings.Builder
 	for _, line := range lines {
 		masked := lex.codeOnly(line)
-		if len(line) <= maxLineBytes {
-			code.WriteString(masked)
-		}
+		code.WriteString(masked)
 		code.WriteByte('\n')
 	}
 	text := code.String()

@@ -11,6 +11,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jsresolution"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsresolve"
 )
 
 type jsImportMetadata struct {
@@ -18,6 +19,12 @@ type jsImportMetadata struct {
 	packages map[string]map[string]string
 	local    map[string]bool
 	complete bool
+	paths    jsresolve.SourcePaths
+}
+
+func jsRuntimeContextSource(name string) bool {
+	base := filepath.Base(name)
+	return jsExts[sastSourceExt(name)] || base == "tsconfig.json" || base == "jsconfig.json"
 }
 
 func jsRuntimeMetadata(ctx context.Context, files []sourceFile) (jsImportMetadata, error) {
@@ -27,6 +34,11 @@ func jsRuntimeMetadata(ctx context.Context, files []sourceFile) (jsImportMetadat
 			return m, err
 		}
 		dir := path.Dir(f.Rel)
+		if path.Base(f.Rel) == "tsconfig.json" || path.Base(f.Rel) == "jsconfig.json" {
+			if err := m.paths.Observe(ctx, f.Rel, []byte(strings.Join(f.Lines, "\n"))); err != nil {
+				return m, err
+			}
+		}
 		if path.Base(f.Rel) == "package.json" {
 			var pkg struct {
 				Name            string
@@ -80,15 +92,22 @@ func jsRuntimeMetadata(ctx context.Context, files []sourceFile) (jsImportMetadat
 	return m, nil
 }
 
-func jsRuntimeImportTarget(from, specifier string, modules map[string]bool, metadata jsImportMetadata) (string, bool) {
-	if at := strings.IndexAny(specifier, "?#"); at >= 0 {
+func jsRuntimeImportTarget(from, specifier string, modules map[string]bool, metadata jsImportMetadata, tsPath jsresolve.SourcePathResult) (string, bool) {
+	if at := strings.IndexAny(specifier, "?#"); at > 0 {
 		specifier = specifier[:at]
 	}
 	if base, aliased := jsRuntimeAliasBase(from, specifier, metadata); aliased {
+		target, known := jsRuntimeModuleTarget(base, modules)
+		if tsPath.Uncertain || (tsPath.Applicable && target != tsPath.Target) {
+			return "", false
+		}
 		if jsimports.IsAssetSpecifier(base) {
 			return "", true
 		}
-		return jsRuntimeModuleTarget(base, modules)
+		return target, known
+	}
+	if tsPath.Applicable {
+		return tsPath.Target, !tsPath.Uncertain
 	}
 	if strings.HasPrefix(specifier, ".") {
 		if jsimports.IsAssetSpecifier(specifier) {

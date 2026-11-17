@@ -390,13 +390,13 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			return nil
 		}
 		if !d.Type().IsRegular() { // never follow symlinks/devices
-			if jsExts[sastSourceExt(path)] {
+			if jsRuntimeContextSource(path) {
 				runtimeSourcesComplete = false
 			}
 			return nil
 		}
 		if skippedSourceFile(path) {
-			if jsExts[sastSourceExt(path)] {
+			if jsRuntimeContextSource(path) {
 				runtimeSourcesComplete = false
 			}
 			// Counted like every other policy exclusion. A .min.js dropped on its name is exactly
@@ -439,14 +439,14 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			return readErr
 		}
 		if len(lines) == 0 {
-			if jsExts[sastSourceExt(path)] {
+			if jsRuntimeContextSource(path) {
 				runtimeSourcesComplete = false
 			}
 			return nil
 		}
 		ext := sastSourceExt(path)
 		if vendoredAssetFile(rel, ext, lines) || looksMinified(lines) || isGeneratedSource(lines) {
-			if jsExts[ext] {
+			if jsRuntimeContextSource(path) {
 				runtimeSourcesComplete = false
 			}
 			// Report the exclusion. Dropping a file and still returning a complete-looking
@@ -736,6 +736,11 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 				matched = r.re.MatchString(phpText) && !r.skip(phpText)
 			} else {
 				matched = r.re.MatchString(text) && !r.skip(text)
+			}
+			if !matched {
+				if r.id == "generic-ssrf-request-url" && (isJS || dartExts[ext]) {
+					matched = dynamicHTTPURLRe.MatchString(matchText) && !r.skip(matchText)
+				}
 			}
 			if !matched {
 				// The concatenation that makes this sink dangerous may sit on an earlier line.

@@ -19,7 +19,6 @@ type jsRuntimeContext struct {
 
 func buildJSRuntimeContext(ctx context.Context, files []sourceFile, edgeLimit int) (jsRuntimeContext, error) {
 	server := make(map[string]bool)
-	browserInput := false
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
 			return jsRuntimeContext{}, err
@@ -27,15 +26,10 @@ func buildJSRuntimeContext(ctx context.Context, files []sourceFile, edgeLimit in
 		if jsExts[f.Ext] {
 			server[f.Rel] = false
 		}
-		browserInput = browserInput || f.Ext == ".html" || f.Ext == ".htm"
 	}
-	metadata := jsImportMetadata{}
-	if browserInput {
-		var err error
-		metadata, err = jsRuntimeMetadata(ctx, files)
-		if err != nil {
-			return jsRuntimeContext{}, err
-		}
+	metadata, err := jsRuntimeMetadata(ctx, files)
+	if err != nil {
+		return jsRuntimeContext{}, err
 	}
 	complete := metadata.complete
 	dependencies := make(map[string][]string)
@@ -69,7 +63,15 @@ func buildJSRuntimeContext(ctx context.Context, files []sourceFile, edgeLimit in
 			if jsresolution.ClassifySpecifier(imp.Specifier).Kind == jsresolution.SpecifierBuiltin {
 				possibleNode = true
 			}
-			candidate, known := jsRuntimeImportTarget(f.Rel, imp.Specifier, server, metadata)
+			tsPath, err := metadata.paths.Resolve(ctx, f.Rel, imp.Specifier, server)
+			if err != nil {
+				return jsRuntimeContext{}, err
+			}
+			possibleNode = possibleNode || tsPath.Uncertain
+			candidate, known := jsRuntimeImportTarget(f.Rel, imp.Specifier, server, metadata, tsPath)
+			if tsPath.Applicable && !known {
+				possibleNode = true
+			}
 			complete = complete && known
 			if candidate == "" || seen[candidate] {
 				continue

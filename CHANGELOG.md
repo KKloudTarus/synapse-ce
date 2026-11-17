@@ -63,6 +63,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- SAST keeps browser HTTP wrappers out of Go SSRF findings while preserving dynamic
+  Node.js and Dart destinations. Server context follows supported TypeScript and
+  JavaScript path aliases; unresolved context retains SSRF candidates.
+
 - Grype synthesizes missing CPEs when scanning an SBOM, restoring NVD advisories
   outside distro fix feeds, including unfixed Alpine busybox and zlib CVEs (#1618).
   Existing component CPEs are preserved in reconstructed SBOMs. Unfixed advisories
