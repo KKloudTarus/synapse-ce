@@ -1,5 +1,7 @@
 # Synapse playground
 
+Live at **<https://synapse-playground.pages.dev>**.
+
 A static build of the dashboard that answers its own API from fixtures, so anyone can click through
 the console without standing up Postgres, MinIO and the Go services. There is no backend, nothing is
 scanned, no target is reached, and no request leaves the visitor's browser.
