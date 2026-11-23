@@ -16,10 +16,11 @@ execution, tamper-evident evidence, and deterministic reports.
 [![License](https://img.shields.io/badge/license-Apache--2.0-6d5bff)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](go.mod)
 [![Docs](https://img.shields.io/badge/docs-live-6d5bff)](https://synapse.kkloudtarus.net/)
+[![Playground](https://img.shields.io/badge/playground-try%20it%20live-22c55e)](https://synapse-playground.pages.dev)
 [![CI](https://github.com/KKloudTarus/synapse-ce/actions/workflows/ci.yml/badge.svg)](https://github.com/KKloudTarus/synapse-ce/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/KKloudTarus/synapse-ce)](https://goreportcard.com/report/github.com/KKloudTarus/synapse-ce)
 
-[Landing page](https://synapse.kkloudtarus.net/) · [Documentation](docs/guide/README.md) · [Quickstart](#quickstart) · [Features](#features) · [Configuration](docs/guide/configuration.md)
+[Landing page](https://synapse.kkloudtarus.net/) · [**Live playground**](https://synapse-playground.pages.dev) · [Documentation](docs/guide/README.md) · [Quickstart](#quickstart) · [Features](#features) · [Configuration](docs/guide/configuration.md)
 
 </div>
 
@@ -148,6 +149,13 @@ The lasting difference is what sits around the finding:
 | Deterministic, model-free report path | Yes | Varies |
 
 ## Quickstart
+
+### Try it in the browser
+
+The [live playground](https://synapse-playground.pages.dev) is a static build of the dashboard backed by seeded
+fixtures, with a guided tour through engagements, supply-chain findings and reachability, evidence,
+code quality gates, and the agent fleet. Nothing is installed, no backend runs, no target is scanned, and the page makes no API call: fixtures answer from a service worker in the browser. The one external request is the web-font stylesheet, so the page is not request-free. See
+[`web/PLAYGROUND.md`](web/PLAYGROUND.md) for how it is built and deployed.
 
 ### Prerequisites
 
