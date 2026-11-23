@@ -63,6 +63,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- SAST keeps browser HTTP wrappers out of Go SSRF findings while preserving dynamic
+  Node.js and Dart destinations. Server context follows supported TypeScript and
+  JavaScript path aliases; unresolved context retains SSRF candidates.
+
 - **Terraform IAM wildcard statements are assessed in context (#1655).** `Resource = "*"`
   no longer reports when every action in the statement is an exact, case-insensitive match
   for `ec2:DescribeInstances` or `ec2:DescribeImages`, which have no resource types in the

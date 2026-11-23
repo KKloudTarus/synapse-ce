@@ -32,8 +32,8 @@ func TestSensitiveDataLoggingCoversStandardLoggers(t *testing.T) {
 		// degrade into "any logger call spanning lines".
 		"plain_multiline.py": "logger.info(\n    \"processed %d orders\",\n    count,\n)\n",
 		"catalog.py":         "catalog.info(\"item %s\", name)\n",
-		"backlog.go": "backlog.debug(\"queued %d\", n)\n",
-		"plain.py":   "logger.info(\"user %s logged in\", username)\n",
+		"backlog.go":         "backlog.debug(\"queued %d\", n)\n",
+		"plain.py":           "logger.info(\"user %s logged in\", username)\n",
 	}
 	for name, body := range flagged {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
