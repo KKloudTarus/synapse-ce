@@ -1,8 +1,8 @@
 import { req } from './client'
 
 // The authenticated DAST scanner and the per-judgment runtime-verification workflow. Requests carry
-// json tags (snake_case); the Proposal / ApprovalDecision / runner Result responses have no Go json
-// tags, so they arrive PascalCase and the mappers read that.
+// json tags (snake_case). Proposals have a lowercase envelope with PascalCase nested
+// action/decision fields; older envelopes and runner results use PascalCase.
 
 export interface DastScanInput {
   target: string
@@ -87,8 +87,8 @@ export interface RuntimeVerifyOutcome {
 }
 
 function mapProposal(raw: any): DastProposal {
-  const action = raw?.Action ?? {}
-  const decision = raw?.Decision ?? {}
+  const action = raw?.action ?? raw?.Action ?? {}
+  const decision = raw?.decision ?? raw?.Decision ?? {}
   return {
     actionId: action?.ID ?? '',
     tool: action?.Tool ?? '',

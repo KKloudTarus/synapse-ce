@@ -79,8 +79,15 @@ type progAttach struct {
 func classPrograms() []classProgram {
 	return []classProgram{
 		{
-			class: detection.ClassProcess, obj: execObj, mapName: "exec_events",
-			attach: []progAttach{{prog: "detect_execve", kind: attachTracepoint, group: "syscalls", name: "sys_enter_execve"}},
+			class: detection.ClassProcess, obj: execObj, requiresCORE: true, mapName: "exec_events",
+			attach: []progAttach{
+				{prog: "enter_execve", kind: attachTracepoint, group: "syscalls", name: "sys_enter_execve"},
+				{prog: "enter_execveat", kind: attachTracepoint, group: "syscalls", name: "sys_enter_execveat"},
+				{prog: "exit_execve", kind: attachTracepoint, group: "syscalls", name: "sys_exit_execve"},
+				{prog: "exit_execveat", kind: attachTracepoint, group: "syscalls", name: "sys_exit_execveat"},
+				{prog: "process_exec", kind: attachTracepoint, group: "sched", name: "sched_process_exec"},
+				{prog: "process_exit", kind: attachTracepoint, group: "sched", name: "sched_process_exit"},
+			},
 			decode: decodeExec,
 		},
 		{
@@ -115,9 +122,10 @@ type Sensor struct {
 	agentID   shared.ID
 	requested map[detection.Class]bool
 
-	mu       sync.Mutex
-	loaded   []*loadedClass
-	coverage []detection.ClassCoverage
+	mu           sync.Mutex
+	loaded       []*loadedClass
+	coverage     []detection.ClassCoverage
+	finalDropped map[detection.Class]uint64
 
 	// ktimeEpoch is the wall-clock instant of kernel monotonic time zero (boot), captured at Start; a
 	// decoder adds a record's bpf_ktime_get_ns() to it to recover the event's true occurred-at instead of
@@ -131,11 +139,14 @@ type Sensor struct {
 }
 
 type loadedClass struct {
-	class   detection.Class
-	coll    *ebpf.Collection
-	links   []link.Link
-	rd      *ringbuf.Reader
-	dropped atomic.Uint64 // events observed but dropped because the consumer was behind
+	class            detection.Class
+	coll             *ebpf.Collection
+	links            []link.Link
+	rd               *ringbuf.Reader
+	dropped          atomic.Uint64 // events observed but dropped because the consumer was behind
+	kernelDropped    func() (uint64, error)
+	kernelReadFailed bool   // protected by Sensor.mu; a failed read permanently degrades coverage
+	kernelCount      uint64 // protected by Sensor.mu; retain the last successful read
 }
 
 // NewSensor builds a sensor for the requested classes. A class not requested is reported as
@@ -193,24 +204,27 @@ func (s *Sensor) Start(ctx context.Context) error {
 	}
 
 	var coreCache *btf.Cache
-	var coreCapabilities HostCapabilities
-	if s.requested[detection.ClassNetwork] {
+	var coreCapabilities map[detection.Class]HostCapabilities
+	if s.requested[detection.ClassNetwork] || s.requested[detection.ClassProcess] {
 		coreCache = btf.NewCache()
-		coreCapabilities = probeHostCapabilities(runtime.GOARCH, embeddedObjectArch, func() (kernelTypeLookup, error) {
+		coreCapabilities = make(map[detection.Class]HostCapabilities)
+		load := func() (kernelTypeLookup, error) {
 			spec, err := coreCache.Kernel()
 			if err != nil {
 				return nil, err
 			}
 			return spec.AnyTypeByName, nil
-		})
+		}
+		coreCapabilities[detection.ClassNetwork] = probeHostCapabilities(runtime.GOARCH, embeddedObjectArch, load)
+		coreCapabilities[detection.ClassProcess] = probeClassCapabilities(runtime.GOARCH, embeddedObjectArch, load, []string{"task_struct", "signal_struct"})
 	}
 
 	for _, cp := range classPrograms() {
 		if !s.requested[cp.class] {
 			continue // reported as StateDisabled below
 		}
-		if cp.requiresCORE && !coreCapabilities.CORE {
-			s.recordGap(cp.class, detection.StateDegraded, coreCapabilities.Reason)
+		if cp.requiresCORE && !coreCapabilities[cp.class].CORE {
+			s.recordGap(cp.class, detection.StateDegraded, coreCapabilities[cp.class].Reason)
 			continue
 		}
 		lc, err := s.loadClass(cp, coreCache)
@@ -265,11 +279,27 @@ func (s *Sensor) loadClass(cp classProgram, cache *btf.Cache) (*loadedClass, err
 	if err != nil {
 		return nil, fmt.Errorf("load spec: %w", err)
 	}
+	return s.loadClassSpec(cp, spec, cache)
+}
+
+func (s *Sensor) loadClassSpec(cp classProgram, spec *ebpf.CollectionSpec, cache *btf.Cache) (*loadedClass, error) {
 	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{Cache: cache})
 	if err != nil {
 		return nil, fmt.Errorf("load programs: %w", err)
 	}
 	lc := &loadedClass{class: cp.class, coll: coll}
+	if cp.class == detection.ClassProcess {
+		counter := coll.Maps["process_dropped"]
+		if counter == nil {
+			lc.closeAll()
+			return nil, errors.New("process loss counter missing from object")
+		}
+		lc.kernelDropped = func() (uint64, error) {
+			var count uint64
+			err := counter.Lookup(uint32(0), &count)
+			return count, err
+		}
+	}
 	for _, pa := range cp.attach {
 		prog := coll.Programs[pa.prog]
 		if prog == nil {
@@ -361,16 +391,38 @@ func (s *Sensor) Coverage() []detection.ClassCoverage {
 	return out
 }
 
-// Dropped returns the number of observed-but-dropped events per class, caused by the consumer falling
-// behind the drain. It is surfaced so load pressure is visible rather than silent: the engine treats a
-// class with a rising drop count as degraded (its "no detections" can no longer be trusted) rather than
-// fully observed.
+// Dropped reports userspace and process-kernel losses. A counter read failure also permanently
+// degrades the class, since its observation completeness is then unknown.
 func (s *Sensor) Dropped() map[detection.Class]uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		out := make(map[detection.Class]uint64, len(s.finalDropped))
+		for class, count := range s.finalDropped {
+			out[class] = count
+		}
+		return out
+	}
+	return s.droppedLocked()
+}
+
+func (s *Sensor) droppedLocked() map[detection.Class]uint64 {
 	out := make(map[detection.Class]uint64, len(s.loaded))
 	for _, lc := range s.loaded {
-		if n := lc.dropped.Load(); n > 0 {
+		n := lc.dropped.Load()
+		if lc.kernelDropped != nil {
+			kernel, err := lc.kernelDropped()
+			if err != nil {
+				lc.kernelReadFailed = true
+			} else {
+				lc.kernelCount = kernel
+			}
+			n += lc.kernelCount
+			if lc.kernelReadFailed {
+				n++
+			}
+		}
+		if n > 0 {
 			out[lc.class] = n
 		}
 	}
@@ -380,33 +432,45 @@ func (s *Sensor) Dropped() map[detection.Class]uint64 {
 // Close detaches every class, stops the drains, and closes the event channel.
 func (s *Sensor) Close() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
 		return nil
 	}
 	s.closed = true
-	loaded := s.loaded
-	s.loaded = nil
-	s.mu.Unlock()
+	for i := range s.coverage {
+		if s.coverage[i].State == detection.StateActive {
+			s.coverage[i].State = detection.StateDegraded
+			s.coverage[i].Reason = "sensor stopped"
+		}
+	}
 
-	for _, lc := range loaded {
+	for _, lc := range s.loaded {
+		lc.detachLinks()
 		if lc.rd != nil {
 			_ = lc.rd.Close() // unblocks its drain
 		}
 	}
+	// Drains do not take s.mu. Keep readers out until producers have detached and all
+	// userspace loss accounting is final, then snapshot before closing the maps.
 	s.wg.Wait()
-	for _, lc := range loaded {
+	s.finalDropped = s.droppedLocked()
+	for _, lc := range s.loaded {
 		lc.closeAll()
 	}
+	s.loaded = nil
 	close(s.events)
 	return nil
 }
 
-func (lc *loadedClass) closeAll() {
+func (lc *loadedClass) detachLinks() {
 	for _, l := range lc.links {
 		_ = l.Close()
 	}
 	lc.links = nil
+}
+
+func (lc *loadedClass) closeAll() {
+	lc.detachLinks()
 	if lc.rd != nil {
 		_ = lc.rd.Close()
 		lc.rd = nil
@@ -421,8 +485,10 @@ func (lc *loadedClass) closeAll() {
 
 type rawExec struct {
 	Ktime    uint64
+	Start    uint64
 	PID      uint32
 	UID      uint32
+	Kind     uint32
 	Comm     [16]byte
 	Filename [256]byte
 	Arg1     [48]byte
@@ -434,6 +500,18 @@ func decodeExec(host shared.ID, raw []byte, epoch time.Time) (detection.Event, b
 	if binary.Read(bytes.NewReader(raw), binary.LittleEndian, &e) != nil {
 		return detection.Event{}, false
 	}
+	var kind string
+	switch e.Kind {
+	case 1:
+		kind = "exec"
+	case 2:
+		kind = "exit"
+	default:
+		return detection.Event{}, false
+	}
+	if e.PID == 0 || e.Start == 0 {
+		return detection.Event{}, false
+	}
 	now := kernelOccurredAt(epoch, e.Ktime)
 	var args []string
 	if a := cstr(e.Arg1[:]); a != "" {
@@ -442,10 +520,7 @@ func decodeExec(host shared.ID, raw []byte, epoch time.Time) (detection.Event, b
 	if a := cstr(e.Arg2[:]); a != "" {
 		args = append(args, a)
 	}
-	// At sys_enter_execve, bpf_get_current_comm returns the CALLER's comm (the old image is still mapped),
-	// not the program being executed — useless for a process rule that matches on the command. The
-	// reliable identity is the executable being run, so derive comm from the basename of its path; fall
-	// back to the kernel comm only if the path was unreadable.
+	// Prefer the executed path where captured; otherwise use the post-exec kernel comm.
 	path := cstr(e.Filename[:])
 	comm := cstr(e.Comm[:])
 	if path != "" {
@@ -453,7 +528,7 @@ func decodeExec(host shared.ID, raw []byte, epoch time.Time) (detection.Event, b
 	}
 	return detection.Event{
 		Class: detection.ClassProcess, At: now, Host: host,
-		Process: &detection.ProcessEvent{PID: int(e.PID), UID: int(e.UID), Comm: comm, Path: path, Args: args},
+		Process: &detection.ProcessEvent{Kind: kind, PID: int(e.PID), StartTimeNanos: e.Start, UID: int(e.UID), Comm: comm, Path: path, Args: args},
 	}, true
 }
 

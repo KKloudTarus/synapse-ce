@@ -1,0 +1,139 @@
+{
+  "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+  "manifest_id": "56dc4f8983cc51e6274d06c3162744df",
+  "job_id": "23157557d7baabcb685730fc1f7a9574",
+  "coverage_guard_refused": true,
+  "coverage_override": "explicit synthetic-only; no exhaustive coverage claim",
+  "report_get_before_worker_terminal": false,
+  "job": {
+    "status": "done",
+    "attempts": 1
+  },
+  "source": {
+    "source_id": "assessment_closure_report:e6e1018cd8c38760763f908e441f817198067c74d35a0ebcbfe2af541f5ec789",
+    "processed": false,
+    "data": {
+      "title": "Report generated",
+      "summary": "A report artifact was sealed from stored data.",
+      "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+      "report_id": "e6e1018cd8c38760763f908e441f817198067c74d35a0ebcbfe2af541f5ec789",
+      "report_kind": "assessment_closure_report",
+      "content_hash": "e6e1018cd8c38760763f908e441f817198067c74d35a0ebcbfe2af541f5ec789",
+      "generated_at": "2026-10-24T14:32:20Z",
+      "report_title": "Assessment closure report"
+    }
+  },
+  "paused_before_projection": true,
+  "crash_boundary": {
+    "before_crash_counts": {
+      "sources": 1,
+      "events": 0
+    },
+    "stopped_projector_profiles": [
+      "notifications",
+      "integrations"
+    ],
+    "report_get_before_crash": false,
+    "stored_report_hash": "e6e1018cd8c38760763f908e441f817198067c74d35a0ebcbfe2af541f5ec789",
+    "stored_report_bytes": 7706,
+    "signals": [
+      {
+        "service": "synapse-api",
+        "signal": "SIGKILL",
+        "command_exit": 0,
+        "before_started_at": "2026-10-24T14:24:24.519516275Z",
+        "observed_exit_code": 137,
+        "observed_state": "exited"
+      },
+      {
+        "service": "lifecycle",
+        "signal": "SIGKILL",
+        "command_exit": 0,
+        "before_started_at": "2026-10-24T14:24:24.404474119Z",
+        "observed_exit_code": 137,
+        "observed_state": "exited"
+      }
+    ],
+    "completed_at": "2026-10-24T14:32:23.167484+00:00"
+  },
+  "recovery": {
+    "counts": {
+      "sources": 1,
+      "processed_sources": 1,
+      "events": 1,
+      "deliveries": 4
+    },
+    "deliveries": [
+      {
+        "id": "56aa4f4d58524662f1a130861e15b45c",
+        "event_id": "de05f519b6cd0cf8618f7d9c7911cbe9",
+        "channel_id": "49303c325d852fbe91c46349753c38ce",
+        "type": "email",
+        "state": "delivered",
+        "attempts": 1
+      },
+      {
+        "id": "18c154e337cecf656ae92b27d4404998",
+        "event_id": "de05f519b6cd0cf8618f7d9c7911cbe9",
+        "channel_id": "6cef8455d6aa9d45f39c5df934dbc85e",
+        "type": "email",
+        "state": "delivered",
+        "attempts": 1
+      },
+      {
+        "id": "3dc4744a4d0b5a474e01d2aa3007ac3e",
+        "event_id": "de05f519b6cd0cf8618f7d9c7911cbe9",
+        "channel_id": "8f0e58285588ff20122299b9e95ebaf4",
+        "type": "email",
+        "state": "delivered",
+        "attempts": 1
+      },
+      {
+        "id": "9b39cf0b078b6f8e9072c8cee3d95c05",
+        "event_id": "de05f519b6cd0cf8618f7d9c7911cbe9",
+        "channel_id": "e7afbada70699473c906d6838c7f5f07",
+        "type": "email",
+        "state": "delivered",
+        "attempts": 1
+      }
+    ],
+    "receipts": [
+      {
+        "message_id": "aZZTguBwTJh6LCetHHJwv3",
+        "locale": "en",
+        "data_class": "signal",
+        "html_link": "https://127.0.0.1:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478",
+        "attachment_count": 0
+      },
+      {
+        "message_id": "JwskvDa3aLapa6JC6cjEFy",
+        "locale": "vi",
+        "data_class": "signal",
+        "html_link": "https://127.0.0.1:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478",
+        "attachment_count": 0
+      },
+      {
+        "message_id": "buw3fYmXiRaWfEM7xWLxcb",
+        "locale": "vi",
+        "data_class": "detail",
+        "html_link": "https://127.0.0.1:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478",
+        "attachment_count": 0
+      },
+      {
+        "message_id": "FVyiaYj2cCf69LhbYPj68E",
+        "locale": "en",
+        "data_class": "detail",
+        "html_link": "https://127.0.0.1:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478",
+        "attachment_count": 0
+      }
+    ],
+    "stored_report_hash_unchanged": true,
+    "cached_report_reads_stable": true,
+    "no_extra_smtp_messages": true,
+    "actual_received_smtp_messages": 4,
+    "recipient_headers_omitted": true,
+    "not_an_ack_loss_window_experiment": true,
+    "gmail_evidence": false,
+    "checked_at": "2026-10-24T14:33:01.383998+00:00"
+  }
+}

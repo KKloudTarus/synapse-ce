@@ -666,3 +666,27 @@ func TestApprovedCallbackPausedBeforeIssuanceCannotSurviveDisableAndReenable(t *
 		t.Fatal("callback returned a token after the user's credentials were revoked")
 	}
 }
+
+func TestApprovedIssuerWithTrailingSlashDoesNotAuthorizeSlashlessIdentity(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	issuer := testIssuer + "/"
+	if err := rig.users.SetOIDCLinking(issuer, testTenant); err != nil {
+		t.Fatal(err)
+	}
+	member := rig.member(t, "Approved person", user.RoleReadOnly)
+	if _, err := rig.users.LinkOIDCIdentity(t.Context(), rig.admin, member.ID, issuer, "shared-subject"); err != nil {
+		t.Fatal(err)
+	}
+	session, err := rig.login(t, ports.OIDCIdentity{Issuer: issuer, Subject: "shared-subject"})
+	if err != nil || session.Principal.ID != member.ID.String() {
+		t.Fatalf("exact approved issuer failed: %v", err)
+	}
+	beforeSessions, beforeLinks := rig.store.counts()
+	if _, err := rig.login(t, ports.OIDCIdentity{Issuer: testIssuer, Subject: "shared-subject"}); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("opposite issuer spelling was not denied: %v", err)
+	}
+	sessions, links := rig.store.counts()
+	if sessions != beforeSessions || links != beforeLinks {
+		t.Fatal("opposite issuer spelling created identity state")
+	}
+}

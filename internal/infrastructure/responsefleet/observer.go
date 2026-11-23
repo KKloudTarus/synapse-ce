@@ -52,10 +52,6 @@ func (d *ObserverDispatcher) EnsureObservation(ctx context.Context, req ports.Re
 	if d.receipts == nil {
 		return fmt.Errorf("%w: response observation dispatch lacks target evidence receipt builder", shared.ErrValidation)
 	}
-	receipt, err := d.receipts.Build(ctx, req)
-	if err != nil {
-		return fmt.Errorf("build target evidence receipt: %w", err)
-	}
 	bindings, err := d.bindings.ListResponseObserverBindings(ctx, req.Target.ProcessAssetID)
 	if err != nil {
 		return fmt.Errorf("list response observers: %w", err)
@@ -95,6 +91,10 @@ func (d *ObserverDispatcher) EnsureObservation(ctx context.Context, req ports.Re
 	}
 	if !now.Before(notAfter) {
 		return fmt.Errorf("%w: response observer binding expires before dispatch", shared.ErrForbidden)
+	}
+	receipt, err := d.receipts.Build(ctx, req)
+	if err != nil {
+		return fmt.Errorf("build target evidence receipt: %w", err)
 	}
 	digest, err := rdom.CanonicalDigest(req.Action)
 	if err != nil {

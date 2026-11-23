@@ -14,6 +14,7 @@ import (
 )
 
 func (rt *Router) registerEnterpriseAdministration(mux *http.ServeMux) {
+	rt.registerEnterpriseProvisioning(mux)
 	mux.HandleFunc("GET /api/v1/identity/connections", rt.recoverable(user.PermAdminister, authz.RecoveryReadIdentity, rt.enterpriseConnections))
 	mux.HandleFunc("POST /api/v1/identity/connections/draft", rt.recoverable(user.PermAdminister, authz.RecoveryRepairConnection, rt.enterpriseDraft))
 	mux.HandleFunc("POST /api/v1/identity/connections/activate", rt.recoverable(user.PermAdminister, authz.RecoveryRepairConnection, rt.enterpriseActivate))
@@ -129,31 +130,78 @@ func (rt *Router) enterpriseConnections(w http.ResponseWriter, r *http.Request) 
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"connections": v})
+	projected := make([]enterpriseConnectionProjection, 0, len(v))
+	for _, connection := range v {
+		projected = append(projected, enterpriseConnectionView(connection))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connections": projected})
 }
+
+// enterpriseConnectionProjection is the secret-free administrative response. A client ID is
+// projected only to authenticated administrators so they can prepare a replacement secret;
+// client secrets remain internal.
+type enterpriseConnectionProjection struct {
+	ID                      shared.ID `json:"id"`
+	DisplayName             string    `json:"display_name"`
+	Issuer                  string    `json:"issuer"`
+	Enabled                 bool      `json:"enabled"`
+	Revision                int       `json:"revision"`
+	DraftRevision           int       `json:"draft_revision"`
+	Version                 int       `json:"version"`
+	TestPassed              bool      `json:"test_passed"`
+	Auth0OrganizationID     string    `json:"auth0_organization_id,omitempty"`
+	EntraDiscoveryMode      string    `json:"entra_discovery_mode"`
+	DraftEntraDiscoveryMode string    `json:"draft_entra_discovery_mode"`
+	ConfigurationPending    bool      `json:"configuration_pending,omitempty"`
+	ClientID                string    `json:"client_id,omitempty"`
+}
+
+func enterpriseConnectionView(connection ports.IdentityConnection) enterpriseConnectionProjection {
+	view := enterpriseConnectionProjection{ID: connection.ID, DisplayName: connection.DisplayName, Issuer: connection.Issuer, Enabled: connection.Enabled, Revision: connection.Revision, DraftRevision: connection.DraftRevision, Version: connection.Version, TestPassed: connection.TestPassed, Auth0OrganizationID: connection.Settings.Auth0OrganizationID, EntraDiscoveryMode: connection.Settings.EntraDiscoveryMode, DraftEntraDiscoveryMode: connection.DraftEntraDiscoveryMode, ConfigurationPending: connection.ConfigurationPending}
+	if connection.ConfigurationPending {
+		view.ClientID = connection.ConfigurationClientID
+	} else {
+		view.ClientID = connection.Settings.ClientID
+	}
+	return view
+}
+
+type enterpriseConnectionDraftRequest struct {
+	ID                   shared.ID `json:"id"`
+	DisplayName          string    `json:"display_name"`
+	Issuer               string    `json:"issuer"`
+	ClientID             string    `json:"client_id"`
+	ClientSecret         string    `json:"client_secret"`
+	Auth0OrganizationID  string    `json:"auth0_organization_id"`
+	EntraDiscoveryMode   string    `json:"entra_discovery_mode"`
+	Version              int       `json:"version"`
+	BootstrapEligibility string    `json:"bootstrap_eligibility"`
+}
+
 func (rt *Router) enterpriseDraft(w http.ResponseWriter, r *http.Request) {
 	if !rt.enterpriseAdminGuard(w, r, authz.RecoveryRepairConnection) {
 		return
 	}
-	var b struct {
-		ID                   shared.ID `json:"id"`
-		DisplayName          string    `json:"display_name"`
-		Issuer               string    `json:"issuer"`
-		ClientID             string    `json:"client_id"`
-		ClientSecret         string    `json:"client_secret"`
-		Version              int       `json:"version"`
-		BootstrapEligibility string    `json:"bootstrap_eligibility"`
-	}
+	var b enterpriseConnectionDraftRequest
 	if !enterpriseDecode(w, r, &b) {
 		return
 	}
 	p, _ := principalObj(r.Context())
-	v, err := rt.enterprise.connections.SaveDraft(r.Context(), p.authz(), b.BootstrapEligibility, identityenterprise.ConnectionDraftInput{ID: b.ID, DisplayName: b.DisplayName, Issuer: b.Issuer, ClientID: b.ClientID, ClientSecret: b.ClientSecret, ExpectedVersion: b.Version})
+	v, err := rt.enterprise.connections.SaveDraft(r.Context(), p.authz(), b.BootstrapEligibility, identityenterprise.ConnectionDraftInput{ID: b.ID, DisplayName: b.DisplayName, Issuer: b.Issuer, ClientID: b.ClientID, ClientSecret: b.ClientSecret, Auth0OrganizationID: b.Auth0OrganizationID, EntraDiscoveryMode: b.EntraDiscoveryMode, ExpectedVersion: b.Version})
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, v)
+	if v.Revision != v.SettingsRevision {
+		active, err := rt.enterprise.store.GetIdentityConnection(r.Context(), shared.ID(p.TenantID), v.ID, 0)
+		if err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+		v.Settings = active.Settings
+	}
+	v.TestPassed = false
+	writeJSON(w, http.StatusOK, enterpriseConnectionView(v))
 }
 func (rt *Router) enterpriseActivate(w http.ResponseWriter, r *http.Request) {
 	if !rt.enterpriseAdminGuard(w, r, authz.RecoveryRepairConnection) {

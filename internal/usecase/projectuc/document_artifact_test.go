@@ -58,7 +58,7 @@ func TestReadProjectQualitySummaryUsesSelectedStoredAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repeat read: %v", err)
 	}
-	if !first.IntegrityVerified || first.EvidenceHead != "" || !strings.Contains(first.SourceRevision, "analysis:analysis-a:") || first.GeneratedAt != created {
+	if !first.IntegrityVerified || first.EvidenceHead != "" || first.ProjectKey != "payments-api" || !strings.Contains(first.SourceRevision, "analysis:analysis-a:") || first.GeneratedAt != created {
 		t.Fatalf("summary=%+v", first)
 	}
 	if len(first.Paragraphs) < 10 || strings.Contains(strings.Join(first.Paragraphs, "\n"), "model") {

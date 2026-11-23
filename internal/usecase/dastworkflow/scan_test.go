@@ -2,7 +2,9 @@ package dastworkflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastsurface"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastcrawl"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
@@ -149,29 +152,48 @@ func TestRunScanDoesNotPromoteIncompleteObservations(t *testing.T) {
 	}
 }
 
-func TestRunScanDoesNotPromoteCleanObservations(t *testing.T) {
-	wf, store := workflowForTest(t, &fakeRunner{}, &fakeApplier{})
-	config := validScanConfig()
-	session := &fakeScanSession{result: dastcrawl.Result{Observations: []ports.DASTObservation{{
-		Method: "GET", URL: config.Target + "/", Status: 200, BodySHA256: strings.Repeat("a", 64),
-		Headers: []string{"Strict-Transport-Security: max-age=1", "Set-Cookie: Secure; HttpOnly; SameSite=Lax"},
-	}}}}
-	evaluator := &fakeScanEvaluator{}
-	judgments := &fakeScanJudgments{}
-	verifier := &fakeScanVerifier{}
-	if err := wf.SetScan(session, "synapse-dast-helper", wf.evidence, evaluator, evaluator, judgments, verifier, DefaultScanCeilings()); err != nil {
-		t.Fatal(err)
-	}
-	proposal, err := wf.ProposeScan(context.Background(), "alice", "eng-1", config)
-	if err != nil && !errors.Is(err, safety.ErrPendingApproval) {
-		t.Fatalf("propose: %v", err)
-	}
-	if err := store.Decide(context.Background(), agent.ApprovalDecision{ActionID: proposal.Action.ID, State: agent.ApprovalApproved, DecidedBy: "bob", DecidedAt: time.Unix(1_700_100_000, 0)}); err != nil {
-		t.Fatal(err)
-	}
-	result, err := wf.RunScan(context.Background(), "alice", "eng-1", proposal.Action.ID, config)
-	if err != nil || len(result.Proofs) != 0 || len(judgments.proposed) != 0 || len(verifier.results) != 0 {
-		t.Fatalf("result=%+v judgments=%d verdicts=%d err=%v", result, len(judgments.proposed), len(verifier.results), err)
+func TestRunScanOnlyPromotesServedArtifacts(t *testing.T) {
+	const sourceMap = `{"version":3,"sources":["src.js"],"mappings":"AAAA"}`
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		proofs int
+	}{
+		{"empty response", 200, "", 0},
+		{"not served", 404, sourceMap, 0},
+		{"served source map", 200, sourceMap, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, store := workflowForTest(t, &fakeRunner{}, &fakeApplier{})
+			ctx := context.Background()
+			config := validScanConfig()
+			config.SelectedCheckIDs = []string{"sensitive-public-artifact"}
+			session := &fakeScanSession{result: dastcrawl.Result{Observations: []ports.DASTObservation{{
+				Method: "GET", URL: config.Target + "/app.js.map", Status: tc.status,
+				BodyExcerpt: tc.body, BodySHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(tc.body))),
+			}}}}
+			evaluator := dastchecks.NewEvaluator()
+			judgments := &fakeScanJudgments{}
+			verifier := &fakeScanVerifier{}
+			if err := wf.SetScan(session, "synapse-dast-helper", wf.evidence, evaluator, evaluator, judgments, verifier, DefaultScanCeilings()); err != nil {
+				t.Fatal(err)
+			}
+			proposal, err := wf.ProposeScan(ctx, "alice", "eng-1", config)
+			if err != nil {
+				t.Fatalf("propose: %v", err)
+			}
+			if err := store.Decide(ctx, agent.ApprovalDecision{ActionID: proposal.Action.ID, State: agent.ApprovalApproved, DecidedBy: "bob", DecidedAt: time.Unix(1_700_100_000, 0)}); err != nil {
+				t.Fatal(err)
+			}
+			result, err := wf.RunScan(ctx, "alice", "eng-1", proposal.Action.ID, config)
+			if err != nil || len(result.Proofs) != tc.proofs || len(judgments.proposed) != tc.proofs || len(verifier.results) != tc.proofs {
+				t.Fatalf("result=%+v judgments=%d verdicts=%d err=%v", result, len(judgments.proposed), len(verifier.results), err)
+			}
+			if tc.proofs == 1 && result.Proofs[0].Version != 3 {
+				t.Fatalf("new artifact proof version = %d, want 3", result.Proofs[0].Version)
+			}
+		})
 	}
 }
 

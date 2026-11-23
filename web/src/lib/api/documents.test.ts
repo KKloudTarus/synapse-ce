@@ -36,4 +36,12 @@ describe('document publishing API contract', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/document-publications/intent%201/resume', expect.objectContaining({ method: 'POST' }))
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ version: 4 })
   })
+
+  it('maps the frozen destination access profile from snapshot history', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 'snapshot-1', link_id: 'link-1', state: 'done', action: 'snapshot', version: 3, attempts: 1, access_profile: 'destination_managed_snapshot_v1', content_hash: 'a'.repeat(64), created_at: '2026-10-20T00:00:00Z', updated_at: '2026-10-20T00:01:00Z' }]), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const [snapshot] = await documentsApi.listSnapshots('link 1')
+    expect(snapshot).toMatchObject({ id: 'snapshot-1', accessProfile: 'destination_managed_snapshot_v1', contentHash: 'a'.repeat(64) })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/document-links/link%201/snapshots', expect.anything())
+  })
 })

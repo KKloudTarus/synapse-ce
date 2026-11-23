@@ -1,0 +1,168 @@
+{
+  "scope": "Tenant SMTP relay migrate-first runtime rollout and local DDL rehearsal; historical tested revisions retained",
+  "runtime": {
+    "started_at": "2026-10-29T11:31:17.068635+00:00",
+    "completed_at": "2026-10-29T11:32:01.581421+00:00",
+    "refs": {
+      "old": "ad218ef8759eb376f5d29ea254afd7c95b02c7e0",
+      "new": "567e8716cf98f08a855243336cfc76fc5680dd22"
+    },
+    "image": "postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3",
+    "binary_sha256": {
+      "old-api": "f7e36d594e99892bd23a85106434aff9f8a02bb0877371c4ac0babc33e99ade1",
+      "old-worker": "4d3ebe187a9e0aa00e6586adefd16567e91495ea9f0e5dbb31d29f6fc673f5c7",
+      "old-migrate": "6ce782df8c1449807ec16ec5d6c24ab7f5d70dd0db0562047f5514c1ef5171cd",
+      "new-api": "01f65e4e48330ff5ef879d6b8ca00703186211515529f846d9a1334e1fe291ae",
+      "new-worker": "1ef5acccf569044761e36c4749b7f6e1dc20cb911cea172880472656d0c780e6",
+      "new-migrate": "e52d36e5d948b03d34df4c40e345cb91aa271b46c15c161033874fc17e1e6f9f",
+      "checkpoint": "936613e6f383066d5ed1f01f2de2d03a7d3d8d45badf33d5ed5738213f84af1a",
+      "grant": "a44ae16093b6e112fd6d372adc9a94b7025187557e431e26e555f3868269b62d"
+    },
+    "runner_sha256": "e9d363d3903334aaa05ead1035d935a9764728a31c054686113d6416ba875982",
+    "cleanup": {
+      "containers": 0,
+      "networks": 0
+    },
+    "pass": true
+  },
+  "runtime_steps": [
+    {
+      "name": "checkpoint_verified",
+      "version": "231"
+    },
+    {
+      "name": "runtime_role",
+      "superuser": false,
+      "bypass_rls": false
+    },
+    {
+      "name": "migration_verified",
+      "version": "234",
+      "preserved": true,
+      "relay_rls_forced": true
+    },
+    {
+      "name": "verified_delivery",
+      "delivery_id": "7f21a96df47f442c6ed8396703772435",
+      "state": "delivered:1",
+      "authenticated": true,
+      "headers_valid": true,
+      "body_nonempty": true,
+      "message_sha256": "87b45cfd52befe836cdb7b73506ebe6ad1b573e80cd25ff1071b8f1afbf2bc73",
+      "history_present": true,
+      "attempt_present": true
+    },
+    {
+      "name": "feature_restart",
+      "relay_unchanged": true,
+      "delivery_unchanged": true
+    },
+    {
+      "name": "old_rollback",
+      "old_seed_unchanged": true,
+      "relay_unchanged": true,
+      "delivery_unchanged": true,
+      "schema": "234",
+      "old_api_seed_visible": true
+    },
+    {
+      "name": "feature_restored",
+      "relay_unchanged": true,
+      "delivery_unchanged": true,
+      "old_seed_unchanged": true
+    },
+    {
+      "name": "verified_delivery",
+      "delivery_id": "a803ea17aa2f16afd26f0558f99c58e0",
+      "state": "delivered:1",
+      "authenticated": true,
+      "headers_valid": true,
+      "body_nonempty": true,
+      "message_sha256": "af948e1de3391e3afe67de875a69bc23459164719b024a15fd277a568c344cd1",
+      "history_present": true,
+      "attempt_present": true
+    }
+  ],
+  "runtime_results_sha256": "247cad8aeac4c65b2830b034c3b8e6ecf2b094a19f02f343da932722ac4b4704",
+  "ddl": {
+    "source_head": "4974bf36df8aa13d9bafaf0127e578b7d6012e07",
+    "started_at": "2026-10-29T10:10:40.942898+00:00",
+    "completed_at": "2026-10-29T10:12:13.575184+00:00",
+    "helper_sha256": "c0f9de7ceedf7d5d1e49cf58af9a2147429a7b9b78e99864d3c3aef0e7cebf6f",
+    "runner_sha256": "4fbd38fa8d98070557ab7c14249fe0d2b18c2c6d4e612769decfccdaaf86faf2",
+    "results_sha256": "2b0fb6ce4e79bc2656d853c1d4a22a2caf4f6eba627695190396375ffc6fa24d",
+    "runs": [
+      {
+        "rows": 10000,
+        "ddl_ms": 28.56,
+        "conflicting_lock_abort_ms": 507.835,
+        "atomic_rollback": "true",
+        "lock_timeout_error": true,
+        "version_after_abort": 231,
+        "index_valid": "true",
+        "new_tables_rls": "true",
+        "rls_cross_tenant_denied": true,
+        "write_latency": {
+          "count": 235,
+          "p50_ms": 1.333,
+          "p95_ms": 3.467,
+          "max_ms": 29.499,
+          "errors": 0
+        }
+      },
+      {
+        "rows": 100000,
+        "ddl_ms": 107.583,
+        "conflicting_lock_abort_ms": 508.914,
+        "atomic_rollback": "true",
+        "lock_timeout_error": true,
+        "version_after_abort": 231,
+        "index_valid": "true",
+        "new_tables_rls": "true",
+        "rls_cross_tenant_denied": true,
+        "write_latency": {
+          "count": 259,
+          "p50_ms": 1.379,
+          "p95_ms": 2.604,
+          "max_ms": 103.252,
+          "errors": 0
+        }
+      },
+      {
+        "rows": 1000000,
+        "ddl_ms": 19214.846,
+        "conflicting_lock_abort_ms": 2611.443,
+        "atomic_rollback": "true",
+        "lock_timeout_error": true,
+        "version_after_abort": 231,
+        "index_valid": "true",
+        "new_tables_rls": "true",
+        "rls_cross_tenant_denied": true,
+        "write_latency": {
+          "count": 2,
+          "p50_ms": 394.362,
+          "p95_ms": 394.362,
+          "max_ms": 19025.038,
+          "errors": 0
+        }
+      }
+    ],
+    "cleanup": {
+      "containers": 0,
+      "networks": 0
+    }
+  },
+  "limitations": [
+    "Local TLS AUTH SMTP fixture and synthetic dataset; no cloud SMTP, mobile-client or production capacity claim.",
+    "Runtime rollback restarted old API/worker binaries on expanded schema 234 without Down; no zero-downtime mixed-version proof.",
+    "DDL lock_timeout applies per acquisition; total abort and rollback can exceed 500 ms.",
+    "One reader and one writer; the 1M writer has only two successful samples, so its percentiles are not reliable.",
+    "Running Down destroys relay/domain data in the disposable database; operational rollback preserves expanded schema.",
+    "Binary hashes, exact source archives and DWARF paths were checked; no reproducible-build attestation or vcs revision stamp."
+  ],
+  "review": {
+    "verdict": "pass scoped operational integration verification",
+    "checked_at": "2026-10-29T11:40:14.354116+00:00",
+    "final_code_review": false
+  }
+}

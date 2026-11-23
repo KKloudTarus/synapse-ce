@@ -243,6 +243,22 @@ func (e *Executor) waitForResult(ctx context.Context, req ports.ResponseExecRequ
 	}
 }
 
+// ResolveReplacement returns the authenticated, lease-bound execution result; it is not verification.
+func (e *Executor) ResolveReplacement(ctx context.Context, req ports.ResponseVerificationRequest) (shared.ID, error) {
+	order, err := e.work.GetByIdempotencyKey(ctx, req.TenantID, req.AttemptKey)
+	if err != nil {
+		return "", fmt.Errorf("read reversal execution result: %w", err)
+	}
+	if order == nil || order.ValidateResponseBinding() != nil || order.ResponseCommand == nil || order.ResponseResult == nil || order.ResponseResult.State != fleetagent.ResponseExecutionApplied || order.State != workorder.StateSucceeded {
+		return "", fmt.Errorf("%w: reversal execution result is unavailable or invalid", shared.ErrForbidden)
+	}
+	command := order.ResponseCommand
+	if command.TenantID != req.TenantID || command.EngagementID != req.EngagementID || command.AgentID != req.ExecutorAgentID || command.Action.ID != req.Action.ID || command.Target != req.Target || command.AttemptKey != req.AttemptKey || command.VerificationChallenge != req.VerificationChallenge || !command.Reversal || command.ActionDigest != receiptDigest(req.Action) {
+		return "", fmt.Errorf("%w: reversal execution result is bound to another attempt", shared.ErrForbidden)
+	}
+	return order.ResponseResult.ReplacementProcessEntityID, nil
+}
+
 func validateRequest(req ports.ResponseExecRequest) error {
 	if req.TenantID.IsZero() || req.EngagementID.IsZero() || req.ActionID.IsZero() || req.AgentID.IsZero() ||
 		strings.TrimSpace(req.IdempotencyKey) == "" || req.IssuedAt.IsZero() || req.DeadlineAt.IsZero() ||
@@ -252,10 +268,7 @@ func validateRequest(req ports.ResponseExecRequest) error {
 	if err := req.Action.Validate(); err != nil {
 		return err
 	}
-	if err := req.Fingerprint.Validate(); err != nil {
-		return err
-	}
-	if err := req.AuthorizationTarget.Validate(); err != nil {
+	if err := rdom.ValidateTargetBinding(req.Action, req.AuthorizationTarget, req.Fingerprint); err != nil {
 		return err
 	}
 	if req.Action.ID != req.ActionID || req.Action.Target != req.Target || req.Declared != req.Action.BlastRadius ||

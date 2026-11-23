@@ -331,7 +331,11 @@ func (c *Connector) enumerateProject(ctx context.Context, clients clients, proje
 func (c *Connector) instances(ctx context.Context, service *compute.Service, project string, inv *cloudposture.Inventory, gaps *[]cloudposture.CoverageIssue) ([]*compute.Instance, error) {
 	var instances []*compute.Instance
 	for token := ""; ; {
-		page, err := service.Instances.AggregatedList(project).Context(ctx).MaxResults(int64(c.opts.MaxResources)).PageToken(token).ReturnPartialSuccess(true).Do()
+		// Compute dropped the returnPartialSuccess parameter from aggregated lists:
+		// the behaviour it asked for is now the only behaviour, and a scope the
+		// caller cannot reach still arrives in Unreachables below rather than
+		// failing the page. Setting it again would not compile.
+		page, err := service.Instances.AggregatedList(project).Context(ctx).MaxResults(int64(c.opts.MaxResources)).PageToken(token).Do()
 		if err != nil {
 			return instances, err
 		}

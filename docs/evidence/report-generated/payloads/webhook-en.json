@@ -1,0 +1,28 @@
+{
+  "body": {
+    "data": {
+      "vars": {
+        "content_hash": "3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5",
+        "engagement_name": "Live acceptance",
+        "event_label": "Report generated",
+        "event_type": "report.generated",
+        "finding_count": "7",
+        "generated_at": "2026-10-23T09:00:00Z",
+        "occurred_at": "2026-10-23T09:00:00Z",
+        "report_kind": "engagement_report",
+        "report_title": "Security assessment report: Live acceptance",
+        "severity": "high",
+        "summary": "A report artifact was sealed from stored data.",
+        "title": "Report generated"
+      }
+    },
+    "event": {
+      "id": "live-report-generated",
+      "occurred_at": "0001-01-01T00:00:00Z",
+      "schema_version": 1,
+      "severity": "high",
+      "type": "report.generated"
+    },
+    "version": "synapse.notification.v1"
+  }
+}

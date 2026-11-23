@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"golang.org/x/net/idna"
 )
 
@@ -209,6 +210,11 @@ func NormalizeTarget(t Target, scopeEntry bool) (Target, error) {
 			return Target{}, err
 		}
 		out.Value = identity.URL
+	case TargetProcess:
+		if !telemetry.ValidProcessEntityID(t.Value) {
+			return Target{}, validationError("process scope requires a canonical ProcessEntityID")
+		}
+		out.Value = t.Value
 	case TargetRepo, TargetImage, TargetCloudAccount:
 		out.Value = v
 	default:

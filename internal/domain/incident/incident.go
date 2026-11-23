@@ -94,12 +94,13 @@ type Incident struct {
 	Risk         *riskassessment.RiskAssessment
 	MergedInto   shared.ID
 	// Members is only populated on canonical logical projections; event-sourced per-ID projections leave it empty.
-	Members   []Member
-	Comments  []Comment
-	Responses []ResponseRef
-	Revision  int
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Members      []Member
+	Comments     []Comment
+	Responses    []ResponseRef
+	Revision     int
+	PagerEpisode int64 `json:"-"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // IsMerged reports whether the incident was merged into another.
@@ -154,6 +155,7 @@ func applyCreated(inc *Incident, e IncidentEvent) error {
 	inc.Title = e.Title
 	inc.Severity = e.Severity
 	inc.State = StateNew
+	inc.PagerEpisode = 1
 	inc.Disposition = DispositionUnknown
 	inc.CreatedAt = e.At
 	if !e.DetectionID.IsZero() {
@@ -179,6 +181,9 @@ func apply(inc *Incident, e IncidentEvent) error {
 	case EventStatusChanged:
 		if err := requireTransition(inc.State, e.To); err != nil {
 			return err
+		}
+		if inc.State.PagerTerminal() && !e.To.PagerTerminal() {
+			inc.PagerEpisode++
 		}
 		inc.State = e.To
 	case EventOwnerChanged:

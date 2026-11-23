@@ -21,7 +21,7 @@ import (
 
 func signingCommand(t *testing.T, at time.Time) fleetagent.ResponseCommand {
 	t.Helper()
-	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +33,8 @@ func signingCommand(t *testing.T, at time.Time) fleetagent.ResponseCommand {
 		ProtocolVersion: fleetagent.ResponseCommandProtocolVersion, CommandID: "command-1", TenantID: "tenant-1",
 		AgentID: "agent-1", AssetID: "asset-1", EngagementID: "engagement-1", Action: action, ActionDigest: digest,
 		AttemptKey: "attempt-1", VerificationChallenge: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "process-1"},
-		Target:              responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: "pe_11111111111111111111111111111111"},
+		Target:              responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		IssuedAt:            at, NotAfter: at.Add(time.Minute),
 	}
 }

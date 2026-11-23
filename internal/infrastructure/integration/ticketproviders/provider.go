@@ -772,7 +772,7 @@ func (a *Adapter) TicketIdentity(ctx context.Context) (string, error) {
 				ID string `json:"id"`
 			} `json:"authenticatedUser"`
 		}
-		if err := a.request(ctx, http.MethodGet, "/"+parts[0]+"/_apis/connectionData", url.Values{"api-version": {"7.1"}}, nil, &out); err != nil {
+		if err := a.request(ctx, http.MethodGet, "/"+parts[0]+"/_apis/connectionData", url.Values{"api-version": {"7.1-preview.1"}}, nil, &out); err != nil {
 			return "", err
 		}
 		return identity(out.AuthenticatedUser.ID)

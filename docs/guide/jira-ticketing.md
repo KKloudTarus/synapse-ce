@@ -37,7 +37,35 @@ another automatic POST. Breakers and rate-limit eligibility survive process rest
 Definite 400/401/403/404 failures open the destination tuple until an audited
 administrator recovery. A 429 cooldown cannot be reset before `Retry-After` expires.
 
-After repairing a 400/401/403/404 cause, a human administrator can send
+To identify the blocked destination, use the failed intent's immutable snapshot.
+The current mapping may already point somewhere else. An authorized operator can
+run this read-only query with the normal tenant-scoped database role, substituting
+the authorized tenant and the intent ID returned by
+`GET /api/v1/engagements/{id}/findings/{fid}/tickets` (`intents[].id`):
+
+```sql
+BEGIN READ ONLY;
+SELECT set_config('app.current_tenant', 'authorized-tenant-id', true);
+SELECT i.id, i.integration_id,
+       i.payload_snapshot #>> '{fields,project,key}' AS project_key,
+       i.payload_snapshot #>> '{fields,issuetype,id}' AS issue_type,
+       b.breaker_code, b.gate_until
+FROM ticket_intents AS i
+LEFT JOIN ticket_dispatch_breakers AS b
+  ON b.tenant_id = i.tenant_id AND b.integration_id = i.integration_id
+ AND b.project_key = i.payload_snapshot #>> '{fields,project,key}'
+ AND b.issue_type = i.payload_snapshot #>> '{fields,issuetype,id}'
+WHERE i.tenant_id = current_setting('app.current_tenant')
+  AND i.id = 'intent-id';
+ROLLBACK;
+```
+
+`issue_type` is the Jira issue type ID, such as `10001`, not its display name
+such as `Bug`. If the snapshot target is missing, stop and investigate the retained
+intent; do not substitute the current mapping. The query returns only destination
+and gate fields, without exposing the stored payload or credentials.
+
+After repairing the credential or other 400/401/403/404 cause, a human administrator can send
 `POST /api/v1/integrations/{integrationID}/jira-breaker/reset` with
 `{"project_key":"SEC","issue_type":"10001"}` using the original destination
 tuple. This audited operation clears its gate without retrying a failed command,
@@ -46,6 +74,18 @@ replacement is already pending or the failed command's finding no longer exists.
 The next worker poll revalidates pending commands before sending them; commands
 approved before a credential or mapping change still require a fresh preview and
 replacement. An active 429 cooldown returns 409 and remains enforced.
+Resetting an existing, already-clear tuple still records a `ticket.breaker.reset`
+audit entry and returns 204; it does not retry a command. A valid tuple that has never
+been recorded returns 404 without a reset audit entry. Each successful explicit
+reset is audited, including repeated requests; an active dispatch lease is kept.
+
+Bulk submission returns one result per finding. A policy or permission refusal
+uses `error_code: permission_denied`, rather than `unavailable`. Other stable
+per-item codes are `validation`, `not_found`, `conflict` and `unavailable`; raw
+provider and policy error text is not returned. HTTP 202 means the batch was
+processed, not that every item was accepted. Repair the refused condition and
+prepare a fresh preview before resubmitting; route-level permission denial remains
+HTTP 403.
 
 Reconciliation searches the original destination for the exact correlation label.
 One verified match completes the intent; multiple matches require human review.

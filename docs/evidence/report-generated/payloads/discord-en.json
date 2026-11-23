@@ -1,0 +1,14 @@
+{
+  "body": {
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "color": 15164957,
+        "description": "Severity\\: high\nReport type\\: engagement\\_report\nFindings\\: 7\nGenerated\\: 2026\\-10\\-23T09\\:00\\:00Z\nEngagement\\: Live acceptance\nTitle\\: Security assessment report\\: Live acceptance\nContent hash\\: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5",
+        "title": "Report generated"
+      }
+    ]
+  }
+}

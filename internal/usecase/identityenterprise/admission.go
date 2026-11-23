@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
@@ -88,7 +89,7 @@ func (s *AdmissionService) SendMailboxChallenge(ctx context.Context, route ports
 		return err
 	}
 	if result := s.mailer.SendContactVerification(ctx, v.Recipient, code, v.ID); result.ErrorCode != "" {
-		return fmt.Errorf("invitation mailbox delivery failed: %s", result.ErrorCode)
+		return fmt.Errorf("%w: invitation mailbox delivery failed: %s", authz.ErrAuthenticationUnavailable, result.ErrorCode)
 	}
 	return nil
 }

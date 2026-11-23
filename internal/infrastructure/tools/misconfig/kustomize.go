@@ -39,8 +39,8 @@ const (
 	maxKustomizeRenders    = 200              // bound the total renders on a hostile tree with many roots
 )
 
-// isKustomizationName recognizes a kustomization root file by its conventional names.
-func isKustomizationName(name string) bool {
+// IsKustomizationName recognizes a kustomization root file by its conventional names.
+func IsKustomizationName(name string) bool {
 	switch name {
 	case "kustomization.yaml", "kustomization.yml", "Kustomization":
 		return true
@@ -89,7 +89,7 @@ func collectKustomizations(ctx context.Context, root string) (index map[string]*
 		if walked > maxEntries {
 			return filepath.SkipAll
 		}
-		if d.IsDir() || !d.Type().IsRegular() || !isKustomizationName(d.Name()) {
+		if d.IsDir() || !d.Type().IsRegular() || !IsKustomizationName(d.Name()) {
 			return nil
 		}
 		dir := filepath.Dir(path)
@@ -154,6 +154,11 @@ func within(root, abs string) bool {
 // must not be scanned raw. A reference cycle is bounded by the visited set.
 func coveredFiles(rootDir string, index map[string]*kustomization) map[string]bool {
 	covered := map[string]bool{}
+	walkKustomizations(index, []string{rootDir}, covered)
+	return covered
+}
+
+func walkKustomizations(index map[string]*kustomization, dirs []string, covered map[string]bool) map[string]bool {
 	visited := map[string]bool{}
 	var visit func(dir string)
 	visit = func(dir string) {
@@ -165,26 +170,32 @@ func coveredFiles(rootDir string, index map[string]*kustomization) map[string]bo
 		if !ok {
 			return
 		}
-		covered[k.file] = true
+		if covered != nil {
+			covered[k.file] = true
+		}
 		for _, ref := range k.refs {
 			if _, isKustomizeDir := index[ref]; isKustomizeDir {
 				visit(ref) // a referenced sub-kustomization directory
 				continue
 			}
-			covered[ref] = true // a referenced manifest / patch file
+			if covered != nil {
+				covered[ref] = true // a referenced manifest / patch file
+			}
 		}
 	}
-	visit(rootDir)
-	return covered
+	for _, dir := range dirs {
+		visit(dir)
+	}
+	return visited
 }
 
 // renderKustomization runs `kustomize build dir` (sandboxed or direct, per the Scanner's configuration) and
 // scans the rendered manifests with the Kubernetes rules. root is bound read-only in the sandbox so a base
 // referenced from a sibling directory (../base) is readable. It returns ok=false when rendering is not
 // enabled or the render FAILED, so the caller can leave the raw scan in place rather than suppress findings.
-func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir string) (k8sScanResult, bool) {
+func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir string) (k8sScanResult, bool, string) {
 	if s.kustomizeBin == "" {
-		return k8sScanResult{}, false
+		return k8sScanResult{}, false, "kustomization rendering is not configured, so overlay patches were not applied"
 	}
 	args := []string{"build", dir}
 	var rendered []byte
@@ -201,12 +212,12 @@ func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir str
 		// Truncated output drops trailing manifests, so a covered resource might never be scanned: treat it as
 		// a failed render (ok=false) so those files fall back to the raw scan instead of being hidden.
 		if err != nil || res.ExitCode != 0 || res.Truncated {
-			return k8sScanResult{}, false
+			return k8sScanResult{}, false, "kustomize build failed, so this overlay's patches were not applied"
 		}
 		rendered = res.Stdout
 	case s.kustomizeDir:
 		if _, err := exec.LookPath(s.kustomizeBin); err != nil {
-			return k8sScanResult{}, false
+			return k8sScanResult{}, false, "the kustomize binary was not found, so overlay patches were not applied"
 		}
 		cctx, cancel := context.WithTimeout(ctx, kustomizeRenderTimeout)
 		defer cancel()
@@ -214,14 +225,15 @@ func (s *Scanner) renderKustomization(ctx context.Context, root, dir, relDir str
 		cw := &cappedBuffer{max: maxRenderedBytes}
 		cmd.Stdout, cmd.Stderr = cw, io.Discard
 		if err := cmd.Run(); err != nil || cw.truncated {
-			return k8sScanResult{}, false // truncation would hide trailing manifests: fall back to raw scan
+			// Truncation would hide trailing manifests: fall back to the raw scan.
+			return k8sScanResult{}, false, "kustomize build failed, so this overlay's patches were not applied"
 		}
 		rendered = cw.buf.Bytes()
 	default:
-		return k8sScanResult{}, false // kustomize rendering not enabled
+		return k8sScanResult{}, false, "kustomization rendering is not enabled for this scan, so overlay patches were not applied"
 	}
 	agg := filepath.ToSlash(filepath.Join(relDir, "kustomization.yaml"))
-	return scanKubernetesFrom(agg, rendered, kustomizeOriginIndex(root, dir)), true
+	return scanKubernetesFrom(agg, rendered, kustomizeOriginIndex(root, dir)), true, ""
 }
 
 // kustomizeOriginIndex maps a rendered document back to the manifest that declared it, keyed by

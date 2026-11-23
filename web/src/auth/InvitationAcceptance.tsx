@@ -30,17 +30,27 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   return response.json()
 }
 
-function takeMailboxMarker(): boolean {
-  const url = new URL(window.location.href)
-  if (url.searchParams.get('auth_error') !== 'mailbox_verification_required') return false
-  url.searchParams.delete('auth_error')
-  window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash)
-  return true
+function invitationError(cause: unknown, action: Action['kind']): string {
+  if (cause instanceof ApiError) {
+    if (cause.status === 401) return action === 'challenge'
+      ? 'Your sign-in session is no longer available. Sign in again, then retry mailbox verification.'
+      : 'Your sign-in session is no longer available. Sign in again, then retry the invitation.'
+    if (cause.status === 429) return 'Too many attempts. Wait a moment, then retry.'
+    if ([400, 403, 404, 409, 410, 422].includes(cause.status)) {
+      if (action === 'challenge') return 'This mailbox verification code is invalid or expired. Ask your administrator for a new invitation if you need one.'
+      return 'This invitation is invalid, expired, or no longer active. Ask your administrator for a current invitation.'
+    }
+  }
+  return cause instanceof Error ? cause.message : 'Could not continue the invitation.'
+}
+
+function retryableInvitationError(cause: unknown): boolean {
+  return cause instanceof ApiError && (cause.status === 0 || cause.status === 429 || cause.status >= 500)
 }
 
 /** Accepts server-routed invitation and mailbox codes without storing either outside component state. */
 export function InvitationAcceptance() {
-  const { retry } = useAuth()
+  const { completeMailboxContinuation } = useAuth()
   const [invitationCode, setInvitationCode] = useState('')
   const [mailboxCode, setMailboxCode] = useState('')
   const [providerChoices, setProviderChoices] = useState<Connection[]>([])
@@ -70,14 +80,13 @@ export function InvitationAcceptance() {
     } catch (cause) {
       if (!(cause instanceof DOMException && cause.name === 'AbortError') && generation.current === generationAtStart) {
         setError(cause instanceof Error ? cause.message : 'Could not check mailbox verification.')
-        setCanRetry(cause instanceof ApiError && (cause.status === 0 || cause.status >= 500))
+        setCanRetry(retryableInvitationError(cause))
       }
     } finally { if (generation.current === generationAtStart) setLoading(false) }
   }, [])
 
   useEffect(() => {
     if (!mailboxRequested.current) return
-    takeMailboxMarker()
     void pendingMailbox()
   }, [pendingMailbox])
 
@@ -102,7 +111,7 @@ export function InvitationAcceptance() {
       if (action.kind === 'challenge') {
         const csrfToken = text(value.csrf_token)
         if (!csrfToken) throw new Error('The mailbox verification response was incomplete.')
-        pending.current = null; setMailboxCode(''); setCSRFToken(csrfToken); await retry(); return
+        pending.current = null; setMailboxCode(''); setCSRFToken(csrfToken); await completeMailboxContinuation(); return
       }
       const authorizationURL = text(value.authorization_url)
       if (authorizationURL) { window.location.assign(authorizationURL); return }
@@ -111,16 +120,18 @@ export function InvitationAcceptance() {
       throw new Error('The invitation response did not include an approved identity provider.')
     } catch (cause) {
       if (!(cause instanceof DOMException && cause.name === 'AbortError') && generation.current === generationAtStart) {
-        setError(cause instanceof Error ? cause.message : 'Could not continue the invitation.')
-        setCanRetry(cause instanceof ApiError && (cause.status === 0 || cause.status >= 500))
+        setError(invitationError(cause, action.kind))
+        setCanRetry(retryableInvitationError(cause))
       }
     } finally { if (generation.current === generationAtStart) setLoading(false) }
-  }, [retry])
+  }, [completeMailboxContinuation])
 
   function cancel() {
+    const wasMailbox = mailboxRequested.current
     mailboxRequested.current = false
     generation.current++; controller.current?.abort(); pending.current = null
     setInvitationCode(''); setMailboxCode(''); setProviderChoices([]); setProvider(''); setMailbox(false); setError(null); setCanRetry(false)
+    if (wasMailbox) void completeMailboxContinuation()
   }
   function retryAction() { const action = pending.current; if (action) void submit(action); else if (mailbox || mailboxRequested.current) void pendingMailbox() }
   function invitationSubmit(event: FormEvent) { event.preventDefault(); if (invitationCode) { setProviderChoices([]); void submit({ kind: 'invitation', code: invitationCode }) } }
@@ -131,6 +142,12 @@ export function InvitationAcceptance() {
     if (action?.kind === 'invitation' && selected) void submit({ ...action, connectionId: selected })
   }
   const errorNode = error ? <p ref={errorRef} tabIndex={-1} role="alert" className="mt-3 text-sm text-critical">{error} {canRetry ? <button type="button" className="underline" onClick={retryAction}>Retry</button> : null}</p> : null
+
+  if (mailboxRequested.current && !mailbox) return <section aria-labelledby="mailbox-heading" className="mt-5 rounded-xl border border-secondary bg-secondary/30 p-4">
+    <h2 id="mailbox-heading" className="text-sm font-semibold text-primary">Verify your mailbox</h2>
+    {loading ? <p role="status" className="mt-3 text-sm text-tertiary">Checking mailbox verification…</p> : errorNode}
+    <button type="button" className="mt-3 text-sm underline" onClick={cancel}>Cancel</button>
+  </section>
 
   if (mailbox) return <section aria-labelledby="mailbox-heading" className="mt-5 rounded-xl border border-secondary bg-secondary/30 p-4">
     <h2 id="mailbox-heading" className="text-sm font-semibold text-primary">Verify your mailbox</h2><p className="mt-1 text-sm text-tertiary">Enter the one-time code sent to the invitation recipient.</p>

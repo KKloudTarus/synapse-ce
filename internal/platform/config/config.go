@@ -1624,8 +1624,7 @@ func (c Config) ValidateEgressGrantPosture(role ProcessRole) error {
 	return nil
 }
 
-// ValidateNetworkExecutionPosture rejects production network execution kinds that do not yet
-// have a trusted control-plane issuer branch. Development may use the local test egress applier.
+// ValidateNetworkExecutionPosture requires the trusted issuer and sandbox for cloud execution.
 func (c Config) ValidateNetworkExecutionPosture(role ProcessRole) error {
 	if !c.IsProduction() {
 		return nil
@@ -1633,7 +1632,10 @@ func (c Config) ValidateNetworkExecutionPosture(role ProcessRole) error {
 	switch role {
 	case ProcessRoleAPI, ProcessRoleWorker:
 		if c.CSPMEnabled {
-			return errors.New("production CSPM execution requires authoritative signed CSPM grants and is not yet supported")
+			if !c.SandboxEnabled {
+				return errors.New("production CSPM execution requires sandboxing")
+			}
+			return c.ValidateEgressGrantPosture(role)
 		}
 		return nil
 	default:

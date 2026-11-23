@@ -13,7 +13,7 @@ No customer data or configured credential is included. Production recovery objec
 
 ## Selected issue security level
 
-These new synthetic findings use the reporter-only Synapse Restricted level, without a waiver. The older waiver samples below retain their original provenance. No screenshot was composed, cropped, recolored or otherwise altered; PNG conversion preserves decoded JPEG pixels.
+These new synthetic findings use the reporter-only Synapse Restricted level, without a waiver. In `security-selection.json`, `checks.waiver: true` means the assertion that no waiver was used passed; it is not a raw waiver value. All four records select security level `10000`. The older waiver samples below retain their original provenance. No screenshot was composed, cropped, recolored or otherwise altered; PNG conversion preserves decoded JPEG pixels.
 
 ### Jira Cloud — English
 

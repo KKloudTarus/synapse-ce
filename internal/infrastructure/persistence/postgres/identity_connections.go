@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -18,16 +19,23 @@ import (
 
 var _ ports.IdentityConnectionStore = (*IdentityFoundationStore)(nil)
 
-const connectionProjection = `c.tenant_id,c.id,c.display_name,c.trust_namespace,c.enabled,c.revision,
+const connectionProjectionPrefix = `c.tenant_id,c.id,c.display_name,c.trust_namespace,c.enabled,c.revision,
  (SELECT max(r.revision) FROM identity_connection_revisions r WHERE r.tenant_id=c.tenant_id AND r.connection_id=c.id),
- c.version,c.epoch,COALESCE((SELECT t.state='passed' FROM identity_connection_tests t
+ c.version,c.epoch,`
+const connectionProjectionSuffix = `,false,r.settings,r.revision,COALESCE((SELECT d.settings->>'entra_discovery_mode' FROM identity_connection_revisions d WHERE d.tenant_id=c.tenant_id AND d.connection_id=c.id ORDER BY d.revision DESC LIMIT 1),'')`
+const activeConnectionTestProjection = `COALESCE((SELECT t.state='passed' FROM identity_connection_tests t
  WHERE t.tenant_id=c.tenant_id AND t.connection_id=c.id AND t.revision=c.revision
- ORDER BY t.tested_at DESC,t.id DESC LIMIT 1),false),r.settings,r.revision`
+ ORDER BY t.tested_at DESC,t.id DESC LIMIT 1),false)`
+const currentDraftTestProjection = `COALESCE((SELECT t.state='passed' AND t.expires_at>CURRENT_TIMESTAMP AND t.tested_at+interval '1 hour'>CURRENT_TIMESTAMP FROM identity_connection_tests t
+ WHERE t.tenant_id=c.tenant_id AND t.connection_id=c.id AND t.revision=(SELECT max(d.revision) FROM identity_connection_revisions d WHERE d.tenant_id=c.tenant_id AND d.connection_id=c.id)
+ ORDER BY t.tested_at DESC,t.id DESC LIMIT 1),false)`
+const connectionProjection = connectionProjectionPrefix + activeConnectionTestProjection + connectionProjectionSuffix
+const administrativeConnectionProjection = connectionProjectionPrefix + currentDraftTestProjection + connectionProjectionSuffix
 
 func scanConnection(row pgx.Row) (ports.IdentityConnection, error) {
 	var c ports.IdentityConnection
 	var settings []byte
-	err := row.Scan(&c.TenantID, &c.ID, &c.DisplayName, &c.Issuer, &c.Enabled, &c.Revision, &c.DraftRevision, &c.Version, &c.Epoch, &c.TestPassed, &settings, &c.SettingsRevision)
+	err := row.Scan(&c.TenantID, &c.ID, &c.DisplayName, &c.Issuer, &c.Enabled, &c.Revision, &c.DraftRevision, &c.Version, &c.Epoch, &c.TestPassed, &c.ConfigurationPending, &settings, &c.SettingsRevision, &c.DraftEntraDiscoveryMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, shared.ErrNotFound
 	}
@@ -59,7 +67,11 @@ func (s *IdentityFoundationStore) GetIdentityConnection(ctx context.Context, ten
 func (s *IdentityFoundationStore) ListIdentityConnections(ctx context.Context, tenant shared.ID, eligibleOnly bool) ([]ports.IdentityConnection, error) {
 	out := []ports.IdentityConnection{}
 	err := s.withIdentityTenant(ctx, tenant, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+connectionProjection+` FROM identity_connections c JOIN identity_connection_revisions r
+		projection := connectionProjection
+		if !eligibleOnly {
+			projection = administrativeConnectionProjection
+		}
+		rows, err := tx.Query(ctx, `SELECT `+projection+` FROM identity_connections c JOIN identity_connection_revisions r
  ON r.tenant_id=c.tenant_id AND r.connection_id=c.id AND r.revision=c.revision WHERE c.tenant_id=$1 AND c.protocol='oidc'
  AND (NOT $2 OR c.enabled AND COALESCE((SELECT t.state='passed' FROM identity_connection_tests t
  WHERE t.tenant_id=c.tenant_id AND t.connection_id=c.id AND t.revision=c.revision ORDER BY t.tested_at DESC,t.id DESC LIMIT 1),false))
@@ -78,7 +90,13 @@ func (s *IdentityFoundationStore) ListIdentityConnections(ctx context.Context, t
 		if len(out) > 100 {
 			return fmt.Errorf("%w: organization connection limit exceeded", shared.ErrSaturated)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if !eligibleOnly {
+			return populateLegacyConfigurationPending(ctx, tx, tenant, out)
+		}
+		return nil
 	})
 	return out, err
 }
@@ -175,6 +193,12 @@ func (s *IdentityFoundationStore) SaveIdentityConnectionDraft(ctx context.Contex
 	if d.ID.IsZero() || strings.TrimSpace(d.DisplayName) == "" || len(d.DisplayName) > 200 || d.Issuer == "" || d.Settings.ClientID == "" || d.Settings.SealedClientSecret == "" {
 		return ports.IdentityConnection{}, shared.ErrValidation
 	}
+	if err := ports.ValidateAuth0OrganizationID(d.Settings.Auth0OrganizationID); err != nil {
+		return ports.IdentityConnection{}, err
+	}
+	if err := ports.ValidateEntraSettings(d.Issuer, d.Settings.EntraDiscoveryMode, d.Settings.Auth0OrganizationID); err != nil {
+		return ports.IdentityConnection{}, err
+	}
 	var out ports.IdentityConnection
 	err := s.withIdentityTenant(ctx, d.TenantID, func(tx pgx.Tx) error {
 		if err := lockIdentityAdministration(ctx, tx, d.TenantID); err != nil {
@@ -198,6 +222,10 @@ func (s *IdentityFoundationStore) SaveIdentityConnectionDraft(ctx context.Contex
 			}
 			if _, err = tx.Exec(ctx, `INSERT INTO identity_connections(tenant_id,id,protocol,trust_namespace,display_name,created_at,updated_at)
  VALUES($1,$2,'oidc',$3,$4,$5,$5)`, d.TenantID.String(), d.ID.String(), d.Issuer, d.DisplayName, proof.At); err != nil {
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "identity_connections_tenant_id_protocol_trust_namespace_key" {
+					return fmt.Errorf("%w: issuer is already configured for this tenant", shared.ErrConflict)
+				}
 				return err
 			}
 		} else if err != nil {
@@ -206,7 +234,19 @@ func (s *IdentityFoundationStore) SaveIdentityConnectionDraft(ctx context.Contex
 			if d.ExpectedVersion != current.Version {
 				return shared.ErrConflict
 			}
-			if current.Issuer != d.Issuer || current.Settings.ClientID != d.Settings.ClientID || current.Settings.RedirectURL != d.Settings.RedirectURL {
+			if current.ID == legacyIdentityID("connection_", d.TenantID, shared.ID(current.Issuer)) && current.Settings.ClientID == "" {
+				state, ok, stateErr := loadLegacyConfigurationState(ctx, tx, d.TenantID, current.ID)
+				if stateErr != nil {
+					return stateErr
+				}
+				pending, configured := state.pending(d.TenantID)
+				if !ok || !pending || current.Issuer != d.Issuer || d.Settings.Auth0OrganizationID != "" || d.Settings.EntraDiscoveryMode != "" || d.Settings.RedirectURL == "" {
+					return fmt.Errorf("%w: legacy connection configuration scaffold is not eligible", shared.ErrConflict)
+				}
+				if configured.ClientID != "" && (configured.ClientID != d.Settings.ClientID || configured.RedirectURL != d.Settings.RedirectURL) {
+					return fmt.Errorf("%w: trust changes require a new connection", shared.ErrConflict)
+				}
+			} else if current.Issuer != d.Issuer || current.Settings.ClientID != d.Settings.ClientID || current.Settings.RedirectURL != d.Settings.RedirectURL || current.Settings.Auth0OrganizationID != d.Settings.Auth0OrganizationID {
 				return fmt.Errorf("%w: trust changes require a new connection", shared.ErrConflict)
 			}
 			revision = current.DraftRevision + 1
@@ -225,13 +265,23 @@ func (s *IdentityFoundationStore) SaveIdentityConnectionDraft(ctx context.Contex
 			return err
 		}
 		out, err = connectionByRevision(ctx, tx, d.TenantID, d.ID, revision)
+		if err == nil && out.Revision == 1 && revision > 1 {
+			state, ok, stateErr := loadLegacyConfigurationState(ctx, tx, d.TenantID, d.ID)
+			if stateErr != nil {
+				return stateErr
+			}
+			if pending, configured := state.pending(d.TenantID); ok && pending {
+				out.ConfigurationPending = true
+				out.ConfigurationClientID = configured.ClientID
+			}
+		}
 		return err
 	})
 	return out, err
 }
 
 func (s *IdentityFoundationStore) RecordIdentityConnectionTest(ctx context.Context, test ports.IdentityConnectionTest, proof ports.IdentityAdminProof) error {
-	if test.ID.IsZero() || !test.ExpiresAt.After(test.At) || test.ExpiresAt.After(test.At.Add(24*time.Hour)) {
+	if test.ID.IsZero() || !test.ExpiresAt.After(test.At) || test.ExpiresAt.After(test.At.Add(time.Hour)) {
 		return shared.ErrValidation
 	}
 	return s.withIdentityTenant(ctx, test.TenantID, func(tx pgx.Tx) error {
@@ -276,7 +326,7 @@ func (s *IdentityFoundationStore) ActivateIdentityConnection(ctx context.Context
 			return shared.ErrConflict
 		}
 		var passed bool
-		if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT state='passed' AND expires_at>$4 FROM identity_connection_tests
+		if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT state='passed' AND expires_at>$4 AND tested_at+interval '1 hour'>$4 FROM identity_connection_tests
  WHERE tenant_id=$1 AND connection_id=$2 AND revision=$3 ORDER BY tested_at DESC,id DESC LIMIT 1),false)`, tenant.String(), id.String(), revision, proof.At).Scan(&passed); err != nil {
 			return err
 		}

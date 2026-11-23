@@ -1,0 +1,134 @@
+{
+  "phase": "complete",
+  "at": "2026-10-25T15:49:24.117854+00:00",
+  "issuer": "https://challenges-burke-pacific-survivors.trycloudflare.com/realms/synapse-e2e",
+  "containers_before": {
+    "synapse-provider-live-keycloak-1": {
+      "id": "13b4f06367899b0d8daaf722c237414415a8f7e66420926b496fbeaf70997cef",
+      "image": "sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b",
+      "started_at": "2026-10-25T15:41:59.915730161Z"
+    },
+    "acceptance-cloudflared-1": {
+      "id": "02ba6d9a73e9c2b30358523b2648826bfb165e57662b566ec9fb8556b83058eb",
+      "image": "sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39",
+      "started_at": "2026-10-25T05:56:42.664110249Z"
+    },
+    "synapse-keycloak-gateway-keycloak-gateway-1": {
+      "id": "538ab0759e6a71e0c5740eabfb343764dab860355aed03e9c5e732d8281a6338",
+      "image": "sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236",
+      "started_at": "2026-10-25T05:58:01.708332626Z"
+    },
+    "synapse-identity-restricted-restricted-api-1": {
+      "id": "cf9409a190b023c01b4b0d7519ff5c829d3eeb119425779e305945f7d6d812ad",
+      "image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+      "started_at": "2026-10-25T13:15:49.518142939Z"
+    },
+    "synapse-identity-restricted-restricted-web-1": {
+      "id": "e99b609cb75c8293d04d36ef25433bc686e1818420b595a56a7faf978f596f71",
+      "image": "sha256:921e6509aa5abbdf1e40899f37835b4cf90959d49998c1204ad7d98261c91813",
+      "started_at": "2026-10-25T13:15:49.872709455Z"
+    }
+  },
+  "signed_out_keycloak_person": true,
+  "fault": "Stop exact retained synthetic provider container; signedout Connect must not create access",
+  "no_billing": true,
+  "guard_unit": "synapse-keycloak-connect-outage-restore",
+  "guarded_at": "2026-10-25T15:49:24.128877+00:00",
+  "stopped_at": "2026-10-25T15:49:25.640198+00:00",
+  "denied_at": "2026-10-25T15:50:07.833519+00:00",
+  "authority_unchanged_during_fault": true,
+  "no_active_session_for_test_person": true,
+  "browser_error": "External authorization endpoint Cloudflare502 at15:49:47UTC",
+  "back_to_connect_retry_enabled": true,
+  "restore_started_at": "2026-10-25T15:50:08.029499+00:00",
+  "discovery_restored_at": "2026-10-25T15:50:30.145945+00:00",
+  "completed_at": "2026-10-25T15:51:09.528318+00:00",
+  "containers_after": {
+    "synapse-provider-live-keycloak-1": {
+      "id": "13b4f06367899b0d8daaf722c237414415a8f7e66420926b496fbeaf70997cef",
+      "image": "sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b",
+      "started_at": "2026-10-25T15:50:07.877629218Z"
+    },
+    "acceptance-cloudflared-1": {
+      "id": "02ba6d9a73e9c2b30358523b2648826bfb165e57662b566ec9fb8556b83058eb",
+      "image": "sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39",
+      "started_at": "2026-10-25T05:56:42.664110249Z"
+    },
+    "synapse-keycloak-gateway-keycloak-gateway-1": {
+      "id": "538ab0759e6a71e0c5740eabfb343764dab860355aed03e9c5e732d8281a6338",
+      "image": "sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236",
+      "started_at": "2026-10-25T05:58:01.708332626Z"
+    },
+    "synapse-identity-restricted-restricted-api-1": {
+      "id": "cf9409a190b023c01b4b0d7519ff5c829d3eeb119425779e305945f7d6d812ad",
+      "image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+      "started_at": "2026-10-25T13:15:49.518142939Z"
+    },
+    "synapse-identity-restricted-restricted-web-1": {
+      "id": "e99b609cb75c8293d04d36ef25433bc686e1818420b595a56a7faf978f596f71",
+      "image": "sha256:921e6509aa5abbdf1e40899f37835b4cf90959d49998c1204ad7d98261c91813",
+      "started_at": "2026-10-25T13:15:49.872709455Z"
+    }
+  },
+  "guard_timer": "inactive",
+  "browser_recovery": "Back to Connect \u2192 same selected activatedKeycloakconnection \u2192 ordinary providerSSO/callback \u2192 same secondaryreadonlyDashboard",
+  "recovered_authenticated_at": "2026-10-25T15:42:51+00:00",
+  "real_password_prompt": false,
+  "provider_recent_sso_reused": true,
+  "authority_counts": [
+    5,
+    7,
+    8
+  ],
+  "source_binding": "same reviewed API/web from shared#1612a2de17b9; not standalonePR1609sourcecertification",
+  "no_new_credentials_grants_or_policy": true,
+  "observations": {
+    "auth0-closure-keycloak-connect-outage-before.json": {
+      "at": "2026-10-25T15:49:22.990462+00:00",
+      "sha256": "19a9aa5310101f12791cb22f10971e76ca154621b50274ca7c3a94e90e0bf164",
+      "counts": [
+        5,
+        7,
+        8
+      ],
+      "active_test_person_proofs": []
+    },
+    "auth0-closure-keycloak-connect-outage-denied.json": {
+      "at": "2026-10-25T15:50:07.785202+00:00",
+      "sha256": "93e8a0dc8f12b20202cdc647b9503305fb503910997714ec573e2f44dbdb5b65",
+      "counts": [
+        5,
+        7,
+        8
+      ],
+      "active_test_person_proofs": []
+    },
+    "auth0-closure-keycloak-connect-outage-recovered.json": {
+      "at": "2026-10-25T15:51:09.411865+00:00",
+      "sha256": "68276e433e0525b2ae38f5856b7d1f3a336a30a5bbbb3ece35e4ba0ec6504510",
+      "counts": [
+        5,
+        7,
+        8
+      ],
+      "active_test_person_proofs": [
+        {
+          "tenant": "sandbox-secondary",
+          "person": "439ae5598e97613dcce354bd63adde75",
+          "connection": "8378f8c58c80d74164b92b38fd804303",
+          "authenticated_at": "2026-10-25T15:42:51+00:00"
+        }
+      ]
+    }
+  },
+  "limits": [
+    "Real stopped-provider authorization endpoint returned external502; no appcallbackerror claimed",
+    "Ordinary recovery reused recent upstreamSSO, not forcedpassword/freshauth",
+    "Allowedlegacycredentials/fullcanaryrecovery/rollback remainopen",
+    "No rawauthorizationquery, code, token, cookie or sessionID retained"
+  ],
+  "screenshots": {
+    "keycloak-connect-outage-502.png": "3b2cd069082102984c91d6510e7d40417feedf6a7ec2148f27d3fefad749f9b2",
+    "keycloak-connect-outage-recovered.png": "834f009fb756810b56407f1836c38d49391849df337ce468359c49679d4051a1"
+  }
+}

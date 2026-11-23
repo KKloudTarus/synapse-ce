@@ -12,7 +12,7 @@ import (
 )
 
 func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind string, now time.Time, limit int) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT source_id,event_type,engagement_id,severity,occurred_at,data,subject_kind,subject_id,context,capture_version,schema_version FROM notification_source_records WHERE tenant_id=$1 AND source_kind=$2 AND processed_at IS NULL ORDER BY occurred_at,source_id LIMIT $3 FOR UPDATE SKIP LOCKED`, tenant, kind, limit)
+	rows, err := tx.Query(ctx, `SELECT source_id,event_type,engagement_id,severity,occurred_at,data,subject_kind,subject_id,context,capture_version,schema_version,pager_episode,pager_revision,pager_terminal FROM notification_source_records WHERE tenant_id=$1 AND source_kind=$2 AND processed_at IS NULL ORDER BY occurred_at,source_id LIMIT $3 FOR UPDATE SKIP LOCKED`, tenant, kind, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -24,7 +24,7 @@ func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant
 	for rows.Next() {
 		e := notification.Event{TenantID: tenant, SourceKind: kind, SchemaVersion: 1}
 		var version int
-		if err := rows.Scan(&e.SourceID, &e.Type, &e.EngagementID, &e.Severity, &e.OccurredAt, &e.Data, &e.SubjectKind, &e.SubjectID, &e.Context, &version, &e.SchemaVersion); err != nil {
+		if err := rows.Scan(&e.SourceID, &e.Type, &e.EngagementID, &e.Severity, &e.OccurredAt, &e.Data, &e.SubjectKind, &e.SubjectID, &e.Context, &version, &e.SchemaVersion, &e.PagerLifecycle.Episode, &e.PagerLifecycle.Revision, &e.PagerLifecycle.Terminal); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -38,6 +38,11 @@ func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant
 	rows.Close()
 	for _, captured := range events {
 		e := captured.event
+		if e.PagerLifecycle.Episode > 0 {
+			if _, err := tx.Exec(ctx, `SELECT set_config('synapse.notification_pager_capability','pager-lifecycle-v1',true)`); err != nil {
+				return 0, err
+			}
+		}
 		// pgx uses a savepoint for a nested transaction. A bad event may have
 		// reached SQL before failing, so roll back that record's work alone.
 		itemTx, err := tx.Begin(ctx)

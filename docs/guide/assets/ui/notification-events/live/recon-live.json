@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-30T04:39:48.783964+00:00",
+  "scope": "One real governed local HTTPX reconnaissance run, explicit denial guards, signed evidence and native Slack/console journey",
+  "runtime": {
+    "source_tree_equivalent_to": "d3052d71641450485b80274b430d4687500d30e8",
+    "build_vcs_metadata": {
+      "vcs.revision": "3f9ac827e2e49b9bf08c660ca1b62bb54e9d4b4b",
+      "vcs.time": "2026-10-29T17:24:11Z",
+      "vcs.modified": "true"
+    },
+    "binary_sha256": {
+      "synapse-api": "23cfca72a279fb26e07966edb5eababc21190e5b9059a66837888eb4ac2d73e4",
+      "synapse-worker": "60dd4df8011263c540d3ae25ceffe6b9648c640387a72eb0934b0444a12606af",
+      "synapse-cspm": "a6bef8d0ab203b077367020e61163220bbc2f00b14a8165eea6d6f64ac61b608",
+      "synapse-egress-broker": "64e9cfdd5f04b5272f2877b28991a2f261e4517591bcb6e7f733effa50fc81da",
+      "httpx": "68bf0b2b2498b89de331cd242c184d8e520d53a7fac94b3367733d22dab6b36a"
+    },
+    "tool_module": "github.com/projectdiscovery/httpx/cmd/httpx@v1.6.9",
+    "placement": "Retained local KVM guest; capless worker, independently signed grant and root egress broker; no public/cloud target",
+    "fixture_source_sha256": "2ac019f85dc8385f6e30a7d84a97153f8c03d0c86c563d7e789aa340d571bb03",
+    "private_resume": "Retained local one-command resume verified without another probe"
+  },
+  "run": {
+    "id": "c3932329224d1e3684b05dc10ec17173",
+    "engagementId": "29930ae9e237212bd87bb778035eca48",
+    "tool": "httpx",
+    "target": "http://10.0.2.15:18080/synapse-e2e-readonly",
+    "status": "succeeded",
+    "stage": "done",
+    "resultCount": 1,
+    "containment": "sandboxed-live · egress-restricted to scope (1 destination(s))",
+    "evidenceId": "33a976483ff46b6159450fadde9b8e1a",
+    "startedAt": "2026-10-30T04:31:39.263305Z",
+    "finishedAt": "2026-10-30T04:31:40.217303Z"
+  },
+  "observed_result": {
+    "url": "http://10.0.2.15:18080/synapse-e2e-readonly",
+    "method": "GET",
+    "status_code": 200,
+    "title": "Synapse owned local recon fixture",
+    "failed": false
+  },
+  "fixture_receipt": {
+    "at": "2026-10-30T04:31:40.166191+00:00",
+    "method": "GET",
+    "path": "/synapse-e2e-readonly",
+    "peer": "10.210.0.2",
+    "status": 200
+  },
+  "containment": {
+    "sandboxed": true,
+    "tier": "bubblewrap",
+    "egress_enforced": true,
+    "egress_allow_rules": 1,
+    "cap_net_raw": false
+  },
+  "submission_denials": [
+    {
+      "case": "live-disabled-denial",
+      "status": 403
+    },
+    {
+      "case": "out-of-scope-denial",
+      "status": 403
+    }
+  ],
+  "durable_run_count": 1,
+  "evidence": {
+    "chain_intact": true,
+    "verified": 2,
+    "head": "116d6aafa58a4a7c19af075472eab683e856cb9062037ab71bc19de0dc9004d6",
+    "attestation_algorithm": "ed25519",
+    "anchored": false,
+    "items": [
+      {
+        "id": "2479ed11fe352efcc27f9fd023fff5a7",
+        "kind": "containment_profile",
+        "hash": "afabd7796eeda3701123c9f4f55faa0262c9e3b5529e90c9374794ca692c62ec"
+      },
+      {
+        "id": "33a976483ff46b6159450fadde9b8e1a",
+        "kind": "terminal_log",
+        "hash": "116d6aafa58a4a7c19af075472eab683e856cb9062037ab71bc19de0dc9004d6"
+      }
+    ]
+  },
+  "notification": {
+    "event_id": "9f3591cd4a521ecb5adfbd9964a3879d",
+    "source_id": "c3932329224d1e3684b05dc10ec17173",
+    "event_type": "recon.run_finished",
+    "data": {
+      "title": "Reconnaissance run finished",
+      "run_id": "c3932329224d1e3684b05dc10ec17173",
+      "outcome": "succeeded",
+      "scan_id": "c3932329224d1e3684b05dc10ec17173",
+      "summary": "A governed run reached a terminal outcome.",
+      "provider": "httpx",
+      "providers": [
+        "httpx"
+      ],
+      "scan_kind": "recon",
+      "error_code": "",
+      "engagement_id": "29930ae9e237212bd87bb778035eca48",
+      "counts_available": false,
+      "severity_counts_available": false
+    },
+    "delivery_id": "cb23c29206bdd92a220c9dc016c3eac8",
+    "state": "delivered",
+    "attempts": 1,
+    "delivered_at": "2026-10-30T04:32:05.832997+00:00",
+    "response_code": 200,
+    "error_code": "",
+    "template_ref": "builtin:recon.run_finished:chat:vi@v1"
+  },
+  "native_ui": {
+    "message_permalink": "https://jj-4qu2855.slack.com/archives/C0BJE2CPPQE/p1793334725736309",
+    "screenshot": "slack-recon-vi.png",
+    "screenshot_sha256": "f265ee89a07f64a0b29df44f3a4de4b7836a4808109e669039dee5719247f9df",
+    "locale": "vi",
+    "data_class": "detail",
+    "vietnamese_diacritics_intact": true,
+    "raw_markdown_or_escaped_tags_observed": false,
+    "console_link_clicked": true,
+    "normal_existing_sandbox_sign_in": true,
+    "console_heading": "Local recon: HTTP fixture chỉ đọc",
+    "console_run_status": "SUCCEEDED",
+    "console_in_scope_results": 1,
+    "console_containment": "sandboxed-live · egress-restricted to scope (1 destination(s))",
+    "console_screenshot": "recon-console.png",
+    "console_screenshot_sha256": "68cbfd92a57caade1d09ceb6af04a5cfbf9eb55405a0871a445c9b4132af5ee9"
+  },
+  "cost_scope": {
+    "cloud_target": false,
+    "new_paid_service": false,
+    "new_cloud_resource": false,
+    "new_cloud_credential": false,
+    "public_exposure_added": false
+  },
+  "limits": [
+    "Representative HTTPX proof only; no subfinder/naabu, public Internet recon or DAST execution is claimed.",
+    "One probe result is not a vulnerability count; the notification correctly renders counts unavailable.",
+    "Signed evidence chain is intact but is not externally anchored.",
+    "Existing API/worker source tree was equivalent to the merged revision; binary VCS metadata reflects the preceding local build and is retained explicitly."
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "phase": "complete",
+  "at": "2026-10-25T15:39:21.315425+00:00",
+  "containers_before": {
+    "synapse-provider-live-keycloak-1": {
+      "id": "13b4f06367899b0d8daaf722c237414415a8f7e66420926b496fbeaf70997cef",
+      "image": "sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b",
+      "started_at": "2026-10-25T05:57:46.922379311Z"
+    },
+    "acceptance-cloudflared-1": {
+      "id": "02ba6d9a73e9c2b30358523b2648826bfb165e57662b566ec9fb8556b83058eb",
+      "image": "sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39",
+      "started_at": "2026-10-25T05:56:42.664110249Z"
+    },
+    "synapse-keycloak-gateway-keycloak-gateway-1": {
+      "id": "538ab0759e6a71e0c5740eabfb343764dab860355aed03e9c5e732d8281a6338",
+      "image": "sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236",
+      "started_at": "2026-10-25T05:58:01.708332626Z"
+    },
+    "synapse-identity-restricted-restricted-api-1": {
+      "id": "cf9409a190b023c01b4b0d7519ff5c829d3eeb119425779e305945f7d6d812ad",
+      "image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+      "started_at": "2026-10-25T13:15:49.518142939Z"
+    },
+    "synapse-identity-restricted-restricted-web-1": {
+      "id": "e99b609cb75c8293d04d36ef25433bc686e1818420b595a56a7faf978f596f71",
+      "image": "sha256:921e6509aa5abbdf1e40899f37835b4cf90959d49998c1204ad7d98261c91813",
+      "started_at": "2026-10-25T13:15:49.872709455Z"
+    }
+  },
+  "fault": "Stop only the existing synthetic Keycloak container; keep issuer/tunnel/gateway/API/DB/connections/policies fixed",
+  "restore": "Start exact original Keycloak container; systemd user timer before stop; verify discovery and ordinary browser recovery",
+  "provider_credentials_changed": false,
+  "billing": false,
+  "healthy_public_discovery_before": true,
+  "guarded_at": "2026-10-25T15:39:56.972137+00:00",
+  "guard_unit": "synapse-keycloak-provider-outage-restore",
+  "stopped_at": "2026-10-25T15:40:02.985359+00:00",
+  "restore_started_at": "2026-10-25T15:42:00.079927+00:00",
+  "local_session_reload_during_outage": true,
+  "new_federation": "Cached discovery redirected to real authorization endpoint; external Cloudflare504; no successful callback observed",
+  "source_reload_after_failure": true,
+  "authority_unchanged": true,
+  "public_discovery_restored_at": "2026-10-25T15:42:22.757488+00:00",
+  "completed_at": "2026-10-25T15:43:46.179773+00:00",
+  "containers_after": {
+    "synapse-provider-live-keycloak-1": {
+      "id": "13b4f06367899b0d8daaf722c237414415a8f7e66420926b496fbeaf70997cef",
+      "image": "sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b",
+      "started_at": "2026-10-25T15:41:59.915730161Z"
+    },
+    "acceptance-cloudflared-1": {
+      "id": "02ba6d9a73e9c2b30358523b2648826bfb165e57662b566ec9fb8556b83058eb",
+      "image": "sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39",
+      "started_at": "2026-10-25T05:56:42.664110249Z"
+    },
+    "synapse-keycloak-gateway-keycloak-gateway-1": {
+      "id": "538ab0759e6a71e0c5740eabfb343764dab860355aed03e9c5e732d8281a6338",
+      "image": "sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236",
+      "started_at": "2026-10-25T05:58:01.708332626Z"
+    },
+    "synapse-identity-restricted-restricted-api-1": {
+      "id": "cf9409a190b023c01b4b0d7519ff5c829d3eeb119425779e305945f7d6d812ad",
+      "image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+      "started_at": "2026-10-25T13:15:49.518142939Z"
+    },
+    "synapse-identity-restricted-restricted-web-1": {
+      "id": "e99b609cb75c8293d04d36ef25433bc686e1818420b595a56a7faf978f596f71",
+      "image": "sha256:921e6509aa5abbdf1e40899f37835b4cf90959d49998c1204ad7d98261c91813",
+      "started_at": "2026-10-25T13:15:49.872709455Z"
+    }
+  },
+  "guard_timer": "inactive",
+  "active_proofs_unchanged_during_outage": true,
+  "browser_recovery": "Back to existing Profile \u2192 Retry same approved Keycloak reauthentication \u2192 real password \u2192 callback \u2192 readonly Dashboard",
+  "recovered_authenticated_at": "2026-10-25T15:42:51+00:00",
+  "api_web_gateway_tunnel_not_restarted": true,
+  "provider_credentials_unchanged": true,
+  "historical_row_count_note": "Corrected invariant: reload rotates local session rows. Active upstream proof tuples are unchanged during outage; no fresh provider proof appeared. Totals258\u2192260 reflect local cookie rotation, not federation success.",
+  "source_binding": {
+    "shared_source_commit": "a2de17b9",
+    "api_image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+    "web_image": "sha256:921e6509aa5abbdf1e40899f37835b4cf90959d49998c1204ad7d98261c91813",
+    "standalone_pr1609_source_certified": false
+  },
+  "observations": {
+    "auth0-closure-keycloak-outage-source-before.json": {
+      "sha256": "fd7d33fd1d1fec3ded964462e009d072dbee658152f156616759b2408adb323b",
+      "at": "2026-10-25T15:39:21.468102+00:00",
+      "authority_counts": [
+        5,
+        7,
+        8
+      ],
+      "active_proofs": [
+        {
+          "tenant": "sandbox-secondary",
+          "person": "16999d77cd54321aaab2efe104579729",
+          "connection": "8378f8c58c80d74164b92b38fd804303",
+          "authenticated_at": "2026-10-25T12:00:55+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "439ae5598e97613dcce354bd63adde75",
+          "connection": "8378f8c58c80d74164b92b38fd804303",
+          "authenticated_at": "2026-10-25T14:24:40+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "67733025b06a5e4a27e6b1d9ac7bd9c4",
+          "connection": "ee51006f03a35c76db12c1852001b7e4",
+          "authenticated_at": "2026-10-25T04:06:58+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "67733025b06a5e4a27e6b1d9ac7bd9c4",
+          "connection": "ee51006f03a35c76db12c1852001b7e4",
+          "authenticated_at": "2026-10-25T06:36:04+00:00"
+        }
+      ]
+    },
+    "auth0-closure-keycloak-outage-denied.json": {
+      "sha256": "02a3b622b95e15ce6febc1edd704c196a18e4e2f7f10592be698e776bb2e22fd",
+      "at": "2026-10-25T15:41:46.336848+00:00",
+      "authority_counts": [
+        5,
+        7,
+        8
+      ],
+      "active_proofs": [
+        {
+          "tenant": "sandbox-secondary",
+          "person": "16999d77cd54321aaab2efe104579729",
+          "connection": "8378f8c58c80d74164b92b38fd804303",
+          "authenticated_at": "2026-10-25T12:00:55+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "439ae5598e97613dcce354bd63adde75",
+          "connection": "8378f8c58c80d74164b92b38fd804303",
+          "authenticated_at": "2026-10-25T14:24:40+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "67733025b06a5e4a27e6b1d9ac7bd9c4",
+          "connection": "ee51006f03a35c76db12c1852001b7e4",
+          "authenticated_at": "2026-10-25T04:06:58+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "67733025b06a5e4a27e6b1d9ac7bd9c4",
+          "connection": "ee51006f03a35c76db12c1852001b7e4",
+          "authenticated_at": "2026-10-25T06:36:04+00:00"
+        }
+      ]
+    },
+    "auth0-closure-keycloak-outage-recovered.json": {
+      "sha256": "53e9adc2b37864c73f4d55f73ccef8a48af40942d6cfb1052411699f76eddb93",
+      "at": "2026-10-25T15:43:46.055323+00:00",
+      "authority_counts": [
+        5,
+        7,
+        8
+      ],
+      "active_proofs": [
+        {
+          "tenant": "sandbox-secondary",
+          "person": "16999d77cd54321aaab2efe104579729",
+          "connection": "8378f8c58c80d74164b92b38fd804303",
+          "authenticated_at": "2026-10-25T12:00:55+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "439ae5598e97613dcce354bd63adde75",
+          "connection": "8378f8c58c80d74164b92b38fd804303",
+          "authenticated_at": "2026-10-25T15:42:51+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "67733025b06a5e4a27e6b1d9ac7bd9c4",
+          "connection": "ee51006f03a35c76db12c1852001b7e4",
+          "authenticated_at": "2026-10-25T04:06:58+00:00"
+        },
+        {
+          "tenant": "sandbox-secondary",
+          "person": "67733025b06a5e4a27e6b1d9ac7bd9c4",
+          "connection": "ee51006f03a35c76db12c1852001b7e4",
+          "authenticated_at": "2026-10-25T06:36:04+00:00"
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "The authorization endpoint rendered external Cloudflare504 from the real provider outage. No in-app callback error or native server-side503 is claimed for this stage; Back to Profile provided the reachable retry.",
+    "This was an existing-session reauthentication journey. Separate signed-out Connect behavior, allowed legacy credentials and break-glass/canary rollback remain open.",
+    "No session identifiers, cookies, tokens, credentials or raw authorization query strings are retained.",
+    "Public browser runtime consumes shared repairs from PR1612; current standalonePR1609 source closure still requires those dependencies."
+  ],
+  "screenshots": {
+    "keycloak-outage-local-session.png": "3de3cca91e6d70fd43b97ac589c709301fd3e7c18cd00706e9267f313a937193",
+    "keycloak-outage-federation-504.png": "8664519b121a7e0b55fd3275dd1fc8ff105d545004b8ce375bf8272637df5420",
+    "keycloak-outage-recovered.png": "1195f37550c0ede4c816f6ff30df90bb72329c917a22d910de19ff6a22ce745a"
+  }
+}

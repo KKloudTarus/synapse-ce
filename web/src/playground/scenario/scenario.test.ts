@@ -11,7 +11,7 @@ import { mapAssessmentSnapshot } from '@/lib/api/assessment-snapshots'
 import { mapAssessmentComparison } from '@/lib/api/assessment-comparisons'
 
 const server = setupServer(...scenarioHandlers, http.get('/api/v1/engagements', () => HttpResponse.json([{ id: 'original-seed' }])))
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterAll(() => server.close())
 beforeEach(() => { resetScenario(); updateScenario(s => { s.enabled = true }) })
 

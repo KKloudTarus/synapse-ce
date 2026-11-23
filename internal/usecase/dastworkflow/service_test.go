@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastsession"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -247,5 +248,170 @@ func TestRunBindsFullProbeAndConsumesApproval(t *testing.T) {
 	}
 	if _, err := wf.Run(context.Background(), "alice", "eng-1", prop.Action.ID, probe); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("repeated approval ran: %v", err)
+	}
+}
+
+type durableTestStore struct {
+	ports.ApprovalStore
+	consumeErr  error
+	consumedRun shared.ID
+}
+
+func (s *durableTestStore) ConsumeForDASTRun(_ context.Context, _ shared.ID, run shared.ID) error {
+	s.consumedRun = run
+	return s.consumeErr
+}
+
+type failingCustodyStore struct{ ports.EvidenceStore }
+
+func (s failingCustodyStore) Append(context.Context, []evdom.Evidence) error {
+	return errors.New("custody append failed")
+}
+
+type durableTestTx struct {
+	commitErr error
+	calls     int
+	committed bool
+}
+
+func (tx *durableTestTx) Run(ctx context.Context, _ shared.ID, fn func(context.Context) error) error {
+	return errors.New("ambient transaction must not be used")
+}
+
+func (tx *durableTestTx) RunIndependent(ctx context.Context, _ shared.ID, fn func(context.Context) error) error {
+	tx.calls++
+	if err := fn(ctx); err != nil {
+		return err
+	}
+	tx.committed = tx.commitErr == nil
+	return tx.commitErr
+}
+
+type custodyTSA struct {
+	t     *testing.T
+	tx    *durableTestTx
+	calls int
+}
+
+func (a *custodyTSA) Timestamp(context.Context, []byte) (ports.TimestampToken, error) {
+	a.calls++
+	if !a.tx.committed {
+		a.t.Error("timestamp requested before custody commit")
+	}
+	return ports.TimestampToken{Authority: "test", Token: "test"}, nil
+}
+
+type custodyTimestamps struct{}
+
+func (custodyTimestamps) Get(context.Context, string, shared.ID, string) (*ports.TimestampToken, error) {
+	return nil, nil
+}
+func (custodyTimestamps) Put(context.Context, string, shared.ID, string, ports.TimestampToken) error {
+	return nil
+}
+func (custodyTimestamps) LatestHead(context.Context, string, shared.ID) (string, bool, error) {
+	return "", false, nil
+}
+
+func TestDurableWorkflowAnchorsAfterCustodyCommit(t *testing.T) {
+	for _, failCommit := range []bool{false, true} {
+		runner := &fakeRunner{out: []byte("synapse-canary\nSYNAPSE_HTTP_STATUS:200\n")}
+		wf, store := workflowForTest(t, runner, &fakeApplier{})
+		ctx := shared.WithTenant(context.Background(), "tenant")
+		probe := testProbe()
+		prop, err := wf.Propose(ctx, "alice", "eng-1", probe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := wf.Decide(ctx, "bob", "eng-1", prop.Action.ID, true, "ok"); err != nil {
+			t.Fatal(err)
+		}
+		tx := &durableTestTx{}
+		if failCommit {
+			tx.commitErr = errors.New("uncertain commit")
+		}
+		if err := wf.SetTransactionRunner(tx); err != nil {
+			t.Fatal(err)
+		}
+		wf.store = &durableTestStore{ApprovalStore: store}
+		tsa := &custodyTSA{t: t, tx: tx}
+		wf.evidence.SetTimestamper(tsa, custodyTimestamps{})
+		probe.RunID = "durable-run"
+		_, err = wf.Run(ctx, "alice", "eng-1", prop.Action.ID, probe)
+		if failCommit {
+			if err == nil || tsa.calls != 0 || runner.calls != 0 {
+				t.Fatalf("failed custody: tsa=%d tools=%d err=%v", tsa.calls, runner.calls, err)
+			}
+		} else if err != nil || tsa.calls != 3 || runner.calls != 1 {
+			t.Fatalf("committed custody: tsa=%d tools=%d err=%v", tsa.calls, runner.calls, err)
+		}
+	}
+}
+
+func TestDurableCustodyFailsClosedBeforeTool(t *testing.T) {
+	for _, scenario := range []string{"no_consumer", "no_transaction", "consume_failure", "seal_failure", "commit_failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			runner := &fakeRunner{out: []byte("synapse-canary\nSYNAPSE_HTTP_STATUS:200\n")}
+			wf, store := workflowForTest(t, runner, &fakeApplier{})
+			ctx := shared.WithTenant(context.Background(), "tenant")
+			probe := testProbe()
+			prop, err := wf.Propose(ctx, "alice", "eng-1", probe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := wf.Decide(ctx, "bob", "eng-1", prop.Action.ID, true, "ok"); err != nil {
+				t.Fatal(err)
+			}
+			durable := &durableTestStore{ApprovalStore: store}
+			tx := &durableTestTx{}
+			if scenario != "no_consumer" {
+				wf.store = durable
+			}
+			if scenario != "no_transaction" {
+				if err := wf.SetTransactionRunner(tx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "consume_failure" {
+				durable.consumeErr = errors.New("custody unavailable")
+			}
+			if scenario == "seal_failure" {
+				broken, err := evidence.NewService(failingCustodyStore{memory.NewEvidenceStore()}, nil, fakeAudit{}, fakeClock{time.Unix(1_700_100_000, 0)}, &seqIDs{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				wf.evidence = broken
+			}
+			if scenario == "commit_failure" {
+				tx.commitErr = errors.New("commit uncertain")
+			}
+			probe.RunID = "durable-run"
+			if _, err := wf.Run(ctx, "alice", "eng-1", prop.Action.ID, probe); err == nil {
+				t.Fatal("expected custody failure")
+			}
+			if runner.calls != 0 {
+				t.Fatalf("tool ran before custody commit: %d", runner.calls)
+			}
+			if scenario == "consume_failure" || scenario == "seal_failure" || scenario == "commit_failure" {
+				if tx.calls != 1 {
+					t.Fatalf("independent transaction calls=%d", tx.calls)
+				}
+				if durable.consumedRun != probe.RunID {
+					t.Fatalf("wrong consumption owner: %q", durable.consumedRun)
+				}
+			}
+		})
+	}
+}
+
+type nonIndependentTx struct{}
+
+func (nonIndependentTx) Run(ctx context.Context, _ shared.ID, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+func TestDurableTransactionRequiresIndependentCommit(t *testing.T) {
+	wf, _ := workflowForTest(t, &fakeRunner{}, &fakeApplier{})
+	if err := wf.SetTransactionRunner(nonIndependentTx{}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("accepted non-independent transaction: %v", err)
 	}
 }

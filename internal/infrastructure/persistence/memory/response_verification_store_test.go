@@ -32,7 +32,7 @@ func memoryResponseVerificationFixture(t *testing.T) ports.AcceptedResponseVerif
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, ReportID: "report-1", AgentID: "observer-1", HostID: "observer-1",
 		AgentSessionID: fleetagent.CanonicalSessionID("observer-1"), AssetID: "asset-1", EngagementID: "eng-1", ActionID: "action-1",
 		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1", ReceiptID: "receipt", ReceiptDigest: "0000000000000000000000000000000000000000000000000000000000000000", VerificationChallenge: strings.Repeat("b", 64),
-		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		ObservedAt: at, KeyID: key.KeyID,
 	}
 	report.Signature = fleetagent.SignResponseVerification(private, report)
@@ -45,7 +45,7 @@ func memoryResponseVerificationFixture(t *testing.T) ports.AcceptedResponseVerif
 func memoryTargetReceiptFixture(t *testing.T, tenant shared.ID) fleetagent.ResponseTargetEvidenceReceipt {
 	t.Helper()
 	at := time.Unix(2_000_100, 0).UTC()
-	receipt := fleetagent.ResponseTargetEvidenceReceipt{Version: fleetagent.ResponseTargetEvidenceReceiptVersion, ReceiptID: "receipt-1", TenantID: tenant, EngagementID: "eng-1", ActionID: "action-1", ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1", VerificationChallenge: strings.Repeat("b", 64), Target: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"}, AttemptedAt: at, WindowUntil: at.Add(time.Second), RecordedAt: at.Add(2 * time.Second), SourceAgentID: "agent-1", SourceAgentSessionID: shared.ID(fleetagent.CanonicalSessionID("agent-1")), SourceHostID: "asset-1", TimelineComplete: true, CoverageComplete: true, Reasons: []string{"complete"}}
+	receipt := fleetagent.ResponseTargetEvidenceReceipt{Version: fleetagent.ResponseTargetEvidenceReceiptVersion, ReceiptID: "receipt-1", TenantID: tenant, EngagementID: "eng-1", ActionID: "action-1", ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1", VerificationChallenge: strings.Repeat("b", 64), Target: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"}, AttemptedAt: at, WindowUntil: at.Add(time.Second), RecordedAt: at.Add(2 * time.Second), SourceAgentID: "agent-1", SourceAgentSessionID: shared.ID(fleetagent.CanonicalSessionID("agent-1")), SourceHostID: "asset-1", TimelineComplete: true, CoverageComplete: true, Reasons: []string{"complete"}}
 	receipt.Digest = fleetagent.ResponseTargetEvidenceReceiptDigest(receipt)
 	return receipt
 }

@@ -43,7 +43,7 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
 export function EnterpriseIdentities() {
   const auth = useOptionalAuth()
   const [linked, setLinked] = useState<Identity[]>([])
-  const [available, setAvailable] = useState<Connection[]>([])
+  const [enabled, setEnabled] = useState<Connection[]>([])
   const [connectionId, setConnectionId] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -59,21 +59,23 @@ export function EnterpriseIdentities() {
       request('/api/v1/identity/link-connections', { signal: controller.signal }),
     ]).then(([authenticators, providerConnections]) => {
       if (cancelled || attempt !== generation.current) return
+      const own = identities(authenticators)
       const next = connections(providerConnections)
-      setLinked(identities(authenticators)); setAvailable(next); setConnectionId(next.length === 1 ? next[0].id : '')
+      const unlinked = next.filter((connection) => !own.some((identity) => identity.connectionId === connection.id))
+      setLinked(own); setEnabled(next); setConnectionId(unlinked.length === 1 ? unlinked[0].id : '')
     }).catch((cause: unknown) => {
       if (!cancelled && attempt === generation.current && !(cause instanceof DOMException && cause.name === 'AbortError')) setError(cause instanceof Error ? cause.message : 'Could not load enterprise identities.')
     }).finally(() => { if (!cancelled && attempt === generation.current) setLoading(false) })
-    return () => { cancelled = true; controller.abort() }
+    return () => { cancelled = true; generation.current += 1; controller.abort() }
   }, [])
 
-  async function begin() {
-    if (!connectionId) return
+  async function begin(purpose: 'link' | 'step_up', selectedConnectionId: string) {
+    if (!selectedConnectionId) return
     const attempt = ++generation.current
     setSubmitting(true); setError(null)
     try {
       const value = record(await request('/api/auth/enterprise/begin', {
-        method: 'POST', body: JSON.stringify({ purpose: auth?.currentUser?.recentAuth === false ? 'step_up' : 'link', connection_id: connectionId }),
+        method: 'POST', body: JSON.stringify({ purpose, connection_id: selectedConnectionId }),
       }))
       if (attempt !== generation.current) return
       const authorizationURL = text(value.authorization_url)
@@ -84,20 +86,21 @@ export function EnterpriseIdentities() {
     } finally { if (attempt === generation.current) setSubmitting(false) }
   }
 
+  const available = enabled.filter((connection) => !linked.some((identity) => identity.connectionId === connection.id))
   const requiresStepUp = auth?.currentUser?.recentAuth === false
   return <section aria-labelledby="enterprise-identities-heading" className="space-y-4 border-t border-secondary pt-6">
     <header className="space-y-1"><h2 id="enterprise-identities-heading" className="text-xl font-semibold text-primary">Enterprise identities</h2><p className="text-sm text-tertiary">Link an approved work identity or accept an organization invitation.</p></header>
     {loading ? <p role="status" className="text-sm text-tertiary">Loading enterprise identities…</p> : <>
-      {linked.length ? <ul className="overflow-hidden rounded-xl border border-secondary bg-primary divide-y divide-secondary">{linked.map((identity) => <li key={identity.connectionId} className="px-4 py-3 text-sm text-primary">{identity.name} · {identity.state}</li>)}</ul> : <p className="rounded-xl border border-secondary bg-secondary/30 p-4 text-sm text-tertiary">No linked enterprise identities.</p>}
-      {available.length ? <div className="space-y-3 rounded-xl border border-secondary bg-primary p-4 sm:p-5">
+      {linked.length ? <ul className="overflow-hidden rounded-xl border border-secondary bg-primary divide-y divide-secondary">{linked.map((identity) => <li key={identity.connectionId} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm text-primary"><span>{identity.name} · {identity.state}</span>{identity.state === 'approved' && enabled.some((connection) => connection.id === identity.connectionId) ? <button type="button" disabled={submitting} onClick={() => { void begin('step_up', identity.connectionId) }} className="rounded-lg border border-secondary px-3 py-2 text-sm font-semibold text-primary disabled:opacity-50">Reauthenticate with {identity.name}</button> : null}</li>)}</ul> : <p className="rounded-xl border border-secondary bg-secondary/30 p-4 text-sm text-tertiary">No linked enterprise identities.</p>}
+      {available.length && requiresStepUp ? <p className="text-sm text-tertiary">Reauthenticate with a linked provider before linking another identity.</p> : available.length ? <div className="space-y-3 rounded-xl border border-secondary bg-primary p-4 sm:p-5">
         <label htmlFor="identity-provider" className="block text-sm font-medium text-primary">Approved identity provider</label>
         <select id="identity-provider" value={connectionId} disabled={submitting} onChange={(event) => setConnectionId(event.target.value)} className="w-full rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 disabled:opacity-50">
           <option value="">Choose a provider</option>{available.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}
         </select>
-        {requiresStepUp ? <p className="text-sm text-tertiary">Reauthenticate with an approved provider before linking an identity.</p> : null}
-        <button type="button" disabled={!connectionId || submitting} onClick={() => { void begin() }} className="w-full sm:w-auto rounded-lg bg-brand-solid px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-solid_hover disabled:cursor-not-allowed disabled:opacity-50">{submitting ? 'Opening provider…' : requiresStepUp ? 'Reauthenticate to link' : 'Link identity'}</button>
+        <button type="button" disabled={!connectionId || submitting} onClick={() => { void begin('link', connectionId) }} className="w-full sm:w-auto rounded-lg bg-brand-solid px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-solid_hover disabled:cursor-not-allowed disabled:opacity-50">{submitting ? 'Opening provider…' : 'Link identity'}</button>
       </div> : <p className="rounded-xl border border-secondary bg-secondary/30 p-4 text-sm text-tertiary">No additional identity providers are approved for this organization.</p>}
     </>}
+    {submitting ? <p role="status" className="text-sm text-tertiary">Opening identity provider…</p> : null}
     {error ? <p role="alert" className="rounded-lg border border-error-subtle bg-error-primary/10 p-3 text-sm text-error-primary">{error}</p> : null}
     <InvitationAcceptance />
   </section>

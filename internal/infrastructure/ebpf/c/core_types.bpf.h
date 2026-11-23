@@ -11,6 +11,14 @@
 
 #pragma clang attribute push(__attribute__((preserve_access_index)), apply_to = record)
 
+struct atomic_t___synapse { int counter; };
+struct signal_struct___synapse { struct atomic_t___synapse live; };
+struct task_struct___synapse {
+	struct task_struct___synapse *group_leader;
+	struct signal_struct___synapse *signal;
+	__u64 start_boottime;
+};
+
 struct in_addr___synapse {
 	__be32 s_addr;
 };

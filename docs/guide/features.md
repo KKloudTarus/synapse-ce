@@ -60,7 +60,9 @@ literal is flagged.
 When container image scanning is enabled, Synapse materializes the image root filesystem and
 runs owned catalogers over it, so a shipped artifact is inventoried even without a lockfile:
 
-- **OS packages.** dpkg (`/var/lib/dpkg/status`) and apk (`/lib/apk/db/installed`) for Debian,
+- **OS packages.** dpkg (`/var/lib/dpkg/status`, and the per-package fragments under
+  `/var/lib/dpkg/status.d/` that distroless images ship instead) and apk
+  (`/lib/apk/db/installed`, or `/usr/lib/apk/db/installed` on a usr-merged image) for Debian,
   Ubuntu, and Alpine, plus rpm from all three database backends: sqlite (`rpmdb.sqlite`, modern
   RHEL/Fedora/AlmaLinux/Rocky/Oracle), BerkeleyDB (`Packages`, RHEL 8 and Amazon Linux 2), and
   ndb (`Packages.db`, openSUSE and SLE), each parsed by owned pure-Go code so `CGO_ENABLED=0`

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/dastprobe"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -32,8 +33,8 @@ import (
 )
 
 const (
-	ToolRunDASTVerifier = "run_dast_verifier"
-	ActionSafeHTTPProbe = "dast.safe_http_probe"
+	ToolRunDASTVerifier = dastprobe.ToolRunDASTVerifier
+	ActionSafeHTTPProbe = dastprobe.ActionSafeHTTPProbe
 	evidenceKindResult  = "dast_verifier_result"
 )
 
@@ -70,17 +71,7 @@ func NewService(runner ports.ToolRunner, ev *evidence.Service, applier resultApp
 	}, nil
 }
 
-type Probe struct {
-	JudgmentID           shared.ID
-	URL                  string
-	Method               string
-	ExpectedStatus       int
-	ExpectedBodyContains string
-	ScoreIfConfirmed     int
-	ScoreIfRefuted       int
-	ExpectedVersion      int
-	Rationale            string
-}
+type Probe = dastprobe.Probe
 
 type Result struct {
 	Judgment judgment.Judgment
@@ -118,10 +109,7 @@ func (s *Service) Execute(ctx context.Context, admitted safety.AdmittedAction, p
 	if admitted.DecidedBy() == "" || admitted.DecidedBy() == "auto" {
 		return Result{}, fmt.Errorf("%w: runtime exploitability verification requires explicit human approval", shared.ErrForbidden)
 	}
-	method := strings.ToUpper(strings.TrimSpace(probe.Method))
-	if method == "" {
-		method = "GET"
-	}
+	method := probe.NormalizedMethod()
 	if method != "GET" && method != "HEAD" {
 		return Result{}, fmt.Errorf("%w: safe HTTP probe supports only GET or HEAD", shared.ErrValidation)
 	}
@@ -148,7 +136,10 @@ func (s *Service) Execute(ctx context.Context, admitted safety.AdmittedAction, p
 		EngagementID:        action.EngagementID,
 		EgressPolicy:        egressPolicyForPinnedIP(pinnedIP, u),
 		EgressExecutionKind: "dast-verifier",
-		EgressExecutionID:   probe.JudgmentID.String(),
+		EgressExecutionID:   probe.RunID.String(),
+	}
+	if probe.RunID.IsZero() {
+		spec.EgressExecutionID = probe.JudgmentID.String()
 	}
 	res, runErr := s.runner.Run(ctx, spec)
 	status, body := splitCurlStatus(res.Stdout)
@@ -208,19 +199,7 @@ func (s *Service) Execute(ctx context.Context, admitted safety.AdmittedAction, p
 	return Result{Judgment: j, Proof: proof, Status: status, Evidence: ev.ID}, nil
 }
 
-func parseProbeURL(raw string) (*url.URL, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u == nil || u.Host == "" {
-		return nil, fmt.Errorf("%w: invalid probe URL", shared.ErrValidation)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("%w: probe URL must be http or https", shared.ErrValidation)
-	}
-	if u.User != nil {
-		return nil, fmt.Errorf("%w: probe URL must not include credentials", shared.ErrValidation)
-	}
-	return u, nil
-}
+func parseProbeURL(raw string) (*url.URL, error) { return dastprobe.ParseURL(raw) }
 
 func (s *Service) resolvePublicHost(ctx context.Context, host string) (netip.Addr, error) {
 	ips, err := s.resolve(ctx, host)
@@ -260,16 +239,7 @@ func defaultResolve(ctx context.Context, host string) ([]netip.Addr, error) {
 	return out, nil
 }
 
-func isForbiddenProbeIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	return !ip.IsValid() ||
-		ip.IsUnspecified() ||
-		ip.IsLoopback() ||
-		ip.IsPrivate() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsMulticast()
-}
+func isForbiddenProbeIP(ip netip.Addr) bool { return !dastprobe.PublicAddress(ip) }
 
 func egressPolicyForPinnedIP(ip netip.Addr, u *url.URL) *ports.EgressPolicy {
 	bits := 32
@@ -283,17 +253,7 @@ func egressPolicyForPinnedIP(ip netip.Addr, u *url.URL) *ports.EgressPolicy {
 	}}}
 }
 
-func probePort(u *url.URL) int {
-	if p := u.Port(); p != "" {
-		if n, err := strconv.Atoi(p); err == nil && n > 0 && n <= 65535 {
-			return n
-		}
-	}
-	if u.Scheme == "https" {
-		return 443
-	}
-	return 80
-}
+func probePort(u *url.URL) int { return int(dastprobe.Port(u)) }
 
 func curlArgs(method, target string, u *url.URL, pinnedIP netip.Addr, timeout time.Duration) []string {
 	maxTime := int(timeout.Seconds())
@@ -353,25 +313,4 @@ func redactProbeExcerpt(body []byte) string {
 // for probe-target validation, enforced at both edges: when a run is submitted (before the probe is
 // persisted on the durable job) and again inside the governed workflow before execution. Rejecting at
 // submit keeps a credential-like URL (e.g. ?token=...) out of the durable jobs payload at rest.
-func ValidateURL(raw string) error {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u == nil || u.User != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("%w: invalid DAST target URL", shared.ErrValidation)
-	}
-	for key := range u.Query() {
-		if sensitiveURLQueryKey(key) {
-			return fmt.Errorf("%w: DAST target URL cannot contain credential-like query keys", shared.ErrValidation)
-		}
-	}
-	return nil
-}
-
-func sensitiveURLQueryKey(key string) bool {
-	key = strings.ToLower(key)
-	for _, sensitive := range []string{"token", "session", "api_key", "key", "secret", "password", "auth", "signature", "sig"} {
-		if strings.Contains(key, sensitive) {
-			return true
-		}
-	}
-	return false
-}
+func ValidateURL(raw string) error { return dastprobe.ValidateURL(raw) }

@@ -214,6 +214,7 @@ func (s *Service) appendIncidentUpdated(ctx context.Context, tenant shared.ID, i
 		TenantID: tenant, SourceKind: "incident_update", SourceID: item.ID.String() + ":" + fmt.Sprint(item.Revision),
 		EventType: notification.EventIncidentUpdated, EngagementID: item.EngagementID, Severity: item.Severity,
 		OccurredAt: occurredAt, Data: raw, SubjectKind: "incident", SubjectID: item.ID.String(),
+		PagerLifecycle: notification.PagerLifecycle{Episode: item.PagerEpisode, Revision: int64(item.Revision), Terminal: item.State.PagerTerminal()},
 	}, vars)
 	if err != nil {
 		return fmt.Errorf("snapshot incident notification: %w", err)

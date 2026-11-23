@@ -46,11 +46,11 @@ func documentWriteError(err error) error {
 }
 
 const documentLinkCols = `id,tenant_id,integration_id,source_kind,source_ref,COALESCE(engagement_id,''),COALESCE(project_id,''),
-    container,remote_page_id,remote_version,remote_revision,remote_url,content_hash,revision,retired_at,created_at,updated_at,
+    container,remote_page_id,remote_version,remote_revision,remote_url,content_hash,access_profile,revision,retired_at,removal_kind,created_at,updated_at,
     restriction_status,restriction_checked_at,restriction_next_at,restriction_check_version`
 
 const documentIntentCols = `id,tenant_id,integration_id,source_kind,source_ref,COALESCE(engagement_id,''),COALESCE(project_id,''),
-    container,COALESCE(link_id,''),action,request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,
+    container,COALESCE(link_id,''),expected_link_revision,action,request_key,payload_digest,content_hash,access_profile,correlation_marker,state,version,attempts,
     lease_until,remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at`
 
 // documentScopeArgs maps a target's scope to the two nullable scope columns.
@@ -72,8 +72,8 @@ func scanDocumentLink(row rowScanner) (docpublish.Link, error) {
 	var l docpublish.Link
 	var engagement, project string
 	err := row.Scan(&l.ID, &l.TenantID, &l.IntegrationID, &l.SourceKind, &l.SourceRef, &engagement, &project,
-		&l.Container, &l.RemotePageID, &l.RemoteVersion, &l.RemoteRevision, &l.RemoteURL, &l.ContentHash, &l.Revision,
-		&l.RetiredAt, &l.CreatedAt, &l.UpdatedAt, &l.RestrictionStatus, &l.RestrictionCheckedAt, &l.RestrictionNextAt, &l.RestrictionCheckVersion)
+		&l.Container, &l.RemotePageID, &l.RemoteVersion, &l.RemoteRevision, &l.RemoteURL, &l.ContentHash, &l.AccessProfile, &l.Revision,
+		&l.RetiredAt, &l.RemovalKind, &l.CreatedAt, &l.UpdatedAt, &l.RestrictionStatus, &l.RestrictionCheckedAt, &l.RestrictionNextAt, &l.RestrictionCheckVersion)
 	if err != nil {
 		return docpublish.Link{}, err
 	}
@@ -90,7 +90,7 @@ func scanDocumentIntent(row rowScanner) (docpublish.Intent, error) {
 	var i docpublish.Intent
 	var engagement, project, link string
 	err := row.Scan(&i.ID, &i.TenantID, &i.IntegrationID, &i.SourceKind, &i.SourceRef, &engagement, &project,
-		&i.Container, &link, &i.Action, &i.RequestKey, &i.PayloadDigest, &i.ContentHash, &i.Marker, &i.State,
+		&i.Container, &link, &i.ExpectedLinkRevision, &i.Action, &i.RequestKey, &i.PayloadDigest, &i.ContentHash, &i.AccessProfile, &i.Marker, &i.State,
 		&i.Version, &i.Attempts, &i.LeaseUntil, &i.RemoteID, &i.RemoteURL, &i.RemoteVersion, &i.RemoteRevision, &i.ErrorCode,
 		&i.CreatedAt, &i.UpdatedAt)
 	if err != nil {
@@ -206,6 +206,49 @@ func (s *DocumentStore) ListLinks(ctx context.Context, tenant shared.ID, scope d
 	return out, nil
 }
 
+func (s *DocumentStore) ListDocumentSnapshots(ctx context.Context, tenant, linkID shared.ID, limit int) ([]docpublish.Intent, error) {
+	if tenant.IsZero() || linkID.IsZero() || limit < 1 || limit > docpublish.MaxListLimit {
+		return nil, shared.ErrValidation
+	}
+	var out []docpublish.Intent
+	err := requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		link, err := scanDocumentLink(tx.QueryRow(ctx, `SELECT `+documentLinkCols+` FROM document_links WHERE tenant_id=$1 AND id=$2`, tenant.String(), linkID.String()))
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+documentIntentCols+` FROM document_intents WHERE tenant_id=$1 AND integration_id=$2 AND source_kind=$3 AND source_ref=$4 AND container=$5 AND engagement_id IS NOT DISTINCT FROM $6 AND project_id IS NOT DISTINCT FROM $7 AND state='done' AND action IN ('create','snapshot') ORDER BY updated_at DESC,id DESC LIMIT $8`, tenant.String(), link.IntegrationID.String(), string(link.SourceKind), link.SourceRef, link.Container, func() any {
+			if link.Scope == docpublish.Engagement {
+				return link.ScopeID.String()
+			}
+			return nil
+		}(), func() any {
+			if link.Scope == docpublish.Project {
+				return link.ScopeID.String()
+			}
+			return nil
+		}(), limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item, err := scanDocumentIntent(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, item)
+		}
+		return rows.Err()
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, shared.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list document snapshots: %w", err)
+	}
+	return out, nil
+}
+
 func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i docpublish.Intent) (docpublish.Intent, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return docpublish.Intent{}, false, err
@@ -260,7 +303,7 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 			if !errors.Is(e, pgx.ErrNoRows) {
 				return e
 			}
-		case docpublish.Update:
+		case docpublish.Update, docpublish.Snapshot:
 			link, linkErr := scanDocumentLink(tx.QueryRow(ctx, `SELECT `+documentLinkCols+` FROM document_links
                 WHERE tenant_id=$1 AND id=$2 FOR KEY SHARE`, tenant.String(), i.LinkID.String()))
 			if errors.Is(linkErr, pgx.ErrNoRows) {
@@ -272,10 +315,13 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 			if link.Target != i.Target {
 				return shared.ErrValidation
 			}
-			if link.RetiredAt != nil {
+			if link.RetiredAt != nil && i.Action != docpublish.Snapshot {
 				return shared.ErrConflict
 			}
-		case docpublish.Purge:
+			if i.ExpectedLinkRevision > 0 && link.Revision != i.ExpectedLinkRevision {
+				return shared.ErrConflict
+			}
+		case docpublish.Purge, docpublish.Trash:
 			link, linkErr := scanDocumentLink(tx.QueryRow(ctx, `SELECT `+documentLinkCols+` FROM document_links
                 WHERE tenant_id=$1 AND id=$2 FOR KEY SHARE`, tenant.String(), i.LinkID.String()))
 			if errors.Is(linkErr, pgx.ErrNoRows) {
@@ -284,7 +330,7 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 			if linkErr != nil {
 				return linkErr
 			}
-			if link.Target != i.Target || link.RetiredAt != nil {
+			if link.Target != i.Target || link.RetiredAt != nil || (i.ExpectedLinkRevision > 0 && link.Revision != i.ExpectedLinkRevision) {
 				return shared.ErrConflict
 			}
 		}
@@ -294,14 +340,14 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 			link = i.LinkID.String()
 		}
 		tag, e := tx.Exec(ctx, `INSERT INTO document_intents
-            (id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,link_id,action,
-             request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,lease_until,
-             remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+			(id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,link_id,expected_link_revision,action,
+			 request_key,payload_digest,content_hash,access_profile,correlation_marker,state,version,attempts,lease_until,
+			 remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
             ON CONFLICT (tenant_id,integration_id,request_key) DO NOTHING`,
 			i.ID.String(), tenant.String(), i.IntegrationID.String(), string(i.SourceKind), i.SourceRef,
-			engagement, project, i.Container, link, string(i.Action), i.RequestKey, i.PayloadDigest,
-			i.ContentHash, i.Marker, string(i.State), i.Version, i.Attempts, nil, i.RemoteID, i.RemoteURL,
+			engagement, project, i.Container, link, i.ExpectedLinkRevision, string(i.Action), i.RequestKey, i.PayloadDigest,
+			i.ContentHash, i.AccessProfile, i.Marker, string(i.State), i.Version, i.Attempts, nil, i.RemoteID, i.RemoteURL,
 			i.RemoteVersion, i.RemoteRevision, i.ErrorCode, i.CreatedAt.UTC(), i.UpdatedAt.UTC())
 		if e != nil {
 			return e
@@ -432,12 +478,12 @@ func completeDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, done
 	engagement, project := documentScopeArgs(link.Target)
 	tag, e := tx.Exec(ctx, `INSERT INTO document_links
         (id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,
-		 remote_page_id,remote_version,remote_revision,remote_url,content_hash,revision,retired_at,created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		 remote_page_id,remote_version,remote_revision,remote_url,content_hash,access_profile,revision,retired_at,removal_kind,created_at,updated_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
         ON CONFLICT ON CONSTRAINT document_links_target_unique DO NOTHING`,
 		link.ID.String(), tenant.String(), link.IntegrationID.String(), string(link.SourceKind), link.SourceRef,
 		engagement, project, link.Container, link.RemotePageID, link.RemoteVersion, link.RemoteRevision, link.RemoteURL,
-		link.ContentHash, link.Revision, link.RetiredAt, link.CreatedAt.UTC(), link.UpdatedAt.UTC())
+		link.ContentHash, link.AccessProfile, link.Revision, link.RetiredAt, link.RemovalKind, link.CreatedAt.UTC(), link.UpdatedAt.UTC())
 	if e != nil {
 		return e
 	}
@@ -464,12 +510,12 @@ func completeDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, done
 
 func updateDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, link docpublish.Link, expectedRevision int) error {
 	tag, err := tx.Exec(ctx, `UPDATE document_links
-		SET remote_version=$3,remote_revision=$4,remote_url=$5,content_hash=$6,revision=$7,retired_at=$8,updated_at=$9,
+		SET remote_page_id=$3,remote_version=$4,remote_revision=$5,remote_url=$6,content_hash=$7,access_profile=$8,revision=$9,retired_at=$10,removal_kind=$11,updated_at=$12,
         restriction_status='unchecked',restriction_checked_at=NULL,restriction_next_at='epoch'::timestamptz,
         restriction_check_version=restriction_check_version+1
-		WHERE tenant_id=$1 AND id=$2 AND revision=$10`,
-		tenant.String(), link.ID.String(), link.RemoteVersion, link.RemoteRevision, link.RemoteURL, link.ContentHash,
-		link.Revision, link.RetiredAt, link.UpdatedAt.UTC(), expectedRevision)
+		WHERE tenant_id=$1 AND id=$2 AND revision=$13`,
+		tenant.String(), link.ID.String(), link.RemotePageID, link.RemoteVersion, link.RemoteRevision, link.RemoteURL, link.ContentHash,
+		link.AccessProfile, link.Revision, link.RetiredAt, link.RemovalKind, link.UpdatedAt.UTC(), expectedRevision)
 	if err != nil {
 		return err
 	}

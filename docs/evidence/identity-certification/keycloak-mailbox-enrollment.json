@@ -1,0 +1,167 @@
+{
+  "at": "2026-10-25T17:44:10.914611+00:00",
+  "scope": "real Keycloak default enrollment and same-person Required-destination subset; not whole PR closure",
+  "source": {
+    "at": "2026-10-25T17:26:44.365614+00:00",
+    "head": "043e9d7491d4fcb2ab1844647c5fb604154965e7",
+    "files": {
+      "internal/adapter/httpapi/enterprise_callback_error_test.go": "a8ef21bebc79f3b92b3406b96f2c3d363df74fe2e41d1f06b6ea3b6d98d2c813",
+      "internal/infrastructure/oidc/provider.go": "2d071e913e1d3774a4e435863cb45f921b44bad2d173b2a1c1c4d5cd2be635ab",
+      "internal/infrastructure/oidc/provider_test.go": "b52b0d85aa552f8512f6c7b42e2b65ffabf655f6fe5690441e6f623d1e6c8e36",
+      "internal/infrastructure/persistence/postgres/identity_admission.go": "3385967168764e7d9c3a7fc3150463699b2eba62568debb2c1c3d163f1ded8c5",
+      "internal/infrastructure/persistence/postgres/identity_admission_mailbox_test.go": "1569e3d1271bea922fc51a03da4dd6a2d465bae5fe171681fde662d485cd172b",
+      "internal/usecase/identityenterprise/authorization_unavailable_test.go": "13658858bd1dc4674997cadd7671271d88631f675f3a24af8ff37e28acf5f86a",
+      "web/src/auth/AuthContext.test.tsx": "e590642918c2f8f2124b15b59e9cc2eb3479cfb26ab291322c813c8edd5d8fcd",
+      "web/src/auth/AuthContext.tsx": "984ab3cb0da1b4f1990877dbedcf4c9c4a9d63ac6a8660e79091f919b5550af3"
+    },
+    "images": {
+      "api": {
+        "image_id": "sha256:bad851715d35065cc65d9c608bd994bb2c368ac40f8eeab47bb68b31b5eb2cbd",
+        "base_image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a"
+      },
+      "web": {
+        "image_id": "sha256:fb0931aececbdf69257218b5ab99e3784ec7b504ca0297e707546cf401eef196",
+        "base_image": "sha256:921e6509aa5abbdf1e40899f37835b4cf90959d49998c1204ad7d98261c91813"
+      }
+    },
+    "api_binary_sha256": "273c4ac4a241b63b553100534c2d66dcac44c08432abd85ebd756ff90e509daf",
+    "entrypoint_sha256": "5fd9d09cd228c72d3c24aecbba46d20196639cd2e25a3b5558ed8f3afd625639",
+    "final_review": "deferred_until_whole_issue_acceptance_complete"
+  },
+  "authority_before": {
+    "persons": 5,
+    "memberships": 7,
+    "authenticators": 8
+  },
+  "authority_after": {
+    "persons": 5,
+    "memberships": 8,
+    "authenticators": 10
+  },
+  "grants": {
+    "connection": "default Keycloak explicitly authorized Test/Activate",
+    "invitations_created": 3,
+    "invitations_accepted": 2,
+    "diagnostic_revoked": 1,
+    "accepted_roles": "readonly only",
+    "codes": "accepted/revoked historical sealed artifacts; never replay"
+  },
+  "false_email": {
+    "provider_flag": "controlled retained synthetic user emailVerified JSON false; restored exact original true and all other fields",
+    "real_callback": "subject-bound mailbox challenge",
+    "sender_outage": "same isolated Mailpit stopped with independent restore guard; no admission and initiating Auth0 source usable; same sender restored and retry delivered private SMTP",
+    "wrong_code": "denied without authority changes",
+    "initial_correct_code": "SQLSTATE23505 legacy membership-derived contact ID; full rollback, then source repaired",
+    "repair": "tenant + locked invitation ID, preserves existing value upsert and historical contact ID",
+    "correct_code_retry": "new Mailpit receipt and new code, challenge consumed, same person/membership/readonly, old manual contact all fields unchanged",
+    "ordinary_login": "local logout then approved Keycloak login, recent provider SSO reused; not claimed forced password"
+  },
+  "true_email": {
+    "provider_flag": "retained approved synthetic emailVerified JSON true, unchanged",
+    "before_invitation": "ordinary default login denied; no JIT",
+    "source": "existing same person secondary readonly, confirmed actual fresh upstream proof17:33:31UTC",
+    "enrollment": "default readonly invitation accepted via actual Keycloak callback, zero mailbox challenges, verified imported OIDC contact",
+    "ordinary_login": "local logout and ordinary default Keycloak sign-in same person/readonly",
+    "claim_evidence": "controlled provider boolean + actual signature-verified callback direct admission; raw JWT not retained"
+  },
+  "required_destination": {
+    "from": "default readonly",
+    "to": "sandbox-secondary Required readonly",
+    "ui": "switch required explicit destination provider choice; selected Keycloak sandbox",
+    "actual": "real redirect/callback reached secondary Dashboard; original person and roles retained",
+    "upstream_auth_time": "2026-10-25T17:33:31Z (recent SSO reused)",
+    "no_false_success": "destination provider selector displayed before callback; no direct local switch"
+  },
+  "restoration": {
+    "candidate_preview": "restored exact reviewed baseline at17:42:15UTC",
+    "provider_email_flag": "restored",
+    "Mailpit": "restored same container/image healthy",
+    "durable_manifests_credentials_migrator": "unchanged",
+    "no_billing": true,
+    "auth0_signing_key_rotation": "owner deferred, untouched"
+  },
+  "limitations": {
+    "candidate_changes": "8 uncommitted files; not durably promoted or claimed standalone PR1609 source",
+    "final_review": "deferred until every linked-issue functional acceptance ready",
+    "early_source_observation": "source-ready snapshot occurred before callback; source-confirmed is authoritative",
+    "outage_copy": "SMTP fault used baseline earlier copy; exact current generalized copy checked by current frontend tests"
+  },
+  "admission_observations": {
+    "mailbox": {
+      "invitation": {
+        "state": "accepted",
+        "person": "439ae5598e97613dcce354bd63adde75",
+        "membership": "membership_2f3a4a22ebb35e0b9a386668d6b64cc748891277",
+        "role": "readonly"
+      },
+      "challenges": [
+        {
+          "subject_matches_original_keycloak_person": true,
+          "person_matches_source": true,
+          "consumed": true
+        }
+      ],
+      "contacts": [
+        {
+          "id": "contact_mailbox_214ad834566e57e98118b16be33af19628595e38",
+          "source": "manual",
+          "kind": "email",
+          "value_is_previous_synthetic_mailbox": false,
+          "value_is_new_synthetic_mailbox": true,
+          "version": 1,
+          "verified_at": "2026-10-25T17:31:40.447217+00:00",
+          "created_at": "2026-10-25T17:31:40.447217+00:00",
+          "updated_at": "2026-10-25T17:31:40.447217+00:00"
+        },
+        {
+          "id": "contact_mailbox_9eb56fa1d38d60c50ff04083407c07d5dee08877",
+          "source": "manual",
+          "kind": "email",
+          "value_is_previous_synthetic_mailbox": true,
+          "value_is_new_synthetic_mailbox": false,
+          "version": 1,
+          "verified_at": "2026-10-25T10:13:55.743072+00:00",
+          "created_at": "2026-10-25T10:13:55.743072+00:00",
+          "updated_at": "2026-10-25T10:13:55.743072+00:00"
+        }
+      ],
+      "at": "2026-10-25T17:31:55.296504+00:00",
+      "previous_contact_all_fields_preserved": true
+    },
+    "verified": {
+      "invitation": {
+        "id": "d5ca01c0d379f6acc1192513f4fffd8c",
+        "state": "accepted",
+        "role": "readonly",
+        "person": "16999d77cd54321aaab2efe104579729",
+        "membership": "membership_6fa04593e63d965067efc29f2891037e22ac8370"
+      },
+      "challenge_count": 0,
+      "imported_contact_count": 1,
+      "at": "2026-10-25T17:36:35.367066+00:00",
+      "authority_counts": [
+        5,
+        8,
+        10
+      ],
+      "same_person_from_source": true,
+      "other_memberships_roles_policies_unchanged": true,
+      "strict_true_claim_branch": "exact verified-email direct admission, no mailbox challenge, real signature-verified codecallback"
+    }
+  },
+  "integration_qa": {
+    "verdict": "pass",
+    "scope": "completed eight-file implementation only; not final PR review",
+    "all_current_source_hashes_match_build": true,
+    "postgres_focused_seconds": 3.252,
+    "postgres_race_seconds": 17.663,
+    "frontend_context_tests": 59
+  },
+  "private_original_manifest_sha256": "0144fd3ba9c916797b4fd41f773af8919c8ff8cc033607ad9128087d9462509f",
+  "screenshots_sha256": {
+    "keycloak-mailbox-contact-repair-accepted.png": "36fbd07a97be13d8f16bf3f411d74b1fe6029ae075b2ba8f52762c71759abd34",
+    "keycloak-verified-email-accepted.png": "2eca2c6748e96e2eeda648ec589f3a057c8468030e11bf45c2dae781d3bf2f41",
+    "keycloak-required-switch-proof-required.png": "f726d5dcd2ebbccbb30430c3d3113518c483e741b31288168194b2dd26b819bf",
+    "keycloak-verified-email-required-switch.png": "d2410ee701456819ad56e39d3033fe6ed498153262744b744df2ddfa804bc827"
+  }
+}

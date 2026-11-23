@@ -47,6 +47,14 @@ func (a *fakeAudit) Record(_ context.Context, entry ports.AuditEntry) error {
 }
 
 func (a *fakeAudit) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
+	return a.recordIdempotent(ctx, e, false)
+}
+
+func (a *fakeAudit) RecordFirstObservation(ctx context.Context, e ports.AuditEntry) error {
+	return a.recordIdempotent(ctx, e, true)
+}
+
+func (a *fakeAudit) recordIdempotent(ctx context.Context, e ports.AuditEntry, firstObservation bool) error {
 	a.mu.Lock()
 	if a.failAction != "" && e.Action == a.failAction {
 		if a.failed == nil {
@@ -68,6 +76,9 @@ func (a *fakeAudit) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 		return a.Record(ctx, e)
 	}
 	if existing, ok := a.entries[key]; ok {
+		if firstObservation {
+			e.At = existing.At
+		}
 		if !reflect.DeepEqual(existing, e) {
 			a.mu.Unlock()
 			return errors.New("idempotent audit metadata changed")

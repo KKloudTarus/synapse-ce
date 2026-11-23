@@ -359,6 +359,16 @@ func main() {
 		log.Error("assessment closure report service init failed", "err", err)
 		os.Exit(1)
 	}
+	// A lifecycle worker can seal a report before the all/integrations composition
+	// reaches its notification setup. Wire source capture before selecting a profile
+	// so every profile that can render the report records report.generated exactly
+	// when a new artifact is stored.
+	if cfg.NotificationEnabled {
+		if err := assessmentClosureReportService.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool)); err != nil {
+			log.Error("assessment closure report notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	if cfg.WorkerProfile == config.WorkerProfileLifecycle {
 		handlers := map[string]worker.Handler{
 			comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
@@ -683,6 +693,12 @@ func main() {
 	if documentPublishErr != nil {
 		log.Error("scheduled document publisher init failed", "err", documentPublishErr)
 		os.Exit(1)
+	}
+	if cfg.NotificationEnabled {
+		if err := documentPublisher.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool)); err != nil {
+			log.Error("document publication notification producers init failed", "err", err)
+			os.Exit(1)
+		}
 	}
 	var scheduleRuntime documentScheduleRuntime
 	if cfg.NotificationEnabled {
@@ -1091,6 +1107,10 @@ func main() {
 				log.Error("DAST workflow init failed", "err", werr)
 				os.Exit(1)
 			}
+			if err := dastWorkflowSvc.SetTransactionRunner(postgres.NewTenantTransactionRunner(pool)); err != nil {
+				log.Error("DAST custody transaction init failed", "err", err)
+				os.Exit(1)
+			}
 			dastProber = dastWorkflowSvc
 			log.Info("DAST verification runs execute on this worker (dast_run handler)")
 		} else {
@@ -1445,6 +1465,9 @@ func main() {
 // configureWorkerJudgmentScanners is the worker's production configuration gate.
 // The binding benchmark calls this same function with an in-memory judgment store.
 func configureWorkerJudgmentScanners(scaService *scauc.Service, cfg config.Config, sb *sandbox.Runner, newJudgmentService func() (*analysisuc.Service, error), auditLog ports.AuditLogger, clock ports.Clock, log *slog.Logger) error {
+	// Record what was selected before deciding what can be built, so a selection the worker cannot satisfy
+	// reaches the engine outcome as unavailable rather than disappearing into not_selected.
+	scacompose.RecordSemanticSelection(scaService, cfg)
 	if !(cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled || cfg.JVMReachabilityEnabled || cfg.GoBinaryReachabilityEnabled) || !cfg.JudgmentsEnabled {
 		return nil
 	}

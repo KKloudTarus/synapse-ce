@@ -20,130 +20,143 @@ import (
 const templateChecksum = "0000000000000000000000000000000000000000000000000000000000000000"
 
 func TestMigration0195NotificationTemplatesSchema(t *testing.T) {
-	_, db := ownershipTestDatabase(t, 194, nil)
-	for _, table := range []string{"notification_templates", "notification_template_versions"} {
-		requireMigrationTable(t, db, table, true)
-		requireMigrationRLS(t, db, table)
-	}
-	requireMigrationIndexes(t, db, "notification_templates_one_active")
-	if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ('t-schema', 'Schema') ON CONFLICT DO NOTHING`); err != nil {
-		t.Fatal(err)
-	}
-	// The owner connection bypasses nothing here: RLS is forced, so writes run under the tenant.
-	exec := func(query string, args ...any) error {
-		tx, err := db.Begin()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if _, err := tx.Exec(`SELECT set_config('app.current_tenant', 't-schema', true)`); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(query, args...); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
-	insertHead := func(id, event, family, locale string) error {
-		return exec(`INSERT INTO notification_templates(tenant_id, id, name, event_type, family, locale, latest_version, revision, created_at, created_by, updated_at, updated_by)
-			VALUES ('t-schema', $1, 'Name', $2, $3, $4, 1, 1, now(), 'admin', now(), 'admin')`, id, event, family, locale)
-	}
-	insertVersion := func(id string, version int, fields string) error {
-		return exec(`INSERT INTO notification_template_versions(tenant_id, template_id, version, fields, checksum, created_at, created_by)
-			VALUES ('t-schema', $1, $2, $3::jsonb, $4, now(), 'admin')`, id, version, fields, templateChecksum)
-	}
-
-	for _, bad := range []struct{ name, event, family, locale string }{
-		{"malformed event type", "Scan Completed", "chat", "en"},
-		{"event type without a dot", "scan", "chat", "en"},
-		{"free-text family", "scan.completed", "sms", "en"},
-		{"unsupported locale", "scan.completed", "chat", "fr"},
-		{"region-tagged locale", "scan.completed", "chat", "en-US"},
+	for _, target := range []struct {
+		name    string
+		version int64
+	}{
+		{"startup", 0},
+		{"rollback", 195},
 	} {
-		if err := insertHead("tpl-bad", bad.event, bad.family, bad.locale); err == nil {
-			t.Errorf("%s: the CHECK accepted it", bad.name)
-		}
-	}
-	// A well-formed event type outside today's catalog is the application's call, not the schema's.
-	for i, event := range []string{"scan.completed", "*", "future_event.created"} {
-		if err := insertHead(fmt.Sprintf("tpl-%d", i), event, "chat", "*"); err != nil {
-			t.Fatalf("event type %q: %v", event, err)
-		}
-	}
-	for _, bad := range []struct{ name, fields string }{
-		{"array", `["title"]`},
-		{"empty object", `{}`},
-		{"non-string value", `{"title": 1}`},
-		{"nested value", `{"title": {"x": "y"}}`},
-		{"malformed key", `{"Title": "x"}`},
-	} {
-		if err := insertVersion("tpl-0", 1, bad.fields); err == nil {
-			t.Errorf("fields %s: the CHECK accepted %s", bad.name, bad.fields)
-		}
-	}
-	if err := insertVersion("tpl-0", 1, `{"title": "v1", "body": "b"}`); err != nil {
-		t.Fatal(err)
-	}
-	if err := exec(`UPDATE notification_templates SET status='active', revision=2 WHERE id='tpl-0'`); err == nil {
-		t.Error("an active template without an active version was accepted")
-	}
-	if err := exec(`UPDATE notification_templates SET status='active', active_version=2, revision=2 WHERE id='tpl-0'`); err == nil {
-		t.Error("an active version past the latest version was accepted")
-	}
+		t.Run(target.name, func(t *testing.T) {
+			_, db := ownershipMigrationDatabase(t, 194, target.version, nil)
+			for _, table := range []string{"notification_templates", "notification_template_versions"} {
+				requireMigrationTable(t, db, table, true)
+				requireMigrationRLS(t, db, table)
+			}
+			requireMigrationIndexes(t, db, "notification_templates_one_active")
+			if _, err := db.Exec(`INSERT INTO tenants(id, name) VALUES ('t-schema', 'Schema') ON CONFLICT DO NOTHING`); err != nil {
+				t.Fatal(err)
+			}
+			// The owner connection bypasses nothing here: RLS is forced, so writes run under the tenant.
+			exec := func(query string, args ...any) error {
+				tx, err := db.Begin()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = tx.Rollback() }()
+				if _, err := tx.Exec(`SELECT set_config('app.current_tenant', 't-schema', true)`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(query, args...); err != nil {
+					return err
+				}
+				return tx.Commit()
+			}
+			insertHead := func(id, event, family, locale string) error {
+				return exec(`INSERT INTO notification_templates(tenant_id, id, name, event_type, family, locale, latest_version, revision, created_at, created_by, updated_at, updated_by)
+					VALUES ('t-schema', $1, 'Name', $2, $3, $4, 1, 1, now(), 'admin', now(), 'admin')`, id, event, family, locale)
+			}
+			insertVersion := func(id string, version int, fields string) error {
+				return exec(`INSERT INTO notification_template_versions(tenant_id, template_id, version, fields, checksum, created_at, created_by)
+					VALUES ('t-schema', $1, $2, $3::jsonb, $4, now(), 'admin')`, id, version, fields, templateChecksum)
+			}
 
-	// Versions are append-only, even for the table owner.
-	for _, q := range []string{
-		`UPDATE notification_template_versions SET fields='{"title":"rewritten"}' WHERE template_id='tpl-0'`,
-		`UPDATE notification_template_versions SET created_by='someone' WHERE template_id='tpl-0'`,
-		`DELETE FROM notification_template_versions WHERE template_id='tpl-0'`,
-	} {
-		if err := exec(q); err == nil {
-			t.Errorf("append-only guard allowed %s", q)
-		}
-	}
-	// The key is immutable and a template with versions cannot be deleted.
-	for _, q := range []string{
-		`UPDATE notification_templates SET event_type='incident.created', revision=2 WHERE id='tpl-0'`,
-		`UPDATE notification_templates SET locale='vi', revision=2 WHERE id='tpl-0'`,
-		`UPDATE notification_templates SET name='x', revision=1 WHERE id='tpl-0'`,
-		`DELETE FROM notification_templates WHERE id='tpl-0'`,
-	} {
-		if err := exec(q); err == nil {
-			t.Errorf("template guard allowed %s", q)
-		}
-	}
+			for _, bad := range []struct{ name, event, family, locale string }{
+				{"malformed event type", "Scan Completed", "chat", "en"},
+				{"event type without a dot", "scan", "chat", "en"},
+				{"free-text family", "scan.completed", "sms", "en"},
+				{"unsupported locale", "scan.completed", "chat", "fr"},
+				{"region-tagged locale", "scan.completed", "chat", "en-US"},
+			} {
+				if err := insertHead("tpl-bad", bad.event, bad.family, bad.locale); err == nil {
+					t.Errorf("%s: the CHECK accepted it", bad.name)
+				}
+			}
+			// A well-formed event type outside today's catalog is the application's call, not the schema's.
+			for i, event := range []string{"scan.completed", "*", "future_event.created"} {
+				if err := insertHead(fmt.Sprintf("tpl-%d", i), event, "chat", "*"); err != nil {
+					t.Fatalf("event type %q: %v", event, err)
+				}
+			}
+			for _, bad := range []struct{ name, fields string }{
+				{"array", `["title"]`},
+				{"empty object", `{}`},
+				{"non-string value", `{"title": 1}`},
+				{"nested value", `{"title": {"x": "y"}}`},
+				{"malformed key", `{"Title": "x"}`},
+			} {
+				if err := insertVersion("tpl-0", 1, bad.fields); err == nil {
+					t.Errorf("fields %s: the CHECK accepted %s", bad.name, bad.fields)
+				}
+			}
+			if err := insertVersion("tpl-0", 1, `{"title": "v1", "body": "b"}`); err != nil {
+				t.Fatal(err)
+			}
+			if err := exec(`UPDATE notification_templates SET status='active', revision=2 WHERE id='tpl-0'`); err == nil {
+				t.Error("an active template without an active version was accepted")
+			}
+			if err := exec(`UPDATE notification_templates SET status='active', active_version=2, revision=2 WHERE id='tpl-0'`); err == nil {
+				t.Error("an active version past the latest version was accepted")
+			}
 
-	// Acceptance: two active templates for one key are refused by the database itself.
-	if err := insertVersion("tpl-1", 1, `{"title": "star"}`); err != nil {
-		t.Fatal(err)
-	}
-	if err := insertVersion("tpl-2", 1, `{"title": "future"}`); err != nil {
-		t.Fatal(err)
-	}
-	if err := insertHead("tpl-dup", "*", "chat", "*"); err != nil {
-		t.Fatal(err)
-	}
-	if err := insertVersion("tpl-dup", 1, `{"title": "dup"}`); err != nil {
-		t.Fatal(err)
-	}
-	if err := exec(`UPDATE notification_templates SET status='active', active_version=1, revision=2 WHERE id='tpl-1'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := exec(`UPDATE notification_templates SET status='active', active_version=1, revision=2 WHERE id='tpl-dup'`); err == nil {
-		t.Fatal("a second active template for (t-schema, *, chat, *) was accepted")
-	}
-	if err := exec(`UPDATE notification_templates SET status='active', active_version=1, revision=2 WHERE id='tpl-2'`); err != nil {
-		t.Fatalf("another key may have its own active template: %v", err)
-	}
+			// Versions are append-only, even for the table owner.
+			for _, q := range []string{
+				`UPDATE notification_template_versions SET fields='{"title":"rewritten"}' WHERE template_id='tpl-0'`,
+				`UPDATE notification_template_versions SET created_by='someone' WHERE template_id='tpl-0'`,
+				`DELETE FROM notification_template_versions WHERE template_id='tpl-0'`,
+			} {
+				if err := exec(q); err == nil {
+					t.Errorf("append-only guard allowed %s", q)
+				}
+			}
+			// The key is immutable and a template with versions cannot be deleted.
+			for _, q := range []string{
+				`UPDATE notification_templates SET event_type='incident.created', revision=2 WHERE id='tpl-0'`,
+				`UPDATE notification_templates SET locale='vi', revision=2 WHERE id='tpl-0'`,
+				`UPDATE notification_templates SET name='x', revision=1 WHERE id='tpl-0'`,
+				`DELETE FROM notification_templates WHERE id='tpl-0'`,
+			} {
+				if err := exec(q); err == nil {
+					t.Errorf("template guard allowed %s", q)
+				}
+			}
 
-	if err := goose.DownTo(db, ".", 194); err != nil {
-		t.Fatalf("migrate down: %v", err)
-	}
-	requireMigrationTable(t, db, "notification_templates", false)
-	requireMigrationTable(t, db, "notification_template_versions", false)
-	var functions int
-	if err := db.QueryRow(`SELECT count(*) FROM pg_proc WHERE proname IN ('notification_template_version_immutable', 'notification_template_head_guard')`).Scan(&functions); err != nil || functions != 0 {
-		t.Fatalf("down left %d functions: %v", functions, err)
+			// Acceptance: two active templates for one key are refused by the database itself.
+			if err := insertVersion("tpl-1", 1, `{"title": "star"}`); err != nil {
+				t.Fatal(err)
+			}
+			if err := insertVersion("tpl-2", 1, `{"title": "future"}`); err != nil {
+				t.Fatal(err)
+			}
+			if err := insertHead("tpl-dup", "*", "chat", "*"); err != nil {
+				t.Fatal(err)
+			}
+			if err := insertVersion("tpl-dup", 1, `{"title": "dup"}`); err != nil {
+				t.Fatal(err)
+			}
+			if err := exec(`UPDATE notification_templates SET status='active', active_version=1, revision=2 WHERE id='tpl-1'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := exec(`UPDATE notification_templates SET status='active', active_version=1, revision=2 WHERE id='tpl-dup'`); err == nil {
+				t.Fatal("a second active template for (t-schema, *, chat, *) was accepted")
+			}
+			if err := exec(`UPDATE notification_templates SET status='active', active_version=1, revision=2 WHERE id='tpl-2'`); err != nil {
+				t.Fatalf("another key may have its own active template: %v", err)
+			}
+
+			if target.version == 0 {
+				return
+			}
+			if err := goose.DownTo(db, ".", 194); err != nil {
+				t.Fatalf("migrate down: %v", err)
+			}
+			requireMigrationTable(t, db, "notification_templates", false)
+			requireMigrationTable(t, db, "notification_template_versions", false)
+			var functions int
+			if err := db.QueryRow(`SELECT count(*) FROM pg_proc WHERE proname IN ('notification_template_version_immutable', 'notification_template_head_guard')`).Scan(&functions); err != nil || functions != 0 {
+				t.Fatalf("down left %d functions: %v", functions, err)
+			}
+		})
 	}
 }
 

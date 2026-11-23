@@ -42,7 +42,7 @@ func (s *DocumentStore) ClaimDocumentRestrictionChecks(ctx context.Context, tena
 }
 
 func (s *DocumentStore) SaveDocumentRestrictionCheck(ctx context.Context, tenant shared.ID, link docpublish.Link, status string, at, next time.Time) error {
-	if tenant.IsZero() || link.TenantID != tenant || link.ID.IsZero() || link.Revision < 1 || link.RestrictionCheckVersion < 1 || at.IsZero() || !next.After(at) || (status != "verified" && status != "restriction_lost" && status != "unverifiable") {
+	if tenant.IsZero() || link.TenantID != tenant || link.ID.IsZero() || link.Revision < 1 || link.RestrictionCheckVersion < 1 || at.IsZero() || !next.After(at) || (status != "verified" && status != "restriction_lost" && status != "unverifiable" && status != "destination_managed") {
 		return shared.ErrValidation
 	}
 	return requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {

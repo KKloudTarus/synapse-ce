@@ -24,6 +24,7 @@ function authValue(): ReturnType<typeof useAuth> {
     logout: async () => {},
     retry: async () => {},
     completeOrganizationSwitch,
+    completeMailboxContinuation: async () => {},
   }
 }
 

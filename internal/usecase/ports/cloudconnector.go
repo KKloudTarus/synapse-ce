@@ -2,7 +2,9 @@ package ports
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -60,4 +62,68 @@ type CloudRunStore interface {
 // CloudRunEnqueuer atomically persists one queued run and its durable job.
 type CloudRunEnqueuer interface {
 	EnqueueCloudRun(context.Context, cloudposture.Run, string, []byte) error
+}
+
+// CloudRunJob is the original queued execution spec. CredentialRef is a vault
+// reference, never credential material.
+type CloudRunJob struct {
+	TenantID        shared.ID    `json:"tenant_id"`
+	RunID           shared.ID    `json:"run_id"`
+	EngagementID    shared.ID    `json:"engagement_id"`
+	Actor           string       `json:"actor"`
+	Scopes          []CloudScope `json:"scopes"`
+	ApprovedTargets []string     `json:"approved_targets"`
+}
+
+// CloudRunAuthorization is a credential-free view used by the grant issuer.
+type CloudRunAuthorization struct {
+	Run    cloudposture.Run
+	Scopes []CloudRunAuthorizationScope
+}
+
+type CloudRunAuthorizationScope struct {
+	Provider        cloudposture.Provider
+	Root            string
+	ApprovedTarget  string
+	CredentialBound bool
+}
+
+type CloudRunJobReader interface {
+	GetCloudRunJob(context.Context, shared.ID, shared.ID) (CloudRunJob, error)
+}
+
+type CloudRunAuthorizationReader interface {
+	GetCloudRunAuthorization(context.Context, shared.ID, shared.ID) (CloudRunAuthorization, error)
+}
+
+// DecodeCloudRunJob validates persisted authority before exposing it to consumers.
+func DecodeCloudRunJob(run cloudposture.Run, kind string, payload []byte) (CloudRunJob, error) {
+	var job CloudRunJob
+	if kind != "cspm" || json.Unmarshal(payload, &job) != nil {
+		return CloudRunJob{}, fmt.Errorf("%w: invalid CSPM job", shared.ErrForbidden)
+	}
+	if run.Validate() != nil || job.TenantID != run.TenantID || job.RunID != run.ID || job.EngagementID != run.EngagementID || strings.TrimSpace(job.Actor) == "" || job.Actor != run.Actor || len(job.Scopes) == 0 || len(job.Scopes) > 32 || len(job.Scopes) != len(job.ApprovedTargets) {
+		return CloudRunJob{}, fmt.Errorf("%w: CSPM job identity or scope mismatch", shared.ErrForbidden)
+	}
+	seen := make(map[string]struct{}, len(job.Scopes))
+	for i, scope := range job.Scopes {
+		_, key, err := cloudposture.NormalizeRoot(scope.Provider, scope.Root)
+		approvedKey, approvedErr := cloudposture.ScopeKey(scope.Provider, job.ApprovedTargets[i])
+		if err != nil || approvedErr != nil || key != approvedKey || scope.EngagementID != run.EngagementID || strings.TrimSpace(scope.CredentialRef) == "" {
+			return CloudRunJob{}, fmt.Errorf("%w: invalid CSPM job scope", shared.ErrForbidden)
+		}
+		if _, ok := seen[key]; ok {
+			return CloudRunJob{}, fmt.Errorf("%w: duplicate CSPM job scope", shared.ErrForbidden)
+		}
+		seen[key] = struct{}{}
+	}
+	return job, nil
+}
+
+func CloudAuthorizationFromJob(run cloudposture.Run, job CloudRunJob) CloudRunAuthorization {
+	result := CloudRunAuthorization{Run: run, Scopes: make([]CloudRunAuthorizationScope, len(job.Scopes))}
+	for i, scope := range job.Scopes {
+		result.Scopes[i] = CloudRunAuthorizationScope{Provider: scope.Provider, Root: scope.Root, ApprovedTarget: job.ApprovedTargets[i], CredentialBound: true}
+	}
+	return result
 }

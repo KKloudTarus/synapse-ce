@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -40,12 +41,18 @@ func (t reconTool) BuildArgs(target engagement.Target) (ports.ToolSpec, error) {
 }
 
 type canonicalizer struct {
-	rules []ports.CanonicalEgressRule
-	calls int
+	rules  []ports.CanonicalEgressRule
+	calls  int
+	policy ports.EgressPolicy
+	after  func()
 }
 
-func (c *canonicalizer) Canonicalize(context.Context, ports.EgressPolicy) ([]ports.CanonicalEgressRule, error) {
+func (c *canonicalizer) Canonicalize(_ context.Context, p ports.EgressPolicy) ([]ports.CanonicalEgressRule, error) {
+	c.policy = p
 	c.calls++
+	if c.after != nil {
+		c.after()
+	}
 	return append([]ports.CanonicalEgressRule(nil), c.rules...), nil
 }
 
@@ -242,6 +249,84 @@ func TestAuthorizeFailsClosedBeforeSigning(t *testing.T) {
 			}
 			if f.signer.calls != 0 {
 				t.Fatalf("signer called %d times", f.signer.calls)
+			}
+		})
+	}
+}
+
+type cloudAuthority struct {
+	auth       ports.CloudRunAuthorization
+	calls      int
+	afterFirst func(*cloudAuthority)
+}
+
+func (a *cloudAuthority) GetCloudRunAuthorization(context.Context, shared.ID, shared.ID) (ports.CloudRunAuthorization, error) {
+	a.calls++
+	if a.calls == 2 && a.afterFirst != nil {
+		a.afterFirst(a)
+	}
+	return a.auth, nil
+}
+
+func TestCSPMAuthorityBindsScopeAndRechecksState(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		alter   func(*cloudAuthority, *fixture)
+		allowed bool
+	}{
+		{name: "selected scope", allowed: true},
+		{name: "unknown scope", alter: func(_ *cloudAuthority, f *fixture) { f.request.ExecutionID = ports.CSPMExecutionID("run-cloud", 2) }},
+		{name: "extra rule", alter: func(_ *cloudAuthority, f *fixture) {
+			f.request.Rules = append(f.request.Rules, ports.CanonicalEgressRule{Allow: true, CIDR: "198.51.100.0/24"})
+		}},
+		{name: "credential absent", alter: func(a *cloudAuthority, _ *fixture) { a.auth.Scopes[1].CredentialBound = false }},
+		{name: "cancel during DNS", alter: func(a *cloudAuthority, _ *fixture) {
+			a.afterFirst = func(a *cloudAuthority) { a.auth.Run.Status = cloudposture.RunCancelled }
+		}},
+		{name: "expired during DNS", alter: func(_ *cloudAuthority, f *fixture) {
+			f.canonicalizer.after = func() {
+				from, to := f.now.Add(-2*time.Hour), f.now.Add(-time.Hour)
+				if err := f.engagement.SetAuthorizationWindow(&from, &to, "UTC", f.now); err != nil {
+					panic(err)
+				}
+				if err := f.engagements.Update(f.ctx, f.engagement); err != nil {
+					panic(err)
+				}
+			}
+		}},
+		{name: "scope changed during DNS", alter: func(a *cloudAuthority, _ *fixture) {
+			a.afterFirst = func(a *cloudAuthority) { a.auth.Scopes[1].ApprovedTarget = "organization/o-other" }
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.engagement.Scope.InScope = append(f.engagement.Scope.InScope, engagement.Target{Kind: engagement.TargetCloudAccount, Value: "organization/o-2"})
+			if err := f.engagements.Update(f.ctx, f.engagement); err != nil {
+				t.Fatal(err)
+			}
+			a := &cloudAuthority{auth: ports.CloudRunAuthorization{Run: cloudposture.Run{ID: "run-cloud", TenantID: "tenant-test", EngagementID: "eng-1", Status: cloudposture.RunRunning}, Scopes: []ports.CloudRunAuthorizationScope{
+				{Provider: cloudposture.ProviderAWS, Root: "o-1", ApprovedTarget: "organization/o-1", CredentialBound: true},
+				{Provider: cloudposture.ProviderAWS, Root: "o-2", ApprovedTarget: "organization/o-2", CredentialBound: true},
+			}}}
+			hosts := map[cloudposture.Provider][]string{cloudposture.ProviderAWS: {"api.example.com"}}
+			if err := f.service.SetCSPM(a, hosts); err != nil {
+				t.Fatal(err)
+			}
+			hosts[cloudposture.ProviderAWS][0] = "changed.example.com"
+			f.request.ExecutionKind = "cspm"
+			f.request.ExecutionID = ports.CSPMExecutionID("run-cloud", 1)
+			if tc.alter != nil {
+				tc.alter(a, f)
+			}
+			_, err := f.service.Authorize(f.ctx, f.request)
+			if (err == nil) != tc.allowed {
+				t.Fatalf("err=%v", err)
+			}
+			if (f.signer.calls == 1) != tc.allowed {
+				t.Fatalf("signed %d", f.signer.calls)
+			}
+			if tc.allowed && (len(f.canonicalizer.policy.AllowDomainRules) != 1 || f.canonicalizer.policy.AllowDomainRules[0].Host != "api.example.com") {
+				t.Fatalf("provider policy changed: %+v", f.canonicalizer.policy)
 			}
 		})
 	}

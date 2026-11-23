@@ -117,6 +117,7 @@ func TestRenderLongCompletenessWarningKeepsEngineTableBelowWarning(t *testing.T)
 	insight := ports.ReportInsight{
 		HasScan:          true,
 		CompletenessNote: note,
+		CoverageWarnings: []string{"1 image-filesystem infrastructure-as-code attribute did not resolve to a value: modules/vol/main.tf:5: encrypted"},
 		EngineCoverage:   scanrun.EngineCoverage{Status: scanrun.CoveragePartial, Required: 2, Completed: 1},
 		EngineOutcomes: []scanrun.EngineOutcome{
 			{Engine: "dependency_resolution", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoveragePartial, Reason: scanrun.ReasonDependencyUnresolved, Required: true},
@@ -128,9 +129,15 @@ func TestRenderLongCompletenessWarningKeepsEngineTableBelowWarning(t *testing.T)
 	}
 
 	words := pdfWordPositions(t, pdftotext, pdf)
-	lastWarning, ok := wordPosition(words, "directory.")
-	if !ok {
+	if _, ok := wordPosition(words, "directory."); !ok {
 		t.Fatalf("long completeness warning was not rendered: %v", words)
+	}
+	if _, ok := wordPosition(words, "modules/vol/main.tf:5:"); !ok {
+		t.Fatalf("source warning location was not rendered: %v", words)
+	}
+	lastWarning, ok := wordPosition(words, "encrypted")
+	if !ok {
+		t.Fatalf("source warning was not rendered: %v", words)
 	}
 	engineHeader, ok := wordPosition(words, "ENGINE")
 	if !ok {

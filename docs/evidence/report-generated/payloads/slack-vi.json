@@ -1,0 +1,79 @@
+{
+  "body": {
+    "blocks": [
+      {
+        "text": {
+          "emoji": false,
+          "text": "🟠 Báo cáo đã được tạo",
+          "type": "plain_text"
+        },
+        "type": "header"
+      },
+      {
+        "elements": [
+          {
+            "elements": [
+              {
+                "text": "Mức độ: high",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Loại báo cáo: engagement_report",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Số phát hiện: 7",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Thời gian tạo: 2026-10-23T09:00:00Z",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Đợt đánh giá: Live acceptance",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Tiêu đề: Security assessment report: Live acceptance",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Mã nội dung: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5",
+                "type": "text"
+              }
+            ],
+            "type": "rich_text_section"
+          }
+        ],
+        "type": "rich_text"
+      }
+    ],
+    "text": "🟠 Báo cáo đã được tạo",
+    "unfurl_links": false,
+    "unfurl_media": false
+  }
+}

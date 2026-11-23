@@ -31,7 +31,7 @@ async function bootstrap() {
   const playground = import.meta.env.VITE_PLAYGROUND === '1'
   if ((import.meta.env.DEV || playground) && !import.meta.env.VITE_API_PROXY_TARGET) {
     const { worker } = await import('./mocks/browser')
-    await worker.start({ onUnhandledRequest: 'bypass' })
+    await worker.start({ onUnhandledFrame: 'bypass' })
   }
 
   // The playground shell is imported dynamically so a normal build never pulls it into the bundle.

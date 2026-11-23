@@ -31,6 +31,7 @@ var builderFixtures = []domain.EventType{
 	domain.EventFindingCommented, domain.EventFindingMentioned,
 	domain.EventApprovalRequested, domain.EventApprovalDecided, domain.EventApprovalTimedOut,
 	domain.EventIncidentUpdated, domain.EventResponseFinished, domain.EventEvidenceChainBroken,
+	domain.EventReportGenerated,
 }
 
 func fixtureEvent(t *testing.T, eventType domain.EventType) domain.Event {

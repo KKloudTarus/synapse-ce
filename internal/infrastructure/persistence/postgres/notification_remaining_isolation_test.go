@@ -45,6 +45,7 @@ func TestRemainingNotificationRoutingKeepsAllScopedSourcesTenantLocal(t *testing
 		notification.EventIncidentUpdated,
 		notification.EventResponseFinished,
 		notification.EventEvidenceChainBroken,
+		notification.EventReportGenerated,
 	}
 	for _, eventType := range ordinary {
 		eventType := eventType
@@ -160,6 +161,11 @@ func remainingIsolationEvent(t *testing.T, tenant shared.ID, eventType notificat
 	case notification.EventEvidenceChainBroken:
 		data["evidence_chain_id"] = "chain-" + tenant.String()
 		data["reason_code"] = "hash_mismatch"
+	case notification.EventReportGenerated:
+		data["report_id"] = "report-" + tenant.String()
+		data["report_kind"] = "engagement_report"
+		data["content_hash"] = "hash-" + tenant.String()
+		data["generated_at"] = at.UTC().Format(time.RFC3339)
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {

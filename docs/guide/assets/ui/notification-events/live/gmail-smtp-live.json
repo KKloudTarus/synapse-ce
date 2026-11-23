@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-29T17:20:01.305902+00:00",
+  "display_timezone": "Asia/Bangkok",
+  "scope": "Representative restored Gmail OAuth SMTP and actual manual-finding journey; accepted historical matrices not repeated",
+  "runtime": {
+    "api": {
+      "image": "sha256:a5c0cb650b041c9444e1bd9765906c747f7762aa636104f7fce1b51b3fef18e4",
+      "state_at_capture": "running"
+    },
+    "worker": {
+      "image": "sha256:1c85eadda37612984fb639569ee7cd71a8f873541dd411c54263461f6a4eae87",
+      "state_at_capture": "exited"
+    },
+    "web": {
+      "image": "sha256:e6ce9f38c16376f1c6ec671c5e037138e32384e77e107e103d1226c86309fde4",
+      "state_at_capture": "running"
+    }
+  },
+  "runtime_lineage_limit": "Retained pinned images, not a rebuild of the latest documentation commit",
+  "source": {
+    "engagement_id": "b8232549f49bcd7f4a1c89ecd2f2eecf",
+    "finding_id": "5e6aedbe0137e96c0e2e9b94e74f7d2e",
+    "record": {
+      "source_kind": "finding_created",
+      "source_id": "5e6aedbe0137e96c0e2e9b94e74f7d2e",
+      "event_type": "finding.created",
+      "subject_kind": "finding",
+      "subject_id": "5e6aedbe0137e96c0e2e9b94e74f7d2e",
+      "capture_version": 3,
+      "schema_version": 1,
+      "occurred_at": "2026-10-29T17:03:21.93041+00:00"
+    },
+    "projected_event_id": "dbc3103b500d655c7c480b1b88c280e0",
+    "operation": "one normal manual-finding API creation, not a scan or exploit"
+  },
+  "deliveries": [
+    {
+      "delivery_id": "f9cf504cb388323e2647b705e27afeb5",
+      "event_id": "dbc3103b500d655c7c480b1b88c280e0",
+      "locale": "en",
+      "event_type": "finding.created",
+      "role": "source",
+      "state": "delivered",
+      "attempts": 1,
+      "template_ref": "builtin:finding.created:email:en@v1",
+      "inbox_message_id": "<f9cf504cb388323e2647b705e27afeb5@synapse.local>",
+      "inbox_message_count": 1,
+      "received_subject": "Finding created",
+      "raw_mime_sha256": "5f854627eeda4691d771df22c6f51fcc2846145a36454011bc2c0a14e8d83eec",
+      "plain_sha256": "3354433fa968387777e91bd1e26d28c2cc0e423733b911be9bb203c904323b6a",
+      "html_sha256": "4ad55da5339aebd16dcbc7505a20eb782d9e1eb10eaa50590a52c70f2e1f57e2",
+      "preview_parity": {
+        "subject": true,
+        "plain": true,
+        "html": true
+      },
+      "safe_html_links_only": true,
+      "attempt_receipts": [
+        {
+          "id": "44dd8691a24b1566ff8c48301e7fdd72",
+          "number": 1,
+          "started_at": "2026-10-29T17:03:54.633671Z",
+          "finished_at": "2026-10-29T17:03:58.371216Z",
+          "outcome": "delivered",
+          "response_code": 250,
+          "template_ref": "builtin:finding.created:email:en@v1"
+        }
+      ]
+    },
+    {
+      "delivery_id": "8405b45069c859fe3d117fec5073e0ad",
+      "event_id": "d0cc292708b0408c60bd0b29f0c6abcb",
+      "locale": "en",
+      "event_type": "test",
+      "role": "initial_probe",
+      "state": "delivered",
+      "attempts": 1,
+      "template_ref": "builtin:*:email:en@v1",
+      "inbox_message_id": "<8405b45069c859fe3d117fec5073e0ad@synapse.local>",
+      "inbox_message_count": 1,
+      "received_subject": "Synapse notification",
+      "raw_mime_sha256": "60d6b0e3c180582e188207f8153b7f1b8c5ac576123e503e5154fa4294a5bb8a",
+      "plain_sha256": "46eeaa1d96286e6d17b6fb04a2c654133ec77208758856e5e7efb4e21e43d80a",
+      "html_sha256": "70bff55296e64b630a1e7b4ad523c12ac2569db025e27b0325fda33c4498df58",
+      "preview_parity": null,
+      "safe_html_links_only": null,
+      "attempt_receipts": [
+        {
+          "id": "393176b3969faaa9f48834456faa5e49",
+          "number": 1,
+          "started_at": "2026-10-29T17:01:53.704365Z",
+          "finished_at": "2026-10-29T17:01:57.346988Z",
+          "outcome": "delivered",
+          "response_code": 250,
+          "template_ref": "builtin:*:email:en@v1"
+        }
+      ]
+    },
+    {
+      "delivery_id": "2ea1c64bd3ce0e1473dae88a80fcdf43",
+      "event_id": "f8b5353bf36c39260a68c1d3409390d0",
+      "locale": "vi",
+      "event_type": "test",
+      "role": "after_worker_restart",
+      "state": "delivered",
+      "attempts": 1,
+      "template_ref": "builtin:*:email:vi@v1",
+      "inbox_message_id": "<2ea1c64bd3ce0e1473dae88a80fcdf43@synapse.local>",
+      "inbox_message_count": 1,
+      "received_subject": "Thông báo Synapse",
+      "raw_mime_sha256": "98056f9601bcb4d7321ba061174146cbbd9c193f511f50dfeecdbed1774a67f7",
+      "plain_sha256": "394782cc9b71ea8499db99c7ce9b68402b4874f4d91f7302722be4d5f93369ac",
+      "html_sha256": "fd965504e4ca9cccee447428bd2693290f2791ad90d52e47467aba09f2132a8f",
+      "preview_parity": null,
+      "safe_html_links_only": null,
+      "attempt_receipts": [
+        {
+          "id": "de32e513975ae6dcf16a1c38d5c01aa6",
+          "number": 1,
+          "started_at": "2026-10-29T17:07:19.299029Z",
+          "finished_at": "2026-10-29T17:07:22.465931Z",
+          "outcome": "delivered",
+          "response_code": 250,
+          "template_ref": "builtin:*:email:vi@v1"
+        }
+      ]
+    },
+    {
+      "delivery_id": "79376205028a105d6875a34f21a69769",
+      "event_id": "dbc3103b500d655c7c480b1b88c280e0",
+      "locale": "vi",
+      "event_type": "finding.created",
+      "role": "source",
+      "state": "delivered",
+      "attempts": 1,
+      "template_ref": "builtin:finding.created:email:vi@v1",
+      "inbox_message_id": "<79376205028a105d6875a34f21a69769@synapse.local>",
+      "inbox_message_count": 1,
+      "received_subject": "Phát hiện mới",
+      "raw_mime_sha256": "7fe5ac1fc756e31e6e5266a61abc0aec4055d446b6866f4928695694e7b2213d",
+      "plain_sha256": "bf88fc7e4c28ab7dcf130924c45c0998057b04a5f7be849244a5e6fe0c3084ad",
+      "html_sha256": "d7caf2646899cbcf0f0deca0e73a0090de8f1d8a06caa484e84e85b98385b66d",
+      "preview_parity": {
+        "subject": true,
+        "plain": true,
+        "html": true
+      },
+      "safe_html_links_only": true,
+      "attempt_receipts": [
+        {
+          "id": "c0bf01c17bd76019610f6ae9314366f0",
+          "number": 1,
+          "started_at": "2026-10-29T17:03:58.380074Z",
+          "finished_at": "2026-10-29T17:04:01.804234Z",
+          "outcome": "delivered",
+          "response_code": 250,
+          "template_ref": "builtin:finding.created:email:vi@v1"
+        }
+      ]
+    }
+  ],
+  "native_images": {
+    "gmail-source-en.png": {
+      "sha256": "0b4970710558ab6d1d9fbad83fe7d21384fb8d0d66b3f2f3305b5afcb1c74f04",
+      "inspected": true,
+      "scope": "native email body crop; headers and unrelated account UI omitted"
+    },
+    "gmail-source-vi.png": {
+      "sha256": "a9a69725582c86b5277d6782d2f58027cc3eefd228c304179943af2f29e21a3c",
+      "inspected": true,
+      "scope": "native email body crop; headers and unrelated account UI omitted"
+    },
+    "gmail-finding-console.png": {
+      "sha256": "23ccf82398d62664e10d4efbca155a99c4dae0a0157c001148f42e3e8a9a5f25",
+      "inspected": true,
+      "scope": "native HTTPS finding after normal Auth0 sign-in; readonly session"
+    }
+  },
+  "navigation": {
+    "source_locale": "vi",
+    "expected_finding_id": "5e6aedbe0137e96c0e2e9b94e74f7d2e",
+    "matched_native_finding_row": true,
+    "membership": "existing readonly; triage controls refused",
+    "sequence": "Initial native click required normal Auth0 sign-in, which returned to Dashboard. A second native Gmail click after sign-in opened the exact engagement/finding.",
+    "automatic_deep_link_restore_claimed": false,
+    "en_link_equivalence": "same generated href; separate English click not claimed"
+  },
+  "worker_restart": {
+    "before": "2026-10-29T17:01:53.504303219Z",
+    "after": "2026-10-29T17:07:17.147023627Z",
+    "settings_revision": 1,
+    "no_new_user_or_consent": true
+  },
+  "operator_resume": {
+    "resumed_at": "2026-10-29T17:17:30.121952+00:00",
+    "no_new_user_or_consent": true,
+    "relay_revision": 1,
+    "test_channels_disabled": true,
+    "worker_started": true,
+    "automatic_email_requested": false,
+    "grant_expires_approximately": "2026-11-05T16:55:44.641853+00:00"
+  },
+  "retained_configuration": {
+    "client_type": "Desktop",
+    "scope": "https://mail.google.com/",
+    "grant_status": "Testing; existing self-test user",
+    "grant_expires_approximately_utc": "2026-11-05T16:55:44.641853+00:00",
+    "credential_storage": "encrypted local vault and sealed tenant relay; no tokens or raw mailbox headers published",
+    "new_user_or_membership": false,
+    "new_project_api_compute_or_billing_action": false,
+    "test_rule_enabled": false,
+    "test_channels_enabled": false,
+    "worker_parked": true,
+    "non_email_providers_disabled": true
+  },
+  "diagnostics": [
+    "Initial worker startup inherited the API dispatch-only posture and exited before claiming the probe. The worker posture was corrected; the queued probe was retained, not resent.",
+    "Popout screenshot capture timed out twice; inspected published body crops come from the working main Gmail window."
+  ],
+  "limits": [
+    "Only one actual source event, EN/VI detail and two channel-test fixtures; no full additional event/device/theme matrix.",
+    "No Microsoft SMTP sender claim.",
+    "Full URLs in these source messages are defanged; no universal bare-domain or split-node auto-link prevention claim.",
+    "Testing token expiry remains provider-controlled; later runs after expiry require renewed consent."
+  ]
+}

@@ -15,7 +15,7 @@ const actionID = shared.ID("act-1")
 var base = time.Unix(1_800_000_000, 0).UTC()
 
 func procTarget() TargetFingerprint {
-	return TargetFingerprint{Kind: FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_abc"}
+	return TargetFingerprint{Kind: FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"}
 }
 
 func mustSaga(t *testing.T) *Saga {
@@ -121,7 +121,7 @@ func TestSagaRejectsIllegalTransitions(t *testing.T) {
 
 func TestTargetFingerprintValidate(t *testing.T) {
 	ok := []TargetFingerprint{
-		{Kind: FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_x"},
+		{Kind: FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		{Kind: FingerprintFile, FilePath: "/etc/x", FileDevice: 1, FileInode: 2},
 		{Kind: FingerprintFile, FilePath: "/etc/x", FileHash: "abc"},
 		{Kind: FingerprintHost, HostID: "host-1", NetpolGeneration: 3},
@@ -132,16 +132,17 @@ func TestTargetFingerprintValidate(t *testing.T) {
 		}
 	}
 	bad := []TargetFingerprint{
-		{Kind: FingerprintProcess},                                 // no stable entity id (bare PID not allowed)
-		{Kind: FingerprintProcess, ProcessEntityID: "pe_x"},        // no authoritative process asset
-		{Kind: FingerprintProcess, ProcessAssetID: "asset-1"},      // no stable process entity
-		{Kind: FingerprintFile, FilePath: "/etc/x"},                // path alone is rebindable
-		{Kind: FingerprintFile, FilePath: "/etc/x", FileDevice: 1}, // device-only is not a stable identity
-		{Kind: FingerprintFile, FilePath: "/etc/x", FileInode: 2},  // inode-only is ambiguous across filesystems
-		{Kind: FingerprintFile, FileDevice: 1, FileInode: 2},       // no path
-		{Kind: FingerprintHost},                                    // no host id
-		{Kind: FingerprintHost, HostID: "host-1"},                  // no netpol generation (staleness undetectable)
-		{Kind: "bogus", ProcessEntityID: "pe_x"},
+		{Kind: FingerprintProcess}, // no stable entity id (bare PID not allowed)
+		{Kind: FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_x"},     // malformed process identity
+		{Kind: FingerprintProcess, ProcessEntityID: "pe_11111111111111111111111111111111"}, // no authoritative process asset
+		{Kind: FingerprintProcess, ProcessAssetID: "asset-1"},                              // no stable process entity
+		{Kind: FingerprintFile, FilePath: "/etc/x"},                                        // path alone is rebindable
+		{Kind: FingerprintFile, FilePath: "/etc/x", FileDevice: 1},                         // device-only is not a stable identity
+		{Kind: FingerprintFile, FilePath: "/etc/x", FileInode: 2},                          // inode-only is ambiguous across filesystems
+		{Kind: FingerprintFile, FileDevice: 1, FileInode: 2},                               // no path
+		{Kind: FingerprintHost},                   // no host id
+		{Kind: FingerprintHost, HostID: "host-1"}, // no netpol generation (staleness undetectable)
+		{Kind: "bogus", ProcessEntityID: "pe_11111111111111111111111111111111"},
 	}
 	for _, f := range bad {
 		if err := f.Validate(); !errors.Is(err, shared.ErrValidation) {

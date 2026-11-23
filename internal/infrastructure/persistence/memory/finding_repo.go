@@ -179,14 +179,18 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 			f.Assignee = existing.Assignee
 			f.AssigneeUserID = existing.AssigneeUserID
 			f.Audit.CreatedAt = existing.Audit.CreatedAt
+			f.PagerEpisode = existing.PagerEpisode
 			f.Version = existing.Version
 			if machineChanged {
 				f.Version++
 			}
 			f.EvidenceScore = existing.EvidenceScore // moves only via SetEvidenceScore; a re-upsert never changes it – mirrors the postgres ON CONFLICT set
 			f.Priority = existing.Priority           // preserve promoted priority; PromotionStore.Apply is the only path that moves it
-		} else if f.Version <= 0 {
-			f.Version = 1
+		} else {
+			if f.Version <= 0 {
+				f.Version = 1
+			}
+			f.PagerEpisode = 1
 		}
 		byKey[key] = cloneFinding(f)
 	}
@@ -282,6 +286,12 @@ func (r *FindingRepository) UpdateStatus(ctx context.Context, engagementID, find
 				return finding.Finding{}, fmt.Errorf("finding %s changed since you loaded it: %w", findingID, shared.ErrConflict)
 			}
 			before := cloneFinding(f)
+			if f.PagerEpisode <= 0 {
+				f.PagerEpisode = 1
+			}
+			if f.Status.PagerTerminal() && !status.PagerTerminal() {
+				f.PagerEpisode++
+			}
 			f.Status = status
 			f.Version++
 			r.data[engagementID][key] = cloneFinding(f)

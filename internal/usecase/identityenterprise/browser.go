@@ -189,9 +189,13 @@ func (b *Browser) AuthenticateAPIKey(ctx context.Context, token string) (authz.P
 }
 
 type BrowserAuthorization struct {
-	TenantID       shared.ID
-	ConnectionID   shared.ID
-	Purpose        ports.IdentityAuthorizationPurpose
+	TenantID     shared.ID
+	ConnectionID shared.ID
+	Purpose      ports.IdentityAuthorizationPurpose
+	// ExplicitTenant records a caller-supplied public login selection. It is accepted only
+	// for Login, then retained in the authenticated callback context so authority is checked
+	// again before a session can be issued.
+	ExplicitTenant bool
 	CallerNonce    string
 	SourceToken    string
 	CSRFToken      string
@@ -199,6 +203,7 @@ type BrowserAuthorization struct {
 	AdminProof     *ports.IdentityAdminProof
 }
 type browserIntent struct {
+	ExplicitLoginTenant     bool      `json:"explicit_login_tenant,omitempty"`
 	SourceDigest            string    `json:"source_digest,omitempty"`
 	SourceSessionID         shared.ID `json:"source_session_id,omitempty"`
 	PersonID                shared.ID `json:"person_id,omitempty"`
@@ -228,6 +233,9 @@ func (b *Browser) Begin(ctx context.Context, in BrowserAuthorization) (BeginResu
 	if in.TenantID.IsZero() {
 		in.TenantID = b.cfg.TenantID
 	}
+	if in.ExplicitTenant && in.Purpose != ports.IdentityAuthorizationLogin {
+		return BeginResult{}, shared.ErrForbidden
+	}
 	if !b.cfg.MutationEnabled(in.TenantID.String()) {
 		return BeginResult{}, shared.ErrForbidden
 	}
@@ -254,8 +262,16 @@ func (b *Browser) Begin(ctx context.Context, in BrowserAuthorization) (BeginResu
 			return BeginResult{}, shared.ErrForbidden
 		}
 	case ports.IdentityAuthorizationLogin:
-		if in.TenantID != b.cfg.TenantID {
+		if in.TenantID != b.cfg.TenantID && !in.ExplicitTenant {
 			return BeginResult{}, shared.ErrForbidden
+		}
+		if in.ExplicitTenant {
+			// A public selection cannot use a tenant this process only writes or only reads.
+			// Recheck it after the provider callback before issuing the session.
+			if err := b.CheckAuthority(ctx, in.TenantID, false); err != nil {
+				return BeginResult{}, err
+			}
+			intent.ExplicitLoginTenant = true
 		}
 		if err := b.CheckAuthority(ctx, in.TenantID, true); err != nil {
 			return BeginResult{}, err
@@ -291,10 +307,11 @@ type BrowserCallback struct {
 	State, Code, CallerNonce, SourceToken string
 }
 type BrowserCallbackResult struct {
-	Session   identitysessions.CreatedSession
-	Principal authz.Principal
-	TestOnly  bool
-	Pending   *PendingInvitation
+	Session              identitysessions.CreatedSession
+	Principal            authz.Principal
+	TestOnly             bool
+	Pending              *PendingInvitation
+	ProvisioningTenantID shared.ID
 }
 
 // PendingInvitation is sealed into a short-lived HttpOnly envelope by the adapter. The verified
@@ -311,7 +328,7 @@ func (b *Browser) Complete(ctx context.Context, in BrowserCallback) (BrowserCall
 		return BrowserCallbackResult{}, err
 	}
 	if proof.Purpose == ports.IdentityAuthorizationTest {
-		return BrowserCallbackResult{TestOnly: true}, nil
+		return BrowserCallbackResult{TestOnly: true, ProvisioningTenantID: proof.ProvisioningTenantID}, nil
 	}
 	if err = b.CheckAuthority(ctx, in.TenantID, true); err != nil {
 		return BrowserCallbackResult{}, err
@@ -319,6 +336,14 @@ func (b *Browser) Complete(ctx context.Context, in BrowserCallback) (BrowserCall
 	var intent browserIntent
 	if json.Unmarshal(proof.Context, &intent) != nil {
 		return BrowserCallbackResult{}, shared.ErrForbidden
+	}
+	if intent.ExplicitLoginTenant {
+		if proof.Purpose != ports.IdentityAuthorizationLogin {
+			return BrowserCallbackResult{}, shared.ErrForbidden
+		}
+		if err = b.CheckAuthority(ctx, in.TenantID, false); err != nil {
+			return BrowserCallbackResult{}, err
+		}
 	}
 	if proof.Purpose == ports.IdentityAuthorizationLink || proof.Purpose == ports.IdentityAuthorizationStepUp || proof.Purpose == ports.IdentityAuthorizationSwitch || proof.Purpose == ports.IdentityAuthorizationInvitation && intent.SourceDigest != "" {
 		if subtle.ConstantTimeCompare([]byte(intent.SourceDigest), []byte(admissionDigest(in.SourceToken))) != 1 {

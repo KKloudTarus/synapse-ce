@@ -4,7 +4,7 @@ import { handlers } from './handlers'
 import { matchGenerated } from './generated'
 
 const server = setupServer(...handlers)
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterAll(() => server.close())
 afterEach(() => vi.unstubAllEnvs())
 const request = (path: string, method = 'GET') => fetch(new URL(`/api/v1${path}`, window.location.origin), { method })

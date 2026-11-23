@@ -19,7 +19,7 @@ import (
 
 var _ ports.DocumentCommandStore = (*DocumentStore)(nil)
 
-const documentCommandCols = `actor_user_id,actor_membership_id,actor_person_id,connection_revision,credential_revision,read_group,artifact,progress,progress_version,next_attempt_at,check_version,created_at,updated_at`
+const documentCommandCols = `actor_user_id,actor_membership_id,actor_person_id,connection_revision,credential_revision,read_group,access_profile,artifact,progress,progress_version,next_attempt_at,check_version,created_at,updated_at`
 
 func documentArtifactJSON(artifact ports.DocumentArtifact) ([]byte, string, error) {
 	if artifact.GeneratedAt.IsZero() || strings.TrimSpace(artifact.Title) == "" || strings.TrimSpace(artifact.SourceRevision) == "" || len(artifact.PDF) == 0 || len(artifact.PDF) > 10<<20 {
@@ -44,10 +44,10 @@ func documentArtifactJSON(artifact ports.DocumentArtifact) ([]byte, string, erro
 }
 
 func validateDocumentCommand(command ports.DocumentCommand) ([]byte, error) {
-	if err := command.Intent.Validate(); err != nil || command.Intent.State != writeintent.Pending || command.Intent.Version != 1 || command.Intent.Attempts != 0 || command.Intent.LeaseUntil != nil || command.Actor.UserID.IsZero() || command.ConnectionRevision < 1 || command.CredentialRevision < 0 || strings.TrimSpace(command.ReadGroup) == "" || len(command.ReadGroup) > 255 {
+	if err := command.Intent.Validate(); err != nil || command.Intent.State != writeintent.Pending || command.Intent.Version != 1 || command.Intent.Attempts != 0 || command.Intent.LeaseUntil != nil || command.Actor.UserID.IsZero() || command.ConnectionRevision < 1 || command.CredentialRevision < 0 || strings.TrimSpace(command.ReadGroup) == "" || len(command.ReadGroup) > 255 || command.AccessProfile != command.Intent.AccessProfile {
 		return nil, shared.ErrValidation
 	}
-	if command.Intent.Action == docpublish.Purge {
+	if command.Intent.Action == docpublish.Purge || command.Intent.Action == docpublish.Trash {
 		return json.Marshal(ports.DocumentArtifact{})
 	}
 	artifact, _, err := documentArtifactJSON(command.Artifact)
@@ -59,9 +59,12 @@ func commandProgressJSON(progress ports.DocumentProgress) ([]byte, error) {
 		return nil, shared.ErrValidation
 	}
 	for _, receipt := range progress.UploadedReceipts {
-		if strings.TrimSpace(receipt.Key) == "" || len(receipt.Key) > 512 || len(receipt.Digest) != 64 {
+		if strings.TrimSpace(receipt.Key) == "" || len(receipt.Key) > 512 || len(receipt.Digest) != 64 || (receipt.UploadID != "" && len(receipt.UploadID) > 512) {
 			return nil, shared.ErrValidation
 		}
+	}
+	if progress.SnapshotReceipt != nil && !validDocumentSnapshotReceipt(*progress.SnapshotReceipt) {
+		return nil, shared.ErrValidation
 	}
 	data, err := json.Marshal(progress)
 	if err != nil || len(data) > 1<<20 {
@@ -70,13 +73,25 @@ func commandProgressJSON(progress ports.DocumentProgress) ([]byte, error) {
 	return data, nil
 }
 
+func validDocumentSnapshotReceipt(receipt ports.DocumentSnapshotReceipt) bool {
+	if len(receipt.BlockIDs) < 1 || len(receipt.BlockIDs) > 100 || len(receipt.Digest) != 64 || receipt.Remote.ID == "" || receipt.Remote.Version < 1 {
+		return false
+	}
+	for _, id := range receipt.BlockIDs {
+		if strings.TrimSpace(id) == "" || len(id) > 512 {
+			return false
+		}
+	}
+	return true
+}
+
 func scanDocumentCommand(ctx context.Context, tx pgx.Tx, tenant, intentID shared.ID) (ports.DocumentCommand, error) {
 	var command ports.DocumentCommand
 	var artifact, progress []byte
 	var progressVersion int
 	var nextAttempt *time.Time
 	err := tx.QueryRow(ctx, `SELECT `+documentCommandCols+` FROM document_commands WHERE tenant_id=$1 AND intent_id=$2`, tenant.String(), intentID.String()).Scan(
-		&command.Actor.UserID, &command.Actor.MembershipID, &command.Actor.PersonID, &command.ConnectionRevision, &command.CredentialRevision, &command.ReadGroup, &artifact, &progress, &progressVersion, &nextAttempt, &command.QueueVersion, &command.Intent.CreatedAt, &command.Intent.UpdatedAt)
+		&command.Actor.UserID, &command.Actor.MembershipID, &command.Actor.PersonID, &command.ConnectionRevision, &command.CredentialRevision, &command.ReadGroup, &command.AccessProfile, &artifact, &progress, &progressVersion, &nextAttempt, &command.QueueVersion, &command.Intent.CreatedAt, &command.Intent.UpdatedAt)
 	if err != nil {
 		return ports.DocumentCommand{}, err
 	}
@@ -101,10 +116,10 @@ func scanDocumentCommand(ctx context.Context, tx pgx.Tx, tenant, intentID shared
 func sameStoredDocumentCommand(existing, requested ports.DocumentCommand) bool {
 	_, existingDigest, existingErr := documentArtifactJSON(existing.Artifact)
 	_, requestedDigest, requestedErr := documentArtifactJSON(requested.Artifact)
-	if existing.Intent.Action == docpublish.Purge && requested.Intent.Action == docpublish.Purge {
+	if (existing.Intent.Action == docpublish.Purge || existing.Intent.Action == docpublish.Trash) && existing.Intent.Action == requested.Intent.Action {
 		existingErr, requestedErr, existingDigest, requestedDigest = nil, nil, "", ""
 	}
-	return existingErr == nil && requestedErr == nil && existing.Intent.SameCommand(requested.Intent) && existing.Actor == requested.Actor && existing.ConnectionRevision == requested.ConnectionRevision && existing.CredentialRevision == requested.CredentialRevision && existing.ReadGroup == requested.ReadGroup && existingDigest == requestedDigest
+	return existingErr == nil && requestedErr == nil && existing.Intent.SameCommand(requested.Intent) && existing.Actor == requested.Actor && existing.ConnectionRevision == requested.ConnectionRevision && existing.CredentialRevision == requested.CredentialRevision && existing.ReadGroup == requested.ReadGroup && existing.AccessProfile == requested.AccessProfile && existingDigest == requestedDigest
 }
 
 func documentTargetLock(ctx context.Context, tx pgx.Tx, tenant shared.ID, target docpublish.Target) error {
@@ -181,19 +196,27 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 			if !errors.Is(e, pgx.ErrNoRows) {
 				return e
 			}
-		case docpublish.Update, docpublish.Purge:
+			if command.AccessProfile == docpublish.DestinationManagedSnapshotProfile {
+				progress.Step = "snapshot_shell"
+			}
+		case docpublish.Update, docpublish.Purge, docpublish.Snapshot, docpublish.Trash:
 			if errors.Is(e, pgx.ErrNoRows) {
 				return shared.ErrNotFound
 			}
 			if e != nil {
 				return e
 			}
-			if link.ID != command.Intent.LinkID || link.RetiredAt != nil {
+			if link.ID != command.Intent.LinkID || (link.RetiredAt != nil && command.Intent.Action != docpublish.Snapshot) || (command.Intent.ExpectedLinkRevision > 0 && link.Revision != command.Intent.ExpectedLinkRevision) {
 				return shared.ErrConflict
 			}
 			progress.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
 			if command.Intent.Action == docpublish.Update {
 				progress.Step = "restrictions"
+			} else if command.Intent.Action == docpublish.Snapshot {
+				progress.Step = "snapshot_shell"
+				progress.Remote = docpublish.RemotePage{}
+			} else if command.Intent.Action == docpublish.Trash {
+				progress.Step = "trash"
 			} else {
 				progress.Step = "purge"
 			}
@@ -207,11 +230,11 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 		if !command.Intent.LinkID.IsZero() {
 			linkID = command.Intent.LinkID.String()
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO document_intents(id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,link_id,action,request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',1,0,'','',0,'','',$15,$16)`, command.Intent.ID.String(), tenant.String(), command.Intent.IntegrationID.String(), string(command.Intent.SourceKind), command.Intent.SourceRef, engagement, project, command.Intent.Container, linkID, string(command.Intent.Action), command.Intent.RequestKey, command.Intent.PayloadDigest, command.Intent.ContentHash, command.Intent.Marker, command.Intent.CreatedAt.UTC(), command.Intent.UpdatedAt.UTC())
+		_, e = tx.Exec(ctx, `INSERT INTO document_intents(id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,link_id,expected_link_revision,action,request_key,payload_digest,content_hash,access_profile,correlation_marker,state,version,attempts,remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending',1,0,'','',0,'','',$17,$18)`, command.Intent.ID.String(), tenant.String(), command.Intent.IntegrationID.String(), string(command.Intent.SourceKind), command.Intent.SourceRef, engagement, project, command.Intent.Container, linkID, command.Intent.ExpectedLinkRevision, string(command.Intent.Action), command.Intent.RequestKey, command.Intent.PayloadDigest, command.Intent.ContentHash, command.Intent.AccessProfile, command.Intent.Marker, command.Intent.CreatedAt.UTC(), command.Intent.UpdatedAt.UTC())
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO document_commands(tenant_id,intent_id,actor_user_id,actor_membership_id,actor_person_id,connection_revision,credential_revision,read_group,artifact,progress,progress_version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12)`, tenant.String(), command.Intent.ID.String(), command.Actor.UserID.String(), command.Actor.MembershipID.String(), command.Actor.PersonID.String(), command.ConnectionRevision, command.CredentialRevision, command.ReadGroup, artifact, progressJSON, command.Intent.CreatedAt.UTC(), command.Intent.UpdatedAt.UTC())
+		_, e = tx.Exec(ctx, `INSERT INTO document_commands(tenant_id,intent_id,actor_user_id,actor_membership_id,actor_person_id,connection_revision,credential_revision,read_group,access_profile,artifact,progress,progress_version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12,$13)`, tenant.String(), command.Intent.ID.String(), command.Actor.UserID.String(), command.Actor.MembershipID.String(), command.Actor.PersonID.String(), command.ConnectionRevision, command.CredentialRevision, command.ReadGroup, command.AccessProfile, artifact, progressJSON, command.Intent.CreatedAt.UTC(), command.Intent.UpdatedAt.UTC())
 		if e != nil {
 			return e
 		}
@@ -288,7 +311,7 @@ func (s *DocumentStore) SaveDocumentProgress(ctx context.Context, tenant, intent
 }
 
 func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
-	if progress.Step != "restrictions" && progress.Step != "attachments" && progress.Step != "body" && progress.Step != "complete" && progress.Step != "purged" {
+	if progress.Step != "restrictions" && progress.Step != "attachments" && progress.Step != "body" && progress.Step != "complete" && progress.Step != "purged" && progress.Step != "snapshot_observe" && progress.Step != "snapshot_uploads" && progress.Step != "snapshot_upload_send" && progress.Step != "snapshot_append" && progress.Step != "snapshot_title" && progress.Step != "snapshot_verify" && progress.Step != "trash_confirm" {
 		return false
 	}
 	if strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "" {
@@ -301,10 +324,10 @@ func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpub
 }
 
 func cleanDocumentRetryCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
-	if !cleanDocumentYieldCheckpoint(progress, intent, at) && progress.Step != "purge" {
+	if !cleanDocumentYieldCheckpoint(progress, intent, at) && progress.Step != "purge" && progress.Step != "trash" {
 		return false
 	}
-	if progress.Step == "purge" && (strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "") {
+	if (progress.Step == "purge" || progress.Step == "trash") && (strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "") {
 		return false
 	}
 	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&

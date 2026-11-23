@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { api, ApiError } from '../../lib/api'
 import { ToastProvider } from '../../components/synapse/Toast'
 import type { Engagement } from '../../lib/types'
-import { ExternalNotificationCard, LifecycleCard, isTerminalStatus } from './SettingsTab'
+import { ExternalNotificationCard, LifecycleCard, ScopeEditorCard, isTerminalStatus } from './SettingsTab'
 
 vi.mock('../../lib/api', () => ({
   api: {
@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
     me: vi.fn(),
     getNotificationEngagementSetting: vi.fn(),
     updateNotificationEngagementSetting: vi.fn(),
+    updateScope: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     constructor(
@@ -39,6 +40,29 @@ function engagement(status: string): Engagement {
     businessAssetId: '',
   }
 }
+
+describe('ScopeEditorCard', () => {
+  it('saves and displays an exact process scope target', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+    const processId = `pe_${'b'.repeat(32)}`
+    const updated = { ...engagement('active'), inScope: [{ kind: 'process', value: processId }] }
+    vi.mocked(api.updateScope).mockResolvedValue(updated)
+    render(<ScopeEditorCard eng={engagement('active')} onUpdated={vi.fn()} />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add target' })[0]!)
+    fireEvent.click(screen.getByRole('combobox', { name: 'In scope target 1 kind' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Process' }))
+    const input = screen.getByRole('textbox', { name: 'In scope target 1 value' })
+    expect(input).toHaveAccessibleDescription(/32 lowercase hexadecimal/)
+    fireEvent.change(input, { target: { value: processId } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save scope' }))
+
+    expect(await screen.findByText('Scope saved.')).toBeInTheDocument()
+    expect(api.updateScope).toHaveBeenCalledWith('eng-1', updated.inScope, [])
+    expect(screen.getByRole('combobox', { name: 'In scope target 1 kind' })).toHaveTextContent('Process')
+    expect(input).toHaveValue(processId)
+  })
+})
 
 function renderCard(status = 'active') {
   const onUpdated = vi.fn()

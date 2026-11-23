@@ -30,7 +30,7 @@ func responseEvent(kind EventKind, timestamp time.Time, actionID shared.ID) Inci
 	e := IncidentEvent{
 		IncidentID: incID, Kind: kind, At: timestamp, Actor: "analyst", ResponseActionID: actionID,
 		ResponseEngagementID: "eng-1", ResponseActionDigest: strings.Repeat("a", 64),
-		ResponseTarget: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		ResponseTarget: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 	}
 	if kind == EventResponseVerified {
 		e.Actor = "control-plane:response-verifier"
@@ -283,5 +283,21 @@ func TestProjectRejectsBackdatedEvent(t *testing.T) {
 	}
 	if _, err := Project(ok); err != nil {
 		t.Fatalf("equal timestamps must be allowed, got %v", err)
+	}
+}
+
+func TestPagerEpisodeFollowsTerminalReopen(t *testing.T) {
+	events := []IncidentEvent{created("det-1")}
+	states := []State{StateInvestigating, StateRemediated, StateResolved, StateClosed, StateReopened, StateClosed, StateReopened}
+	want := []int64{1, 1, 1, 1, 2, 2, 3}
+	for i, state := range states {
+		events = append(events, IncidentEvent{IncidentID: incID, Kind: EventStatusChanged, At: at(i + 1), Actor: "analyst", To: state})
+		got, err := Project(events)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PagerEpisode != want[i] {
+			t.Fatalf("state %s episode %d, want %d", state, got.PagerEpisode, want[i])
+		}
 	}
 }

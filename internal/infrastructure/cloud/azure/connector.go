@@ -30,7 +30,8 @@ const (
 	defaultMinRequestWait       = 200 * time.Millisecond
 )
 
-const resourcesQuery = `union Resources, ResourceContainers
+const resourcesQuery = `Resources
+| union ResourceContainers
 | where type in~ ('microsoft.storage/storageaccounts', 'microsoft.storage/storageaccounts/blobservices/containers', 'microsoft.compute/virtualmachines', 'microsoft.compute/virtualmachinescalesets', 'microsoft.containerservice/managedclusters', 'microsoft.managedidentity/userassignedidentities', 'microsoft.keyvault/vaults', 'microsoft.sql/servers', 'microsoft.documentdb/databaseaccounts', 'microsoft.network/networkinterfaces', 'microsoft.network/publicipaddresses', 'microsoft.network/routetables', 'microsoft.network/networksecuritygroups', 'microsoft.network/virtualnetworks', 'microsoft.authorization/roleassignments', 'microsoft.authorization/roledefinitions')
 | project id, name, type, location, subscriptionId, properties`
 

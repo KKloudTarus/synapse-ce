@@ -67,7 +67,7 @@ func TestIncidentCoordinatorPreparesPostgresActionBeforeRequestProjection(t *tes
 		t.Fatalf("seed incident: %v", err)
 	}
 
-	target := engagement.Target{Kind: engagement.TargetIP, Value: "host-1"}
+	target := engagement.Target{Kind: engagement.TargetDomain, Value: "host-1"}
 	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintHost, HostID: "host-1", NetpolGeneration: 1}
 	unprepared := act(unpreparedID.String())
 	if _, err := incidentService.Append(tenantCtx, incidentID, 1, []incident.IncidentEvent{{

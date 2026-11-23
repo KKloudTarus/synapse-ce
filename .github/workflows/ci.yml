@@ -96,6 +96,12 @@ jobs:
       - name: Build (CGO disabled – distroless parity)
         run: CGO_ENABLED=0 go build ./cmd/...
 
+  keycloak-integration:
+    name: Keycloak enterprise conformance
+    permissions:
+      contents: read
+    uses: ./.github/workflows/keycloak-conformance.yml
+
   backend-windows:
     name: Backend (Go, Windows)
     runs-on: windows-latest
@@ -156,7 +162,7 @@ jobs:
           node-version: 22
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
         with:
           version: 9
 

@@ -144,6 +144,14 @@ call the network. It reports optional toolchain availability, dependency markers
 target tree, and whether SCA, SAST, secret, misconfig, and code-quality coverage is full,
 partial, or unavailable.
 
+Misconfig readiness checks for Helm charts and Kustomize inputs in the bounded target
+inventory and reports missing or unusable CLI-host renderers as partial. Discovery alone
+does not imply readiness: a required renderer's bounded version command must succeed.
+A truncated inventory is also partial because it may omit render inputs. Plain manifests
+and native Terraform do not require those renderers. This is a local prerequisite check,
+not proof that a chart or overlay will render successfully, or that an API or worker host
+is ready. Doctor does not render charts or fetch dependencies.
+
 ```bash
 # preview what Synapse can analyze before scanning the current tree
 synapse-cli doctor .
@@ -277,6 +285,27 @@ When a scan is pushed with `--server`, Synapse also captures provider-neutral pu
 Azure Pipelines is detected through `TF_BUILD=true`. A credential-free run URL is constructed only for a valid `https://dev.azure.com/{organization}/` collection URI and numeric build ID. When `BUILD_REPOSITORY_PROVIDER=TfsGit`, the same trusted collection URI supplies the organization portion of the Azure Repos decoration target. For a GitHub or other external repository, Synapse does not invent an Azure Repos slug; set `SYNAPSE_CI_PROVIDER` and `SYNAPSE_REPO_SLUG` explicitly when decoration should target that external forge. A standalone `synapse-cli` scan requires no Azure API token for auto-detection; the server's separate read-only integration uses a PAT.
 
 Provider-independent overrides are `SYNAPSE_PR_NUMBER`, `SYNAPSE_PR_TARGET_BRANCH`, `SYNAPSE_REPO_SLUG`, and `SYNAPSE_PR_HEAD_SHA`. Decoration is skipped unless all four identity fields are present.
+
+### Engines the CLI does not run
+
+The CLI runs the deterministic engines: SCA, pattern SAST, secret scanning and IaC. The
+semantic taint engines (`taint_go`, `taint_python`, `taint_javascript`, `taint_java`) run
+in `synapse-api` and `synapse-worker` only. Their witnesses are gated judgments minted
+through the propose-verify-confirm lifecycle, which needs the judgment store the CLI has
+no access to, and a pattern rule is not a substitute for semantic proof.
+
+Selecting one of those engines for a CLI run (`SYNAPSE_TAINT_ENABLED`,
+`SYNAPSE_PYTAINT_ENABLED`, `SYNAPSE_JSTAINT_ENABLED`, `SYNAPSE_JAVATAINT_ENABLED`) is
+reported, never silently dropped. The CLI prints one line on stderr naming the engines it
+will not run, and each one's engine outcome is `not_applicable` rather than
+`not_selected`: the capability is unsupported here, not unrequested. Neither `--mode full`
+nor `--detection-priority comprehensive` changes this.
+
+In `synapse-api` and `synapse-worker` the same flags are the selection. An engine that was
+selected and whose adapter could not be built, for example because
+`SYNAPSE_JUDGMENTS_ENABLED` is off or its sidecar is missing, reports `unavailable` with
+required coverage, so `--require-complete` rejects the run. An engine nobody selected
+reports `not_selected`.
 
 ## False-positive gate
 

@@ -48,7 +48,7 @@ func TestResponseVerificationOutboxIsDurableAndRejectsEquivocation(t *testing.T)
 		AgentSessionID: fleetagent.CanonicalSessionID("observer-1"), AssetID: "asset-1", EngagementID: "eng-1", ActionID: "action-1",
 		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1", VerificationChallenge: strings.Repeat("b", 64),
 		ReceiptID: "receipt-1", ReceiptDigest: strings.Repeat("c", 64),
-		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		ObservedAt: now, KeyID: signer.Key.KeyID,
 	}
 	report.Signature = fleetagent.SignResponseVerification(signer.PrivateKey, report)

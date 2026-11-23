@@ -78,7 +78,7 @@ const server = setupServer(
   http.get('/api/v1/notifications/email-settings', () => HttpResponse.json({})),
 )
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'bypass' }))
 beforeEach(() => {
   resetCapabilityCache()
   asked.users = []

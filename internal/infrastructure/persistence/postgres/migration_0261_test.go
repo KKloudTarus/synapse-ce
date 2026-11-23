@@ -14,6 +14,7 @@ func TestMigration0261DocumentRestrictionMonitorUpgradeRollbackAndReapply(t *tes
 	}
 	requireMigrationRLS(t, isolate.db, "document_links")
 	requireMigrationIndexes(t, isolate.db, "document_links_restriction_due_idx")
+	isolate = newIsolatedMigrationDB(t, 261, 261)
 	if err := goose.DownTo(isolate.db, ".", 260); err != nil {
 		t.Fatal(err)
 	}

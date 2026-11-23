@@ -387,6 +387,17 @@ func TestValidateEgressGrantPosture(t *testing.T) {
 }
 
 func TestValidateNetworkExecutionPosture(t *testing.T) {
+	api := Config{Environment: "production", CSPMEnabled: true, SandboxEnabled: true,
+		APIToken: "api", EgressGrantAuthorityAddr: "127.0.0.1:9091",
+		EgressGrantIssuerToken: "issuer", EgressGrantSigningSeed: "grant-seed",
+		EvidenceSigningSeed: "evidence-seed"}
+	worker := Config{Environment: "production", CSPMEnabled: true, SandboxEnabled: true,
+		APIToken: "api", EgressGrantAuthorityURL: "http://127.0.0.1:9091",
+		EgressGrantAuthorityToken: "issuer"}
+	noSandbox := api
+	noSandbox.SandboxEnabled = false
+	reusedToken := worker
+	reusedToken.EgressGrantAuthorityToken = reusedToken.APIToken
 	for _, tt := range []struct {
 		name    string
 		cfg     Config
@@ -396,6 +407,10 @@ func TestValidateNetworkExecutionPosture(t *testing.T) {
 		{name: "production API offline", cfg: Config{Environment: "production"}, role: ProcessRoleAPI},
 		{name: "production API rejects CSPM", cfg: Config{Environment: "production", CSPMEnabled: true}, role: ProcessRoleAPI, wantErr: true},
 		{name: "production worker rejects CSPM", cfg: Config{Environment: "production", CSPMEnabled: true}, role: ProcessRoleWorker, wantErr: true},
+		{name: "production API permits authoritative CSPM", cfg: api, role: ProcessRoleAPI},
+		{name: "production worker permits authoritative CSPM", cfg: worker, role: ProcessRoleWorker},
+		{name: "production CSPM requires sandbox", cfg: noSandbox, role: ProcessRoleAPI, wantErr: true},
+		{name: "production CSPM rejects reused API token", cfg: reusedToken, role: ProcessRoleWorker, wantErr: true},
 		{name: "development worker permits local CSPM", cfg: Config{Environment: "development", CSPMEnabled: true}, role: ProcessRoleWorker},
 		{name: "unknown production role", cfg: Config{Environment: "production"}, role: ProcessRoleCLI, wantErr: true},
 	} {

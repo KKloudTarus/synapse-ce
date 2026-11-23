@@ -40,7 +40,7 @@ func responseVerificationHTTPReport() fleetagent.ResponseVerificationReport {
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, ReportID: "response-report-http", AgentID: "agent-response-http", HostID: "agent-response-http",
 		AgentSessionID: fleetagent.CanonicalSessionID("agent-response-http"), AssetID: "asset-http", EngagementID: "eng-http", ActionID: "action-http",
 		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-http", VerificationChallenge: strings.Repeat("b", 64),
-		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-http", ProcessEntityID: "process-http"},
+		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-http", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		ObservedAt: at, KeyID: "key-http", Signature: "c2lnbmVkLXVwc3RyZWFt",
 	}
 }

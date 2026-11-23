@@ -1,0 +1,9 @@
+{
+  "body": {
+    "link_preview_options": {
+      "is_disabled": true
+    },
+    "parse_mode": "MarkdownV2",
+    "text": "*🟠 Report generated*\n\nSeverity: high\nReport type: engagement\\_report\nFindings: 7\nGenerated: 2026\\-10\\-23T09:00:00Z\nEngagement: Live acceptance\nTitle: Security assessment report: Live acceptance\nContent hash: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5"
+  }
+}

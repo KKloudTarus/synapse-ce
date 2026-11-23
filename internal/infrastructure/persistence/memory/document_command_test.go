@@ -55,6 +55,59 @@ func TestDocumentCommandStoreMemoryAdmissionAndCheckpointCAS(t *testing.T) {
 	}
 }
 
+func TestDocumentCommandStoreMemoryReplaysTrashWithoutArtifact(t *testing.T) {
+	store, fixture := newDocumentStoreForTest(t)
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	target := docpublish.Target{IntegrationID: fixture.Integration, SourceKind: docpublish.EngagementReport, SourceRef: "trash-report", Scope: docpublish.Engagement, ScopeID: fixture.Engagement, Container: "SEC"}
+	link := docpublish.Link{ID: "trash-link", TenantID: fixture.Tenant, Target: target, RemotePageID: "page", RemoteVersion: 1, RemoteURL: "https://wiki.example/page", ContentHash: strings.Repeat("a", 64), AccessProfile: docpublish.DestinationManagedSnapshotProfile, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	store.links[fixture.Tenant] = map[shared.ID]docpublish.Link{link.ID: link}
+	intent := docpublish.Intent{ID: "trash-intent", TenantID: fixture.Tenant, Target: target, LinkID: link.ID, ExpectedLinkRevision: link.Revision, Action: docpublish.Trash, RequestKey: "trash-request", PayloadDigest: strings.Repeat("b", 64), ContentHash: link.ContentHash, AccessProfile: docpublish.DestinationManagedSnapshotProfile, Marker: docpublish.MarkerFor("trash-intent"), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}
+	command := ports.DocumentCommand{Intent: intent, Actor: ports.DocumentActor{UserID: "user"}, ConnectionRevision: 1, ReadGroup: "destination-owner", AccessProfile: intent.AccessProfile}
+	first, created, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, command)
+	if err != nil || !created {
+		t.Fatalf("create trash command created=%t err=%v", created, err)
+	}
+	replay, created, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, command)
+	if err != nil || created || replay.Intent.ID != first.Intent.ID {
+		t.Fatalf("replay trash created=%t result=%+v err=%v", created, replay, err)
+	}
+}
+
+func TestDocumentCommandStoreMemoryDefersCleanTrashRetry(t *testing.T) {
+	store, fixture := newDocumentStoreForTest(t)
+	now := time.Date(2026, 10, 26, 13, 0, 0, 0, time.UTC)
+	target := docpublish.Target{IntegrationID: fixture.Integration, SourceKind: docpublish.EngagementReport, SourceRef: "trash-retry", Scope: docpublish.Engagement, ScopeID: fixture.Engagement, Container: "SEC"}
+	link := docpublish.Link{ID: "trash-retry-link", TenantID: fixture.Tenant, Target: target, RemotePageID: "page", RemoteVersion: 1, RemoteURL: "https://wiki.example/page", ContentHash: strings.Repeat("a", 64), AccessProfile: docpublish.DestinationManagedSnapshotProfile, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	store.links[fixture.Tenant] = map[shared.ID]docpublish.Link{link.ID: link}
+	intent := docpublish.Intent{ID: "trash-retry-intent", TenantID: fixture.Tenant, Target: target, LinkID: link.ID, ExpectedLinkRevision: link.Revision, Action: docpublish.Trash, RequestKey: "trash-retry-request", PayloadDigest: strings.Repeat("b", 64), ContentHash: link.ContentHash, AccessProfile: docpublish.DestinationManagedSnapshotProfile, Marker: docpublish.MarkerFor("trash-retry-intent"), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}
+	saved, created, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, ports.DocumentCommand{Intent: intent, Actor: ports.DocumentActor{UserID: "user"}, ConnectionRevision: 1, ReadGroup: "destination-owner", AccessProfile: intent.AccessProfile})
+	if err != nil || !created {
+		t.Fatalf("create trash command created=%t err=%v", created, err)
+	}
+	lease := now.Add(5 * time.Minute)
+	claimed, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		t.Fatalf("claim trash: %v", err)
+	}
+	progress := saved.Progress
+	progress.IntentVersion, progress.LeaseUntil, progress.UpdatedAt = claimed.Version, &lease, now.Add(time.Second)
+	saved, err = store.SaveDocumentProgress(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Progress.Version, progress)
+	if err != nil {
+		t.Fatalf("checkpoint pre-dispatch trash: %v", err)
+	}
+	deadline := now.Add(2 * time.Minute)
+	deferred, err := store.DeferDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, saved.Progress.Version, saved.QueueVersion, deadline, now.Add(time.Second), ports.DocumentRetryRelease, "")
+	if err != nil || deferred.Intent.State != writeintent.Pending || !deferred.NextAttemptAt.Equal(deadline) || deferred.Progress.Step != "trash" || deferred.Progress.Remote.ID != link.RemotePageID {
+		t.Fatalf("defer clean trash=%+v err=%v", deferred, err)
+	}
+	if stored := store.links[fixture.Tenant][link.ID]; stored != link {
+		t.Fatalf("pre-dispatch retry changed link: got=%+v want=%+v", stored, link)
+	}
+	if _, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, deferred.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, deadline); err != nil {
+		t.Fatalf("resume deferred trash: %v", err)
+	}
+}
+
 func TestDocumentCommandStoreMemoryResumeRequiresUncertainCAS(t *testing.T) {
 	store, fixture := newDocumentStoreForTest(t)
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)

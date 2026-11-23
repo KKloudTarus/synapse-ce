@@ -1,0 +1,64 @@
+{
+  "result": "pass",
+  "completed_at": "2026-10-25T14:26:26.091181+00:00",
+  "runtime": {
+    "api_image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+    "api_started_at": "2026-10-25T13:15:49.518142939Z",
+    "shared_source": "a2de17b9",
+    "keycloak_build": "26.8.1"
+  },
+  "flow": "fresh Auth0 readonly source -> real Keycloak password reauthentication with controlled stale auth_time mapper -> callback denied/source reload works -> restore -> new callback same person secondary readonly",
+  "provider_control": {
+    "mapper_type": "oidc-hardcoded-claim-mapper",
+    "claim_name": "auth_time",
+    "json_type": "long",
+    "mapped_unix_seconds": 1792937026,
+    "mapped_utc": "2026-10-25T14:03:46+00:00",
+    "unsigned_example_has_integer_claim": true,
+    "subject_issuer_audience_client_email_boolean_verification_unchanged": true,
+    "shared_basic_untouched": true,
+    "synapse_clock_or_sessions_mutated": false,
+    "note": "Synthetic negative provider fixture, not a claim that the real user last authenticated at the mapped old time. Actual callback token value inferred from isolated Keycloak mapper configuration plus denial; raw callback JWT not retained.",
+    "age_seconds_at_post_denial_observation": 1267.3981249332428
+  },
+  "denial": {
+    "message": "The identity you selected is not approved for this action. Your existing sign-in is still active.",
+    "provider_password_prompt": true,
+    "source_tenant": "default",
+    "source_role": "readonly",
+    "source_authentication_time": "2026-10-25T14:23:24+00:00",
+    "source_dashboard_reload": true,
+    "new_destination_session": false
+  },
+  "recovery": {
+    "tenant": "sandbox-secondary",
+    "role": "readonly",
+    "same_existing_person": true,
+    "authentication_time": "2026-10-25T14:24:40+00:00",
+    "session_created_at": "2026-10-25T14:25:14.601355+00:00",
+    "exact_default_optional_scopes_restored": true,
+    "temporary_scope_deleted": true,
+    "guard_inactive": true
+  },
+  "authority": {
+    "persons": 5,
+    "memberships": 7,
+    "authenticators": 8,
+    "roles_policies_connections_revisions_unchanged": true
+  },
+  "api_restarted": false,
+  "billing_added": false,
+  "limitations": [
+    "Provider emits a controlled hardcoded old auth_time; no 15-minute natural wait is claimed.",
+    "Raw callback JWT claims were not retained; mapped old value is inferred from isolated real-provider control."
+  ],
+  "observations_sha256": {
+    "keycloak-stale-auth-time-drill.json": "c5ce7352c37a9e4d9c2e518dfecaede19ca1edf84ffd8e4d9c336aecc4004211",
+    "native-connection-revision-keycloak-stale-time-before.json": "43362f7d9bb580c3afcc7c54d81795c0d3ed931f5982cd3eb53b919cac0068d0",
+    "native-connection-revision-keycloak-stale-time-callback.json": "b67c6f33ff20065f80b5435627a005289fa36d0e4f4b5b7ff906143125e8c6a5",
+    "native-connection-revision-keycloak-stale-time-source-reload.json": "2e1a236457d10aec7e07045507549734ce4d38f0d5e7d1cfaefdd52e669a8579",
+    "native-connection-revision-keycloak-stale-time-restored.json": "54852e8171cf3c70a39266b712041efcf81679f190786b9217c4c34dd9f5bb49",
+    "keycloak-stale-time-denied.png": "87c50b945b41953ea05ac5a1e3aa1148d285d165e522ab5a6a224ef7839f52e1",
+    "keycloak-stale-time-restored.png": "b1b9e1e91b99853ea70c4b41eb23d042c329a4626d4bf3fc6ceee60ec284033e"
+  }
+}

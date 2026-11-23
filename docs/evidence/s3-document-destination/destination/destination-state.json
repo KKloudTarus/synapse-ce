@@ -1,0 +1,58 @@
+{
+  "bucket": "synapse-reports",
+  "bucket_policy": {
+    "Statement": [
+      {
+        "Action": [
+          "s3:GetObject"
+        ],
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": [
+            "arn:aws:iam::123456789012:role/report-readers"
+          ]
+        },
+        "Resource": [
+          "arn:aws:s3:::synapse-reports/engagement-reports/*"
+        ],
+        "Sid": "synapse-report-readers"
+      }
+    ],
+    "Version": "2012-10-17"
+  },
+  "endpoint": "https://172.28.0.10:9000",
+  "objects": [
+    {
+      "key": "engagement-reports/synapse-intent-4d55ede8312eb31719fae23ddcbb759a/.synapse-shell",
+      "size": 0,
+      "version_id": "6b370088-bf86-4c1f-9539-762828e7c3ff",
+      "is_latest": true,
+      "user_metadata": {
+        "X-Amz-Meta-Synapse-Marker": "synapse-intent-4d55ede8312eb31719fae23ddcbb759a",
+        "content-type": "application/octet-stream"
+      }
+    },
+    {
+      "key": "engagement-reports/synapse-intent-4d55ede8312eb31719fae23ddcbb759a/report-c4bac2515dfe1229.pdf",
+      "size": 39923,
+      "version_id": "c3540cbd-7e5f-4315-b64e-48df7601a9a9",
+      "is_latest": true,
+      "user_metadata": {
+        "X-Amz-Meta-Synapse-Marker": "synapse-intent-4d55ede8312eb31719fae23ddcbb759a",
+        "content-type": "application/pdf"
+      }
+    },
+    {
+      "key": "engagement-reports/synapse-intent-4d55ede8312eb31719fae23ddcbb759a/report.html",
+      "size": 7274,
+      "version_id": "09e9f753-6677-448b-9c21-d32a83e98a84",
+      "is_latest": true,
+      "user_metadata": {
+        "X-Amz-Meta-Synapse-Marker": "synapse-intent-4d55ede8312eb31719fae23ddcbb759a",
+        "content-type": "text/html; charset=utf-8"
+      }
+    }
+  ],
+  "server": "MinIO RELEASE.2025-09-07T16-13-09Z, TLS with a local CA",
+  "versioning_status": "Enabled"
+}

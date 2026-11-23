@@ -1,4 +1,4 @@
-import { Eye, RefreshCw } from 'lucide-react'
+import { Eye, RefreshCw01 } from '@untitledui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Markdown } from '../../../components/synapse/Markdown'
 import { SeverityBadge } from '../../../components/synapse/SeverityBadge'
@@ -205,7 +205,7 @@ export function PreviewPanel({
       actions={
         channelID && sampleEventType ? (
           <Button type="button" variant="ghost" className="px-2 py-1.5 text-xs" onClick={() => setRefreshEpoch((value) => value + 1)} aria-label="Refresh preview">
-            <RefreshCw className="size-4" /> Refresh
+            <RefreshCw01 className="size-4" /> Refresh
           </Button>
         ) : undefined
       }

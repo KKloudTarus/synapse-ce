@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 )
 
 // FingerprintKind is the sort of target a response acts on.
@@ -39,7 +40,7 @@ type TargetFingerprint struct {
 func (f TargetFingerprint) Validate() error {
 	switch f.Kind {
 	case FingerprintProcess:
-		if f.ProcessAssetID.IsZero() || f.ProcessEntityID.IsZero() {
+		if f.ProcessAssetID.IsZero() || !telemetry.ValidProcessEntityID(f.ProcessEntityID.String()) {
 			return fmt.Errorf("%w: process target requires its authoritative asset and stable ProcessEntityID (never a bare PID)", shared.ErrValidation)
 		}
 	case FingerprintFile:

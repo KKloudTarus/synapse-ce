@@ -15,6 +15,8 @@ export interface DocumentIntent {
   errorCode?: string
   remoteUrl?: string
   remoteId?: string
+  contentHash?: string
+  accessProfile?: string
   createdAt: string
   updatedAt: string
 }
@@ -33,6 +35,8 @@ export interface DocumentLink {
   contentHash: string
   revision: number
   retiredAt?: string
+  removalKind?: 'trash' | 'purge'
+  accessProfile?: string
   restrictionStatus?: string
   restrictionCheckedAt?: string
   updatedAt: string
@@ -44,8 +48,8 @@ export interface DocumentRelease {
   link?: DocumentLink
 }
 
-const intent = (value: any): DocumentIntent => ({ id: value?.id ?? '', linkId: value?.link_id ?? '', action: value?.action ?? '', state: value?.state ?? '', version: value?.version ?? 0, attempts: value?.attempts ?? 0, errorCode: value?.error_code || undefined, remoteUrl: value?.remote_url || undefined, remoteId: value?.remote_id || undefined, createdAt: value?.created_at ?? '', updatedAt: value?.updated_at ?? '' })
-const link = (value: any): DocumentLink => ({ id: value?.id ?? '', integrationId: value?.integration_id ?? '', sourceKind: value?.source_kind ?? 'engagement_report', sourceRef: value?.source_ref ?? '', scope: value?.scope === 'project' ? 'project' : 'engagement', scopeId: value?.scope_id ?? '', container: value?.container ?? '', remoteUrl: value?.remote_url ?? '', remoteRevisionKind: value?.remote_revision_kind === 'opaque' ? 'opaque' : 'numeric', remoteVersion: value?.remote_version ?? 0, contentHash: value?.content_hash ?? '', revision: value?.revision ?? 0, restrictionStatus: value?.restriction_status || undefined, restrictionCheckedAt: value?.restriction_checked_at || undefined, retiredAt: value?.retired_at || undefined, updatedAt: value?.updated_at ?? '' })
+const intent = (value: any): DocumentIntent => ({ id: value?.id ?? '', linkId: value?.link_id ?? '', action: value?.action ?? '', state: value?.state ?? '', version: value?.version ?? 0, attempts: value?.attempts ?? 0, errorCode: value?.error_code || undefined, remoteUrl: value?.remote_url || undefined, remoteId: value?.remote_id || undefined, contentHash: value?.content_hash || undefined, accessProfile: value?.access_profile || undefined, createdAt: value?.created_at ?? '', updatedAt: value?.updated_at ?? '' })
+const link = (value: any): DocumentLink => ({ id: value?.id ?? '', integrationId: value?.integration_id ?? '', sourceKind: value?.source_kind ?? 'engagement_report', sourceRef: value?.source_ref ?? '', scope: value?.scope === 'project' ? 'project' : 'engagement', scopeId: value?.scope_id ?? '', container: value?.container ?? '', remoteUrl: value?.remote_url ?? '', remoteRevisionKind: value?.remote_revision_kind === 'opaque' ? 'opaque' : 'numeric', remoteVersion: value?.remote_version ?? 0, contentHash: value?.content_hash ?? '', revision: value?.revision ?? 0, restrictionStatus: value?.restriction_status || undefined, restrictionCheckedAt: value?.restriction_checked_at || undefined, retiredAt: value?.retired_at || undefined, removalKind: value?.removal_kind === 'trash' ? 'trash' : value?.removal_kind === 'purge' ? 'purge' : undefined, accessProfile: value?.access_profile || undefined, updatedAt: value?.updated_at ?? '' })
 const release = (value: any): DocumentRelease => ({ skipped: value?.skipped === true, intent: value?.intent ? intent(value.intent) : undefined, link: value?.link ? link(value.link) : undefined })
 
 export const documentsApi = {
@@ -54,5 +58,6 @@ export const documentsApi = {
   resumePreparedPublication: async (intentId: string, version: number): Promise<DocumentIntent> => intent(await req(`/document-publications/${id(intentId)}/resume`, { method: 'POST', body: JSON.stringify({ version }) })),
   listEngagementDocuments: async (engagementId: string): Promise<DocumentLink[]> => ((await req(`/engagements/${id(engagementId)}/documents`)) ?? []).map(link),
   listProjectDocuments: async (projectKey: string): Promise<DocumentLink[]> => ((await req(`/projects/${id(projectKey)}/documents`)) ?? []).map(link),
+  listSnapshots: async (linkId: string): Promise<DocumentIntent[]> => ((await req(`/document-links/${id(linkId)}/snapshots`)) ?? []).map(intent),
   unpublish: async (linkId: string, requestKey: string): Promise<DocumentRelease> => release(await req(`/document-links/${id(linkId)}`, { method: 'DELETE', body: JSON.stringify({ request_key: requestKey }) })),
 }

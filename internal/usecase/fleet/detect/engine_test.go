@@ -118,6 +118,47 @@ func TestEngineEmitsDetectionOnMatch(t *testing.T) {
 	}
 }
 
+func TestEngineIgnoresProcessExitForRulesAndContext(t *testing.T) {
+	sensor, sink := newFakeSensor(), &fakeSink{}
+	e := newEngine(t, sensor, sink, Options{Classes: []detection.Class{detection.ClassProcess}})
+
+	exit := procEvent("ps", "-ef")
+	exit.Process.Kind = "exit"
+	e.process(context.Background(), exit)
+	if got := sink.detections(); len(got) != 0 {
+		t.Fatalf("process exit must not trigger exec rules, got %+v", got)
+	}
+
+	// Empty kind is a legacy exec and must still trigger the rule.
+	e.process(context.Background(), procEvent("ps", "-ef"))
+	got := sink.detections()
+	if len(got) != 1 || len(got[0].Evidence) != 1 || got[0].Evidence[0].Process.Kind != "" {
+		t.Fatalf("legacy exec must detect without exit in context, got %+v", got)
+	}
+
+	exec := procEvent("ps")
+	exec.Process.Kind = "exec"
+	e.process(context.Background(), exec)
+	got = sink.detections()
+	if len(got) != 2 || len(got[1].Evidence) != 2 || got[1].Evidence[1].Process.Kind != "exec" {
+		t.Fatalf("explicit exec must detect with exec-only context, got %+v", got)
+	}
+}
+
+func TestEngineProcessExitDoesNotAdvanceSequence(t *testing.T) {
+	sensor, sink := newFakeSensor(), &fakeSink{}
+	e := newEngine(t, sensor, sink, Options{Classes: []detection.Class{detection.ClassProcess}})
+	exit := procEvent("curl")
+	exit.Process.Kind = "exit"
+	e.process(context.Background(), exit)
+	e.process(context.Background(), procEvent("ncat"))
+	for _, d := range sink.detections() {
+		if d.RuleID == "det.tool_staging_sequence" {
+			t.Fatalf("process exit must not advance exec sequence: %+v", d)
+		}
+	}
+}
+
 // TestEngineIgnoresNonMatchingAndDisabled: a non-matching command produces nothing, and an event of a
 // disabled class is never evaluated.
 func TestEngineIgnoresNonMatchingAndDisabled(t *testing.T) {

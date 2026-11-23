@@ -421,6 +421,56 @@ func TestBootstrapPrincipalRequiresTheConfiguredToken(t *testing.T) {
 	}
 }
 
+func TestBootstrapPrincipalBindsTheConfiguredCredentialAcrossRestartAndRotation(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewUserRepository()
+	start := func(token string) *Service {
+		t.Helper()
+		svc, err := NewService(repo, nopAudit{}, fixedClock{}, &seqIDs{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if svc.BootstrapCredentialID() != "" {
+			t.Fatal("an unconfigured service exposed a deployment credential binding")
+		}
+		if err := svc.EnsureBootstrapAdmin(ctx, token); err != nil {
+			t.Fatal(err)
+		}
+		return svc
+	}
+	authenticate := func(svc *Service, token string) authz.Principal {
+		t.Helper()
+		p, _, err := svc.AuthenticatePrincipal(ctx, token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !p.IsBootstrap() || p.ActorID != BootstrapID || p.TenantID != "default" {
+			t.Fatal("credential binding changed deployment principal authority or tenancy")
+		}
+		if p.Credential.ID == "" || p.Credential.ID == token || p.Credential.ID == HashToken(token) {
+			t.Fatal("bootstrap requires a nonempty binding distinct from the credential and authentication digest")
+		}
+		if p.Credential.ID != svc.BootstrapCredentialID() {
+			t.Fatal("callback authority and authenticated requests disagree on the configured credential binding")
+		}
+		return p
+	}
+	const firstToken, secondToken = "synthetic-bootstrap-first", "synthetic-bootstrap-second"
+	first := authenticate(start(firstToken), firstToken)
+	restarted := authenticate(start(firstToken), firstToken)
+	if first.Credential != restarted.Credential {
+		t.Fatal("unchanged configured credential lost its binding after restart")
+	}
+	rotatedService := start(secondToken)
+	rotated := authenticate(rotatedService, secondToken)
+	if first.Credential.ID == rotated.Credential.ID {
+		t.Fatal("replacement deployment credential reused the previous binding")
+	}
+	if _, _, err := rotatedService.AuthenticatePrincipal(ctx, firstToken); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Fatal("previous deployment credential remained usable after replacement")
+	}
+}
+
 // Unlinking removes exactly the named link, revokes every browser session of the user, and is
 // audited with the removed issuer and subject.
 func TestUnlinkOIDCIdentityRemovesTheLinkAndRevokesSessions(t *testing.T) {

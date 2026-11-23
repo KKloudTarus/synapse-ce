@@ -45,6 +45,7 @@ func TestMigration0221BitbucketWebhookLifecycle(t *testing.T) {
 			t.Fatalf("PUBLIC execute on %s", fn)
 		}
 	}
+	isolated = newIsolatedMigrationDB(t, 221, 221)
 	if err := goose.DownTo(isolated.db, ".", 220); err != nil {
 		t.Fatal(err)
 	}

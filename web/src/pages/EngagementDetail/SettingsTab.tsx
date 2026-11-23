@@ -8,10 +8,10 @@ import { useFetch } from '../../hooks'
 import { api, ApiError } from '../../lib/api'
 import type { EngagementExternalNotifications } from '../../lib/api'
 import { kindLabel } from '../../lib/format'
+import { EDIT_SCOPE_KINDS, PROCESS_SCOPE_HINT } from '../../lib/scopeTargets'
 import { canManageIntegrations, isAdminRole } from '../../lib/roles'
 import type { BusinessAsset, Engagement, ScopeTarget } from '../../lib/types'
 import { StatusPill } from '../Engagements'
-import { TARGET_KINDS } from './ReconTab'
 
 export function SettingsTab({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Engagement) => void }) {
   return (
@@ -403,7 +403,7 @@ export function ScopeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated
         <TargetList label="Out of scope" targets={outScope} onChange={setOutScope} />
       </div>
       <p className="mt-3 text-[11px] text-quaternary">
-        Host-centric matching. Out-of-scope always wins. The execution gate reads this live.
+        Out-of-scope always wins. The execution gate reads this live.
       </p>
       {err && (
         <div className="mt-3">
@@ -433,29 +433,33 @@ export function TargetList({
       <div className="space-y-2">
         {targets.length === 0 && <p className="text-xs text-quaternary">No targets.</p>}
         {targets.map((t, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <Select
-              value={t.kind}
-              onValueChange={(v) => update(i, { kind: v })}
-              ariaLabel={`${label} target ${i + 1} kind`}
-              options={TARGET_KINDS.map((k) => ({ value: k, label: kindLabel(k) }))}
-              className="w-32 shrink-0"
-            />
-            <Input
-              value={t.value}
-              onChange={(e) => update(i, { value: e.target.value })}
-              placeholder="value (e.g. *.example.com, 10.0.0.0/24)"
-              className="flex-1 font-mono"
-              aria-label={`${label} target ${i + 1} value`}
-            />
-            <button
-              type="button"
-              onClick={() => onChange(targets.filter((_, j) => j !== i))}
-              aria-label={`Remove ${label} target ${i + 1}`}
-              className="rounded-md p-2 text-quaternary transition-colors hover:bg-secondary hover:text-critical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-            >
-              <Trash01 className="size-4" />
-            </button>
+          <div key={i}>
+            <div className="flex items-center gap-2">
+              <Select
+                value={t.kind}
+                onValueChange={(v) => update(i, { kind: v })}
+                ariaLabel={`${label} target ${i + 1} kind`}
+                options={EDIT_SCOPE_KINDS.map((k) => ({ value: k, label: kindLabel(k) }))}
+                className="w-32 shrink-0"
+              />
+              <Input
+                value={t.value}
+                onChange={(e) => update(i, { value: e.target.value })}
+                placeholder={t.kind === 'process' ? 'pe_ followed by 32 lowercase hex characters' : 'value (e.g. *.example.com, 10.0.0.0/24)'}
+                className="flex-1 font-mono"
+                aria-label={`${label} target ${i + 1} value`}
+                aria-describedby={t.kind === 'process' ? `${label === 'In scope' ? 'in' : 'out'}-process-hint-${i}` : undefined}
+              />
+              <button
+                type="button"
+                onClick={() => onChange(targets.filter((_, j) => j !== i))}
+                aria-label={`Remove ${label} target ${i + 1}`}
+                className="rounded-md p-2 text-quaternary transition-colors hover:bg-secondary hover:text-critical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+              >
+                <Trash01 className="size-4" />
+              </button>
+            </div>
+            {t.kind === 'process' && <p id={`${label === 'In scope' ? 'in' : 'out'}-process-hint-${i}`} className="mt-1 text-xs text-tertiary">{PROCESS_SCOPE_HINT}</p>}
           </div>
         ))}
       </div>

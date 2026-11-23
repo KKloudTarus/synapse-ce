@@ -154,7 +154,7 @@ func newArtifactBuilder(t *testing.T, insight ports.ReportInsight) *ArtifactBuil
 		artifactEngagements{eng: eng}, artifactReports{head: insight.EvidenceHead},
 		closures, closures,
 		artifactClosureRenderer{artifact: ports.AssessmentClosureReportArtifact{TenantID: tenant, CycleID: cycleID, ManifestID: "manifest-a", ContentHash: closureHash, Content: closureContent, GeneratedAt: artifactAt}},
-		artifactQuality{summary: ports.ProjectQualitySummary{TenantID: tenant, ProjectID: project, Title: "Quality summary", Paragraphs: []string{"Stored analysis summary."}, SourceRevision: "analysis:analysis-a", EvidenceHead: strings.Repeat("b", 64), GeneratedAt: artifactAt, IntegrityVerified: true}},
+		artifactQuality{summary: ports.ProjectQualitySummary{TenantID: tenant, ProjectID: project, ProjectKey: "project-key", Title: "Quality summary", Paragraphs: []string{"Stored analysis summary."}, SourceRevision: "analysis:analysis-a", EvidenceHead: strings.Repeat("b", 64), GeneratedAt: artifactAt, IntegrityVerified: true}},
 		artifactProjector{},
 	)
 	if err != nil {
@@ -195,6 +195,12 @@ func TestArtifactBuilderBuildsEveryStoredSourceDeterministically(t *testing.T) {
 			}
 			if first.EvidenceHead != strings.Repeat("a", 64) {
 				t.Fatalf("artifact must retain its actual verified evidence head: %+v", first)
+			}
+			if test.name == "quality" && first.ProjectKey != "project-key" {
+				t.Fatalf("project artifact lost its authoritative key: %+v", first)
+			}
+			if test.name == "closure" && first.CycleID != "cycle-a" {
+				t.Fatalf("closure artifact lost its validated cycle key: %+v", first)
 			}
 			if !reflect.DeepEqual(first, second) {
 				t.Fatalf("stored source must be deterministic\nfirst=%+v\nsecond=%+v", first, second)

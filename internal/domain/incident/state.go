@@ -68,3 +68,6 @@ func requireTransition(from, to State) error {
 	}
 	return nil
 }
+
+// PagerTerminal identifies states that end a pager occurrence.
+func (s State) PagerTerminal() bool { return s == StateResolved || s == StateClosed }
