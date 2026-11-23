@@ -1,7 +1,16 @@
 // Package teamslive posts the acceptance messages of #1420 into a real Microsoft Teams 1:1
-// conversation, through the shipped templates, the shipped Adaptive Card formatter and the real
-// Bot Connector client. It exists so the client evidence that issue asks for is one command, not a
-// hand-assembled payload: what lands in Teams is what a delivery would land.
+// conversation, through the shipped chat-family templates, the shipped Adaptive Card formatter and
+// the real Bot Connector client. It exists so the client evidence that issue asks for is one
+// command rather than a hand-assembled payload, and it sends exactly the bytes
+// teamslink.Service.SendPersonal sends: messageformat.Teams already emits the activity envelope, so
+// nothing here rewraps it.
+//
+// What it proves is the rendering and the transport, not the personal-delivery content path. The
+// bot renders no template: SendPersonal builds its message from the stored user_notifications row,
+// and these templates belong to FamilyChat, which template_binding.go maps to the tenant's Teams
+// channel. So the cards below are tenant chat-family content carried over the personal bot
+// transport, which is how the Adaptive Card renders in a real client, and is not a sample of what a
+// personal delivery writes.
 //
 // It is opt-in, like the Postgres, syslog and S3 suites. Set:
 //
@@ -18,6 +27,7 @@
 package teamslive
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -115,34 +125,18 @@ func TestTeamsLiveAcceptanceMessages(t *testing.T) {
 				if err != nil {
 					t.Fatalf("format the Adaptive Card: %v", err)
 				}
-				activity, err := bot.Send(ctx, ref, teamsActivity(formatted.Body))
+				activity, err := bot.Send(ctx, ref, formatted.Body)
 				if err != nil {
 					t.Fatalf("send to the conversation: %v", err)
 				}
 				if strings.TrimSpace(activity) == "" {
 					t.Fatalf("the connector accepted the activity without an id")
 				}
-				t.Logf("delivered %s as activity %s: screenshot it as teams-%s-%s-<theme>.png", message.name, activity, strings.SplitN(message.name, "-", 2)[1], locale)
+				t.Logf("delivered %s as activity %s: screenshot it as teams-%s-%s-<theme>.png", message.name, activity, screenshotLabel(message.name), locale)
 			})
 		}
 	}
 	t.Log("every message above is in the conversation now; capture light and dark, desktop and mobile, and mask the channel settings")
-}
-
-// teamsActivity wraps the card body the formatter produced in the activity envelope the Bot
-// Connector accepts. The formatter already emits the message shape a Workflows webhook takes, so
-// only the activity type is added.
-func teamsActivity(card []byte) []byte {
-	return []byte(`{"type":"message","attachments":` + attachmentsOf(string(card)) + `}`)
-}
-
-func attachmentsOf(body string) string {
-	const marker = `"attachments":`
-	index := strings.Index(body, marker)
-	if index < 0 {
-		return `[]`
-	}
-	return strings.TrimSuffix(body[index+len(marker):], "}")
 }
 
 func locales(t *testing.T) []tenancy.Locale {
@@ -230,6 +224,9 @@ func eventSchema(t *testing.T, spec domain.EventSpec) *msgtemplate.Schema {
 // fakeConnector answers the token request and the activity post, and keeps what it received.
 type fakeConnector struct {
 	activities []map[string]any
+	// raw keeps the bytes as posted. The decoded map cannot show a duplicate top-level key,
+	// because json.Unmarshal collapses one last-wins.
+	raw [][]byte
 }
 
 func (f *fakeConnector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +242,7 @@ func (f *fakeConnector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.activities = append(f.activities, activity)
+	f.raw = append(f.raw, body)
 	_, _ = w.Write([]byte(`{"id":"activity-` + strconv.Itoa(len(f.activities)) + `"}`))
 }
 
@@ -286,7 +284,7 @@ func TestTeamsAcceptanceMessagesRenderAndPost(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s/%s format: %v", message.name, locale, err)
 			}
-			activity, err := bot.Send(context.Background(), ref, teamsActivity(formatted.Body))
+			activity, err := bot.Send(context.Background(), ref, formatted.Body)
 			if err != nil {
 				t.Fatalf("%s/%s send: %v", message.name, locale, err)
 			}
@@ -297,6 +295,33 @@ func TestTeamsAcceptanceMessagesRenderAndPost(t *testing.T) {
 	}
 	if len(fake.activities) != 2*len(acceptanceMessages()) {
 		t.Fatalf("connector received %d activities, want %d", len(fake.activities), 2*len(acceptanceMessages()))
+	}
+	for i, raw := range fake.raw {
+		// json.Unmarshal collapses a duplicate key last-wins, so the decoded map cannot see a
+		// second top-level "type". Count the keys on the wire instead: an envelope rewrapped
+		// around a formatter that already emits one produced {"type":...,"attachments":...,"type":...}
+		// and every assertion below still passed.
+		var keys int
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		if _, err := dec.Token(); err != nil { // opening brace
+			t.Fatalf("activity %d is not a JSON object: %v", i, err)
+		}
+		for dec.More() {
+			name, err := dec.Token()
+			if err != nil {
+				t.Fatalf("activity %d key %d: %v", i, keys, err)
+			}
+			if name == "type" {
+				keys++
+			}
+			var discard json.RawMessage
+			if err := dec.Decode(&discard); err != nil {
+				t.Fatalf("activity %d value for %v: %v", i, name, err)
+			}
+		}
+		if keys != 1 {
+			t.Fatalf("activity %d carries %d top-level \"type\" keys, want 1: %s", i, keys, raw)
+		}
 	}
 	for i, activity := range fake.activities {
 		if activity["type"] != "message" {
@@ -368,4 +393,13 @@ func cardRuns(t *testing.T, activity map[string]any) []string {
 		}
 	}
 	return runs
+}
+
+// screenshotLabel is the part of an acceptance-message name that identifies the screenshot. A name
+// without a separator keeps its whole self rather than panicking on a missing second field.
+func screenshotLabel(name string) string {
+	if _, after, found := strings.Cut(name, "-"); found {
+		return after
+	}
+	return name
 }

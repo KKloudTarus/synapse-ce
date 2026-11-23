@@ -89,9 +89,9 @@ Historical evidence for earlier event types does not certify these new event cel
 | #1404 | `approval.requested`, `approval.decided`, `approval.timed_out` | Canonical retry identity, immutable reviewer snapshot and delivery-time authorization; decisions remain console actions |
 | #1405 | `incident.updated` | Authoritative incident mutation and outbox commit together; real service and native delivery evidence |
 | #1406 | `response.finished` | Transactional bounded outcomes and crash/idempotency tests; provider evidence uses synthetic facts, with no remote execution claim |
-| #1420 | Microsoft Teams personal delivery | The bot, the link flow and the Adaptive Card are merged; `go test ./test/teamslive` posts the five acceptance messages into a real 1:1 conversation when `SYNAPSE_TEST_TEAMS_*` is set, and the same messages run against a fake connector without a tenant |
 | #1407 | `evidence.chain_broken` | Independent append-only alert transaction, mandatory floor and fail-closed reporting tests; provider evidence uses synthetic facts, with no live tampering claim |
 | #1410 | `report.generated` | Capture keyed by the sealed report digest, so a rebuild and a later release announce once; `go test ./test/notifylive` posts it to every configured client through the shipped template and formatter, and the payload half runs with no destination |
+| #1420 | Microsoft Teams personal delivery | The bot, the link flow and the Adaptive Card are merged; `go test ./test/teamslive` posts the five acceptance messages into a real 1:1 conversation when `SYNAPSE_TEST_TEAMS_*` is set, and the same messages run against a fake connector without a tenant. The cards carry chat-family template content over the bot transport, so they evidence the Adaptive Card render, not what a personal delivery writes: `SendPersonal` builds its message from the stored notification row and renders no template |
 
 The local test environment uses PostgreSQL 17 and the existing dedicated notification
 workspaces. The candidate API, notification worker and built web console bind to
