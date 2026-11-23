@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
@@ -492,5 +493,50 @@ func TestSuccessfulCallWithNilConfigStaysUnknown(t *testing.T) {
 	}
 	if bucket.Public != cloudposture.StateUnknown {
 		t.Errorf("Public = %q, want %q (a nil policy-status field on a 200 is not evidence of absence)", bucket.Public, cloudposture.StateUnknown)
+	}
+}
+
+// coverageGap decides whether a failed call reads as a reachability problem, a permission problem
+// or a fault in the request. It used to lean on the SDK synthesizing smithy.GenericAPIError with
+// code "UnknownError" for an error body it could not deserialize, and when schema-based
+// deserialization stopped doing that, a 504 with an empty body silently became provider_error.
+// These cases pin the classification to the status and the error code, which no SDK release decides
+// for us.
+func TestCoverageGapClassification(t *testing.T) {
+	response := func(status int) error {
+		return &smithyhttp.ResponseError{
+			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: status}},
+			Err:      errors.New("deserialization failed, EOF"),
+		}
+	}
+	apiBehind := func(status int, code string) error {
+		return &smithyhttp.ResponseError{
+			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: status}},
+			Err:      &smithy.GenericAPIError{Code: code, Message: code},
+		}
+	}
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"unparseable gateway timeout": {err: response(http.StatusGatewayTimeout), want: "unreachable_account"},
+		"unparseable server error":    {err: response(http.StatusInternalServerError), want: "unreachable_account"},
+		"unparseable bad gateway":     {err: response(http.StatusBadGateway), want: "unreachable_account"},
+		"forbidden":                   {err: response(http.StatusForbidden), want: "permission_denied"},
+		"access denied code":          {err: apiBehind(http.StatusBadRequest, "AccessDeniedException"), want: "permission_denied"},
+		"service unavailable code":    {err: apiBehind(http.StatusServiceUnavailable, "ServiceUnavailable"), want: "unreachable_account"},
+		"unknown error code":          {err: apiBehind(http.StatusBadGateway, "UnknownError"), want: "unreachable_account"},
+		// A parseable 4xx names a fault in the request, so it must not be excused as unreachable.
+		"validation code": {err: apiBehind(http.StatusBadRequest, "ValidationException"), want: "provider_error"},
+		"plain error":     {err: errors.New("something else"), want: "provider_error"},
+		"deadline":        {err: context.DeadlineExceeded, want: "unreachable_account"},
+		"cancelled":       {err: context.Canceled, want: "unreachable_account"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := coverageGap("scope", "account", tc.err)
+			if got.Code != tc.want {
+				t.Fatalf("code = %q, want %q", got.Code, tc.want)
+			}
+		})
 	}
 }

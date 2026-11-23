@@ -469,6 +469,17 @@ func coverageGap(scope, category string, err error) *cloudposture.CoverageIssue 
 		} else {
 			code = "provider_error"
 		}
+	} else if errors.As(err, &responseErr) && responseErr.HTTPStatusCode() >= 500 {
+		// A 5xx whose body carries no error code the SDK can parse. The account answered, something
+		// between us and it failed, which is a reachability problem and not a fault in the request.
+		//
+		// This used to arrive as an APIError above: the SDK synthesized smithy.GenericAPIError with
+		// code "UnknownError" when it could not deserialize an error body, and the branch above maps
+		// that to unreachable_account. Schema-based deserialization stopped synthesizing it, so a
+		// gateway timeout with an empty body fell through to provider_error and a transient
+		// reachability failure was reported as a provider fault. Classify on the status instead,
+		// which does not depend on the SDK synthesizing anything.
+		code = "unreachable_account"
 	} else {
 		var networkErr net.Error
 		if !errors.As(err, &networkErr) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
