@@ -222,35 +222,28 @@ func observedTSAliasTarget(target string, modules map[string]struct{}, mode alia
 	if len(modules) == 0 {
 		return false
 	}
-	if _, ok := modules[target]; ok {
-		return true
-	}
-
-	// Extension substitution is valid across TypeScript module-resolution modes
-	// when the paths target names a JavaScript-family file explicitly. The rewrite
-	// table lives in the domain so the source scanner (phase R1) and this resolver
-	// cannot disagree about which file a specifier names.
-	if ext := path.Ext(target); ext != "" {
-		base := strings.TrimSuffix(target, ext)
-		for _, rewrite := range jsresolution.EmittedExtensionCandidates(ext) {
-			if _, ok := modules[base+rewrite]; ok {
-				return true
-			}
-		}
-	}
-	if mode != aliasModuleResolutionExtensionless {
-		return false
-	}
-	if path.Ext(target) != "" {
-		return false
-	}
-	for _, ext := range jsresolution.ModuleSourceExtensions() {
-		if _, ok := modules[target+ext]; ok {
-			return true
-		}
-		if _, ok := modules[path.Join(target, "index"+ext)]; ok {
+	for _, candidate := range tsAliasFileCandidates(target, mode) {
+		if _, ok := modules[candidate]; ok {
 			return true
 		}
 	}
 	return false
+}
+
+func tsAliasFileCandidates(target string, mode aliasModuleResolution) []string {
+	candidates := []string{target}
+	if ext := path.Ext(target); ext != "" {
+		base := strings.TrimSuffix(target, ext)
+		for _, rewrite := range jsresolution.EmittedExtensionCandidates(ext) {
+			candidates = append(candidates, base+rewrite)
+		}
+	} else if mode == aliasModuleResolutionExtensionless {
+		for _, ext := range jsresolution.ModuleSourceExtensions() {
+			candidates = append(candidates, target+ext)
+		}
+		for _, ext := range jsresolution.ModuleSourceExtensions() {
+			candidates = append(candidates, path.Join(target, "index"+ext))
+		}
+	}
+	return candidates
 }
