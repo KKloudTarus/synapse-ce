@@ -67,7 +67,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
           [[ "$SYNAPSE_BENCH_RELEASE_DIGEST" =~ ^[0-9a-f]{40}$ ]]
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
         with:
           go-version-file: go.mod
           cache: true
