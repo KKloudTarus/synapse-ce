@@ -4,7 +4,8 @@ Live at **<https://synapse-playground.pages.dev>**.
 
 A static build of the dashboard that answers its own API from fixtures, so anyone can click through
 the console without standing up Postgres, MinIO and the Go services. There is no backend, nothing is
-scanned, no target is reached, and no request leaves the visitor's browser.
+scanned, no target is reached, and the page makes no API call. The web-font stylesheet is the one
+external request it does make, so it is not request-free.
 
 That last property is the reason the playground is static rather than a hosted instance. Synapse
 executes tools against targets, so a public instance with a real backend would be an abuse vector:

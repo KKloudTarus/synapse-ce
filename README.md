@@ -154,7 +154,7 @@ The lasting difference is what sits around the finding:
 
 The [live playground](https://synapse-playground.pages.dev) is a static build of the dashboard backed by seeded
 fixtures, with a guided tour through engagements, supply-chain findings and reachability, evidence,
-code quality gates, and the agent fleet. Nothing is installed, no backend runs, no target is scanned, and no request leaves your browser. See
+code quality gates, and the agent fleet. Nothing is installed, no backend runs, no target is scanned, and the page makes no API call: fixtures answer from a service worker in the browser. The one external request is the web-font stylesheet, so the page is not request-free. See
 [`web/PLAYGROUND.md`](web/PLAYGROUND.md) for how it is built and deployed.
 
 ### Prerequisites
