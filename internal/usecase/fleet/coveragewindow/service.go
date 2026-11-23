@@ -89,7 +89,7 @@ func (s *Service) Compose(ctx context.Context, request ComposeRequest) (sensorst
 	window := sensorstate.CoverageWindow{
 		AssetID: request.AssetID, AgentID: request.AgentID, HostID: request.HostID,
 		Since: request.Since, Until: request.Until, CreatedAt: canonicalTime(s.clock.Now()),
-		States: conservativeStates(observations), BatchCount: len(accounting),
+		States: conservativeStates(observations, request.Since), BatchCount: len(accounting),
 		GapCount: scoredGapCount(gapFacts),
 	}
 	for _, batch := range accounting {
@@ -179,7 +179,6 @@ func validateSources(
 	accounting []ports.TelemetryBatchAccounting,
 	gaps []ports.CoverageGapFact,
 ) error {
-	preWindowByClass := make(map[detection.Class]struct{})
 	for _, observation := range observations {
 		if err := observation.Validate(); err != nil {
 			return fmt.Errorf("validate coverage sensor state: %w", err)
@@ -187,14 +186,6 @@ func validateSources(
 		if observation.AgentID != request.AgentID || observation.AssetID != request.AssetID || observation.HostID != request.HostID ||
 			!observation.ObservedAt.Before(request.Until) {
 			return fmt.Errorf("%w: coverage sensor state is outside requested identity or interval", shared.ErrValidation)
-		}
-		if observation.ObservedAt.Before(request.Since) {
-			for _, state := range observation.States {
-				if _, exists := preWindowByClass[state.Class]; exists {
-					return fmt.Errorf("%w: coverage sensor state reader returned multiple pre-window facts for class %q", shared.ErrValidation, state.Class)
-				}
-				preWindowByClass[state.Class] = struct{}{}
-			}
 		}
 	}
 	for _, batch := range accounting {
@@ -249,9 +240,31 @@ func checkedAdd(total *int, value int) bool {
 	return true
 }
 
-func conservativeStates(observations []sensorstate.Observation) []detection.ClassCoverage {
+func conservativeStates(observations []sensorstate.Observation, since time.Time) []detection.ClassCoverage {
 	byClass := make(map[detection.Class]detection.ClassCoverage)
+	// Readers retain complete signed reports. A report selected for one class can
+	// contain an older state of another class, so resolve carry per class before
+	// scoring the window. Match the readers' observed-time/report-ID ordering.
+	carry := make(map[detection.Class]int)
+	for i, observation := range observations {
+		if !observation.ObservedAt.Before(since) {
+			continue
+		}
+		for _, state := range observation.States {
+			previous, exists := carry[state.Class]
+			if !exists || observations[previous].ObservedAt.Before(observation.ObservedAt) ||
+				(observations[previous].ObservedAt.Equal(observation.ObservedAt) && observations[previous].ReportID < observation.ReportID) {
+				carry[state.Class] = i
+				byClass[state.Class] = state
+			}
+		}
+	}
+	// Every in-window state still contributes, including failures followed by
+	// recovery. Only superseded pre-window states are excluded from scoring.
 	for _, observation := range observations {
+		if observation.ObservedAt.Before(since) {
+			continue
+		}
 		for _, state := range observation.States {
 			current, exists := byClass[state.Class]
 			if !exists || coverageStateWorse(state, current) {

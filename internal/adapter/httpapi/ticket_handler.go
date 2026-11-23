@@ -296,6 +296,9 @@ func (rt *Router) bulkSubmitTickets(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, shared.ErrConflict) {
 				code = "conflict"
 			}
+			if errors.Is(err, shared.ErrForbidden) {
+				code = string(CodePermissionDenied)
+			}
 			out = append(out, map[string]any{"finding_id": item.FindingID, "error_code": code})
 		} else {
 			out = append(out, map[string]any{"finding_id": item.FindingID, "intent": ticketIntentResponse(i)})

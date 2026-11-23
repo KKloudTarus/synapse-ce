@@ -40,6 +40,7 @@ type SourceRecord struct {
 	// a sealed EventSpec context captured with the source transaction; older rows
 	// remain readable while the worker finishes their legacy projection.
 	CaptureVersion int
+	PagerLifecycle PagerLifecycle `json:"-"`
 }
 
 const (
@@ -96,6 +97,9 @@ func (r SourceRecord) validate() error {
 	}
 	if len(r.SubjectID) > maxSubjectIDLength {
 		return invalidRecord("subject id is too long")
+	}
+	if err := r.PagerLifecycle.validate(r.EventType, r.SubjectKind, r.SubjectID); err != nil {
+		return err
 	}
 	if !isJSONObject(r.Data, 0) {
 		return invalidRecord("data must be a JSON object")

@@ -721,6 +721,17 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if err != nil {
 		return err
 	}
+	if pagerLifecycleWork(work) {
+		if repo, ok := s.repo.(ports.NotificationPagerRepository); ok {
+			acknowledged, reconcileErr := repo.ReconcilePagerAcknowledgement(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence)
+			if reconcileErr != nil {
+				return reconcileErr
+			}
+			if acknowledged {
+				return nil
+			}
+		}
+	}
 	if work.Delivery.State == domain.DeliverySucceeded || work.Delivery.State == domain.DeliveryCancelled {
 		return nil
 	}
@@ -812,7 +823,18 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	}
 	result := ports.NotificationSendResult{ErrorCode: emailCode, Retryable: emailCode == "email_settings_unavailable", ProviderRequestRef: work.Delivery.ProviderRequestRef}
 	if emailCode == "" {
-		result = s.sender.Send(ctx, work, cfg)
+		if pagerLifecycleWork(work) {
+			var suppressed bool
+			result, suppressed, err = s.sendPagerMutation(ctx, job, aid, &work, cfg)
+			if err != nil {
+				return err
+			}
+			if suppressed {
+				return s.finishAttempt(ctx, attempt, s.clock.Now().UTC(), "cancelled", 0, "pager_episode_terminal", nil, "", "", domain.AttemptIgnored)
+			}
+		} else {
+			result = s.sender.Send(ctx, work, cfg)
+		}
 	}
 	result.TemplateFallback = result.TemplateFallback || render.Fallback
 	finished := s.clock.Now().UTC()
@@ -866,7 +888,13 @@ func (s *Service) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause e
 		return err
 	}
 	if d.State != domain.DeliveryPending && d.State != domain.DeliveryRetrying {
-		return nil // already terminal: do not count the same dead letter twice
+		// A late pager receipt can arrive between fenced failure and the queue's
+		// dead-letter callback. Reconcile that receipt without counting failure twice.
+		if d.State == domain.DeliveryDead && (d.ChannelType == domain.ChannelJSM || d.ChannelType == domain.ChannelPagerDuty) {
+			_, err = s.repo.DeadLetterDelivery(tenantCtx, job.TenantID, p.DeliveryID, job.Fence, "worker_dead_letter")
+			return err
+		}
+		return nil
 	}
 	transitioned, err := s.repo.DeadLetterDelivery(tenantCtx, job.TenantID, p.DeliveryID, job.Fence, "worker_dead_letter")
 	if err != nil {

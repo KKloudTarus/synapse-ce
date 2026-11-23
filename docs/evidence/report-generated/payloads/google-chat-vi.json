@@ -1,0 +1,25 @@
+{
+  "body": {
+    "cardsV2": [
+      {
+        "card": {
+          "header": {
+            "title": "🟠 Báo cáo đã được tạo"
+          },
+          "sections": [
+            {
+              "widgets": [
+                {
+                  "textParagraph": {
+                    "text": "Mức độ: high\u003cbr\u003eLoại báo cáo: engagement_report\u003cbr\u003eSố phát hiện: 7\u003cbr\u003eThời gian tạo: 2026-10-23T09:00:00Z\u003cbr\u003eĐợt đánh giá: Live acceptance\u003cbr\u003eTiêu đề: Security assessment report: Live acceptance\u003cbr\u003eMã nội dung: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "cardId": "synapse-notification"
+      }
+    ]
+  }
+}

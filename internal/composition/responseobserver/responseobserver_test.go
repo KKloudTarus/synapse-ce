@@ -65,7 +65,7 @@ func testRequest(now time.Time) fleetagent.ResponseObservationRequest {
 		ReceiptID:             "receipt-1",
 		ReceiptDigest:         strings.Repeat("c", 64),
 		Target: responsesaga.TargetFingerprint{
-			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "target-asset-1", ProcessEntityID: "process-1",
+			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "target-asset-1", ProcessEntityID: "pe_11111111111111111111111111111111",
 		},
 		AttemptedAt: now.Add(-time.Second),
 		IssuedAt:    now,

@@ -790,24 +790,25 @@ func (f *fleetRouter) result(w http.ResponseWriter, r *http.Request) {
 	agent, _ := agentFrom(r.Context())
 	id := shared.ID(r.PathValue("id"))
 	var req struct {
-		Status         string                            `json:"status"` // "succeeded" | "failed"
-		Reason         string                            `json:"reason"`
-		AttemptKey     string                            `json:"attempt_key"`
-		CommandDigest  string                            `json:"command_digest"`
-		ExecutionState fleetagent.ResponseExecutionState `json:"execution_state"`
-		ObservedRadius offensivepolicy.Radius            `json:"observed_radius"`
-		AffectedCount  int                               `json:"affected_count"`
-		AlreadyApplied bool                              `json:"already_applied"`
-		CompletedAt    time.Time                         `json:"completed_at"`
-		LeaseID        string                            `json:"lease_id"`
+		Status                     string                            `json:"status"` // "succeeded" | "failed" | observer-only "refused"
+		Reason                     string                            `json:"reason"`
+		AttemptKey                 string                            `json:"attempt_key"`
+		CommandDigest              string                            `json:"command_digest"`
+		ExecutionState             fleetagent.ResponseExecutionState `json:"execution_state"`
+		ObservedRadius             offensivepolicy.Radius            `json:"observed_radius"`
+		AffectedCount              int                               `json:"affected_count"`
+		AlreadyApplied             bool                              `json:"already_applied"`
+		ReplacementProcessEntityID shared.ID                         `json:"replacement_process_entity_id"`
+		CompletedAt                time.Time                         `json:"completed_at"`
+		LeaseID                    string                            `json:"lease_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetBodyCap)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid result body"})
 		return
 	}
 	to := workorder.State(req.Status)
-	if to != workorder.StateSucceeded && to != workorder.StateFailed {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "result status must be succeeded or failed"})
+	if to != workorder.StateSucceeded && to != workorder.StateFailed && to != workorder.StateRefused {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "result status must be succeeded, failed or observer refused"})
 		return
 	}
 	wo, err := f.work.GetByID(r.Context(), agent.TenantID, id)
@@ -817,6 +818,10 @@ func (f *fleetRouter) result(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, f.log, err)
+		return
+	}
+	if to == workorder.StateRefused && wo.ResponseObserve == nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "refused result is only valid for observer work"})
 		return
 	}
 	if wo.ResponseCommand != nil {
@@ -836,7 +841,7 @@ func (f *fleetRouter) result(w http.ResponseWriter, r *http.Request) {
 		result := fleetagent.ResponseExecutionResult{
 			AttemptKey: req.AttemptKey, CommandDigest: req.CommandDigest, LeaseID: req.LeaseID,
 			State: req.ExecutionState, ObservedRadius: req.ObservedRadius, AffectedCount: req.AffectedCount,
-			AlreadyApplied: req.AlreadyApplied, CompletedAt: req.CompletedAt,
+			AlreadyApplied: req.AlreadyApplied, CompletedAt: req.CompletedAt, ReplacementProcessEntityID: req.ReplacementProcessEntityID,
 		}
 		if err := result.Validate(); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid_response_execution_result"})
@@ -849,7 +854,7 @@ func (f *fleetRouter) result(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"state": string(to)})
 		return
 	} else if req.AttemptKey != "" || req.CommandDigest != "" || req.ExecutionState != "" || req.ObservedRadius != "" ||
-		req.AffectedCount != 0 || req.AlreadyApplied || !req.CompletedAt.IsZero() {
+		req.AffectedCount != 0 || req.AlreadyApplied || !req.ReplacementProcessEntityID.IsZero() || !req.CompletedAt.IsZero() {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "response result binding is only valid for response work"})
 		return
 	}

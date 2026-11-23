@@ -1,0 +1,85 @@
+{
+  "body": {
+    "attachments": [
+      {
+        "content": {
+          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+          "body": [
+            {
+              "inlines": [
+                {
+                  "size": "Medium",
+                  "text": "🟠 Báo cáo đã được tạo",
+                  "type": "TextRun",
+                  "weight": "Bolder"
+                }
+              ],
+              "type": "RichTextBlock"
+            },
+            {
+              "inlines": [
+                {
+                  "text": "Mức độ: high",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Loại báo cáo: engagement_report",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Số phát hiện: 7",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Thời gian tạo: 2026-10-23T09:00:00Z",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Đợt đánh giá: Live acceptance",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Tiêu đề: Security assessment report: Live acceptance",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Mã nội dung: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5",
+                  "type": "TextRun"
+                }
+              ],
+              "type": "RichTextBlock"
+            }
+          ],
+          "type": "AdaptiveCard",
+          "version": "1.4"
+        },
+        "contentType": "application/vnd.microsoft.card.adaptive"
+      }
+    ],
+    "type": "message"
+  }
+}

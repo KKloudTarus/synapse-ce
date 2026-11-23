@@ -5,7 +5,7 @@ import { ticketingHandlers } from './ticketing'
 const server = setupServer(...ticketingHandlers)
 const request = (path: string, init?: RequestInit) => fetch(new URL(`/api/v1${path}`, window.location.origin), init)
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterAll(() => server.close())
 
 describe('playground Jira ticketing fixtures', () => {

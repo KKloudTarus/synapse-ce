@@ -233,13 +233,16 @@ func (r *ResponseRepository) StartAttempt(ctx context.Context, a responsesaga.Re
 		deadline = a.DeadlineAt.UTC()
 	}
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := lockResponseHalt(ctx, tx, false); err != nil {
+			return err
+		}
 		var (
 			generation int64
 			halted     bool
 		)
 		err := tx.QueryRow(ctx, `
 			SELECT generation, halted FROM response_halt_fences
-			WHERE tenant_id=current_setting('app.current_tenant', true) FOR SHARE`).Scan(&generation, &halted)
+			WHERE tenant_id=current_setting('app.current_tenant', true)`).Scan(&generation, &halted)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("read response halt fence for attempt: %w", err)
 		}

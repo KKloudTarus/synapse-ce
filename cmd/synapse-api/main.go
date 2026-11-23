@@ -1356,6 +1356,7 @@ func main() {
 		os.Exit(1)
 	}
 	var privateAuthorityHandler http.Handler
+	var dastGrantAuthorityConfigured bool
 	if cfg.EgressGrantAuthorityAddr != "" {
 		seed, serr := signing.DecodeSeed(cfg.EgressGrantSigningSeed)
 		if serr != nil {
@@ -1376,6 +1377,40 @@ func main() {
 		if serr != nil {
 			log.Error("egress grant service init failed", "err", serr)
 			os.Exit(1)
+		}
+		if cfg.CSPMEnabled {
+			reader, ok := cloudRunStore.(ports.CloudRunAuthorizationReader)
+			if !ok {
+				log.Error("CSPM grant authority requires persisted execution metadata")
+				os.Exit(1)
+			}
+			hosts := make(map[cloudposture.Provider][]string, len(cfg.CSPMProviders))
+			for _, name := range cfg.CSPMProviders {
+				hosts[cloudposture.Provider(strings.ToLower(strings.TrimSpace(name)))] = nil
+			}
+			for _, entry := range cfg.CSPMEgressHosts {
+				name, host, valid := strings.Cut(entry, "=")
+				provider := cloudposture.Provider(strings.ToLower(strings.TrimSpace(name)))
+				if _, enabled := hosts[provider]; valid && enabled {
+					hosts[provider] = append(hosts[provider], strings.TrimSpace(host))
+				}
+			}
+			if serr = grantService.SetCSPM(reader, hosts); serr != nil {
+				log.Error("CSPM grant authority init failed", "err", serr)
+				os.Exit(1)
+			}
+		}
+		if cfg.JudgmentsEnabled && cfg.DBDSN != "" {
+			reader, ok := dastRunStore.(ports.DASTRunAuthority)
+			if !ok {
+				log.Error("DAST grant authority requires persisted run and approval custody")
+				os.Exit(1)
+			}
+			if serr = grantService.SetDAST(reader); serr != nil {
+				log.Error("DAST grant authority init failed", "err", serr)
+				os.Exit(1)
+			}
+			dastGrantAuthorityConfigured = true
 		}
 		egressGrantHandler, serr := httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
 		if serr != nil {
@@ -1918,7 +1953,7 @@ func main() {
 			log.Error("fleet response observer dispatcher init failed", "err", observerErr)
 			os.Exit(1)
 		}
-		receiptBuilder, receiptErr := responsefleet.NewTargetEvidenceReceiptBuilder(telemetryTransportStore, endpointTimelineStore, coverageWindowStore, responseVerificationStore, clock)
+		receiptBuilder, receiptErr := responsefleet.NewTargetEvidenceReceiptBuilder(telemetryTransportStore, fleetAgentStore, endpointTimelineStore, coverageWindowStore, responseVerificationStore, clock, cfg.FleetAgentStaleAfter)
 		if receiptErr != nil {
 			log.Error("response target evidence receipt builder init failed", "err", receiptErr)
 			os.Exit(1)
@@ -2072,7 +2107,7 @@ func main() {
 		}
 		router.SetOIDC(httpOIDCService, cfg.OIDCFrontendURL)
 	}
-	if err := wireEnterpriseIdentity(cfg, router, auth, databasePool, vaultCipher, notificationSender, clock, ids); err != nil {
+	if err := wireEnterpriseIdentity(cfg, router, auth, databasePool, vaultCipher, notificationSender, clock, ids, usersService.BootstrapCredentialID()); err != nil {
 		log.Error("enterprise identity initialization failed", "err", err)
 		os.Exit(1)
 	}
@@ -2222,10 +2257,22 @@ func main() {
 		}
 		documentArtifacts.SetEvidenceProvider(evidenceService)
 		documentArtifacts.SetEvidenceIntegrityProvider(scaService)
+		if cfg.NotificationEnabled {
+			if err := assessmentClosureReportService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool)); err != nil {
+				log.Error("assessment closure report notification producers init failed", "err", err)
+				os.Exit(1)
+			}
+		}
 		documentService, documentErr := docpublishuc.NewService(documentStore, integrationStore, integrationService, documentArtifacts, documentAuthority, documentSourcePolicy, auditLog, ids, clock)
 		if documentErr != nil {
 			log.Error("document publishing service init failed", "err", documentErr)
 			os.Exit(1)
+		}
+		if cfg.NotificationEnabled {
+			if err := documentService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool)); err != nil {
+				log.Error("document publication notification producers init failed", "err", err)
+				os.Exit(1)
+			}
 		}
 		router.SetDocumentPublishing(documentService)
 		if notificationService != nil {
@@ -2240,6 +2287,12 @@ func main() {
 			if scheduleErr != nil {
 				log.Error("document schedule service init failed", "err", scheduleErr)
 				os.Exit(1)
+			}
+			if cfg.NotificationEnabled {
+				if scheduleErr := documentSchedules.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool)); scheduleErr != nil {
+					log.Error("document schedule notification producers init failed", "err", scheduleErr)
+					os.Exit(1)
+				}
 			}
 			documentScheduleHistory, scheduleErr := docpublishuc.NewScheduleHistoryService(documentStore, documentStore)
 			if scheduleErr != nil {
@@ -2521,7 +2574,7 @@ func main() {
 				log.Error("assessment closure preview key generation failed", "err", keyErr)
 				os.Exit(1)
 			}
-			if cycleErr := cycleAPI.SetClosureDependencies(assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, vulnerabilityQueue, closureTokenKey); cycleErr != nil {
+			if cycleErr := cycleAPI.SetClosureDependencies(assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, assessmentClosureReportService, vulnerabilityQueue, closureTokenKey); cycleErr != nil {
 				log.Error("assessment closure service init failed", "err", cycleErr)
 				os.Exit(1)
 			}
@@ -2656,11 +2709,12 @@ func main() {
 			os.Exit(1)
 		} else {
 			router.SetRuntimeVerifier(runtimeVerifierSvc)
-			if egressLive {
+			durableVerifier := toolExecution == config.ToolExecutionDispatchOnly && reconQueue != nil && dastGrantAuthorityConfigured
+			if egressLive || durableVerifier {
 				// DAST actively probes a URL. Unlike typed runtime-verifier result ingestion,
 				// the workflow must never run on the plain ExecRunner because ExecRunner ignores
-				// ToolSpec.EgressPolicy. Serve the propose/approve/run routes only when the
-				// sandbox can kernel-enforce egress confinement.
+				// ToolSpec.EgressPolicy. Dispatch-only exposes these routes only with the
+				// durable queue and independent verifier grant authority; its runner refuses execution.
 				dastRunnerSvc, derr := dastrunneruc.NewService(reconRunner, evidenceService, runtimeVerifierSvc, "curl", 10*time.Second, cfg.ReconMaxOutput)
 				if derr != nil {
 					log.Error("DAST safe verifier runner init failed", "err", derr)
@@ -2670,6 +2724,12 @@ func main() {
 				if werr != nil {
 					log.Error("DAST verifier workflow init failed", "err", werr)
 					os.Exit(1)
+				}
+				if vulnerabilityTransactions != nil {
+					if err := dastWorkflowSvc.SetTransactionRunner(vulnerabilityTransactions); err != nil {
+						log.Error("DAST custody transaction init failed", "err", err)
+						os.Exit(1)
+					}
 				}
 				router.SetDASTWorkflow(dastWorkflowSvc)
 				// #823 durable DAST verification: with the Postgres job queue, the run route enqueues a
@@ -2686,25 +2746,29 @@ func main() {
 					router.SetDASTRunner(dastRunSvc)
 					log.Info("DAST verification runs execute on the worker (durable)", "route", "POST .../runtime-verification/proposals/{aid}/run")
 				}
-				engine, eerr := dastengine.New(reconRunner, cfg.DASTHelperBin, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
-				if eerr != nil {
-					log.Error("authenticated DAST engine init failed", "err", eerr)
-					os.Exit(1)
+				if egressLive {
+					engine, eerr := dastengine.New(reconRunner, cfg.DASTHelperBin, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
+					if eerr != nil {
+						log.Error("authenticated DAST engine init failed", "err", eerr)
+						os.Exit(1)
+					}
+					sessionSvc, serr := dastsessionuc.NewService(engine, reconGuard, evidenceService)
+					if serr != nil {
+						log.Error("authenticated DAST session init failed", "err", serr)
+						os.Exit(1)
+					}
+					ceilings := dastworkflowuc.DefaultScanCeilings()
+					ceilings.MaxReauth, ceilings.RatePerSec, ceilings.Concurrency = cfg.DASTMaxReauth, cfg.DASTRatePerSec, cfg.DASTConcurrency
+					ceilings.Limits.Depth, ceilings.Limits.Pages, ceilings.Limits.Requests, ceilings.Limits.WallClock = cfg.DASTMaxDepth, cfg.DASTMaxPages, cfg.DASTMaxRequests, cfg.DASTMaxWallClock
+					if err := dastWorkflowSvc.SetScan(sessionSvc, cfg.DASTHelperBin, evidenceService, dastchecks.NewEvaluator(), dastchecks.NewEvaluator(), judgmentSvc, runtimeVerifierSvc, ceilings); err != nil {
+						log.Error("authenticated DAST scan workflow init failed", "err", err)
+						os.Exit(1)
+					}
+					router.SetDASTScan(dastWorkflowSvc)
+					log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
+				} else {
+					log.Info("durable DAST verifier ENABLED; authenticated scanner remains unavailable")
 				}
-				sessionSvc, serr := dastsessionuc.NewService(engine, reconGuard, evidenceService)
-				if serr != nil {
-					log.Error("authenticated DAST session init failed", "err", serr)
-					os.Exit(1)
-				}
-				ceilings := dastworkflowuc.DefaultScanCeilings()
-				ceilings.MaxReauth, ceilings.RatePerSec, ceilings.Concurrency = cfg.DASTMaxReauth, cfg.DASTRatePerSec, cfg.DASTConcurrency
-				ceilings.Limits.Depth, ceilings.Limits.Pages, ceilings.Limits.Requests, ceilings.Limits.WallClock = cfg.DASTMaxDepth, cfg.DASTMaxPages, cfg.DASTMaxRequests, cfg.DASTMaxWallClock
-				if err := dastWorkflowSvc.SetScan(sessionSvc, cfg.DASTHelperBin, evidenceService, dastchecks.NewEvaluator(), dastchecks.NewEvaluator(), judgmentSvc, runtimeVerifierSvc, ceilings); err != nil {
-					log.Error("authenticated DAST scan workflow init failed", "err", err)
-					os.Exit(1)
-				}
-				router.SetDASTScan(dastWorkflowSvc)
-				log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
 			} else {
 				log.Warn("DAST execution workflows DISABLED: authoritative signed DAST grants are unavailable in this process posture")
 			}
@@ -3779,6 +3843,7 @@ func main() {
 	// Composition-root only (the taintscan arch tripwire keeps it off the agent surface). Requires the
 	// sandbox: synapse-callgraph compiles the GENERAL target source, so there is NO safe unsandboxed dev
 	// fallback (contrast govulncheck's vuln-scan) – refuse rather than build untrusted code on the host.
+	scacompose.RecordSemanticSelection(scaService, cfg)
 	if cfg.TaintEnabled {
 		if judgmentSvc == nil {
 			log.Error("SYNAPSE_TAINT_ENABLED requires SYNAPSE_JUDGMENTS_ENABLED (taint mints judgments)")

@@ -4,6 +4,8 @@ This ledger separates source-operation evidence from provider transport tests an
 from the remaining client acceptance matrix. It records the local run on
 2026-10-13. Provider credentials and repeatable operation state remain in the
 operator's private runtime directory; they are not part of this repository.
+The [functional follow-up](#functional-follow-up) records later operational proof
+and the remaining environment gaps without rewriting these historical observations.
 
 ## Environment and operations
 
@@ -224,3 +226,249 @@ and [Vietnamese risk lifecycle](assets/ui/notification-events/live/mattermost-ri
 in Mattermost, and [Vietnamese expiration](assets/ui/notification-events/live/rocket-chat-risk-expired-vi-light.png)
 in Rocket.Chat. The screenshots establish those views; the other combinations
 have transport receipts, not a complete native theme/locale capture matrix.
+
+## Functional follow-up
+
+On 2026-10-29, representative functional journeys completed the remaining
+creation/promotion, retest, stale-scan/dead-letter and SLA reminder/cap source
+coverage. The maintainer requested functional proof without another theme matrix.
+Existing renderer, tenant, recovery and hostile-input regressions remain accepted;
+this criterion does not waive runtime authorization or evidence integrity.
+[Tracker #1576](https://github.com/KKloudTarus/synapse-ce/issues/1576) still owns the
+external environments and execution paths listed below.
+
+| Journey | Observed result and scope |
+| --- | --- |
+| Retest | All three outcomes, their status transitions and stale-version denial, followed by real Slack receipts and finding navigation. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6487881346). |
+| SLA | Production assessment and source polling with a controlled clock produced ordinal 0 and one capped reminder; PostgreSQL and Slack delivery were real. This is not a multiday soak. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6487975155). |
+| Stale scan | A worker running the real pipeline was killed with SIGKILL. After the wall-clock stale threshold, a maintenance helper invoked production `SweepStaleScans`; normal worker redelivery retained one failed source and delivery. Periodic scheduler timing is not claimed. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6488224328). |
+| Dead-letter | Three lease acquisition faults scoped to one disposable scan exhausted the real queue. A fourth acquisition let the terminal handler persist `failed/dead-letter`; one Slack delivery returned HTTP 200. The trigger, function and sequence were removed. Engines had not run, so the console has unknown coverage and no completed scan-run row. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6488733441). |
+| Creation/promotion | A sandboxed CGO Python parser and production taint coordinator proposed a CWE-78 claim. An independent static assessment was submitted through the existing operator-authorized verification API. A sealed verdict produced one SAST finding and one Slack delivery; replay did not duplicate them. This is a source-only static journey, not a complete SCA job or runtime exploit. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6488863842). |
+| Telegram threading | Real same-subject replies, deleted-parent fallback, and subject/channel/local credential-version isolation produced eight successful deliveries. Credential-version testing reused the existing bot credential; no cloud rotation is claimed. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6488361514). |
+| Local SMTP relay | Admin UI configure-465, replace-with-587 and unset-only fallback produced four actual SMTP messages. Certificate verification, rejected host/port, stale revision and safe settings/audit were checked; a Mailpit link opened the finding. This proves local relay behavior, not Gmail/Outlook, XOAUTH2 or mobile-client acceptance. [Receipt](https://github.com/KKloudTarus/synapse-ce/issues/1576#issuecomment-6488527239). |
+| JSM lifecycle | Finding transitions created and closed real alerts; reopening created a distinct episode. Restart and same-version channel restoration resumed the original asynchronous request. The paired closure implementation shipped in [#1625](https://github.com/KKloudTarus/synapse-ce/pull/1625); live PagerDuty remains excluded. |
+
+The [tenant relay rollout receipt](assets/ui/notification-events/live/tenant-relay-rollout.json)
+adds an actual migrate-first rehearsal from schema 231 to 234: old API/worker, feature runtime with
+configured relay, verified TLS/AUTH SMTP delivery and history, feature restart, old-binary rollback
+on the expanded schema, feature restoration and a second delivery. Legacy mappings and relay data
+remained intact; the runtime role had neither superuser nor RLS bypass. This uses the exact historical
+old and feature commits recorded in the receipt, rather than attributing that run to later code.
+
+Synthetic DDL runs measured 28.560 ms at 10,000 contacts, 107.583 ms at 100,000 and 19,214.846 ms
+at 1,000,000. A conflicting lock caused atomic rollback with a 500 ms per-lock timeout; total abort
+time reached 2,611.443 ms at 1,000,000 because the timeout is not a total migration deadline.
+These local measurements inform a maintenance window, not a production capacity or zero-downtime
+claim. The largest run had only two successful writer samples. Rollback keeps the expanded schema;
+running Down would delete relay/domain data. Both disposable rehearsals cleaned up their containers
+and networks.
+
+The dead-letter and promotion runtime used source
+`e77c95e3ac7dd5d8167b3d789d04edda1ab0e92d`, merged by #1625. Their
+[correlated receipt](assets/ui/notification-events/live/functional-followup.json)
+records immutable source/event equality, delivery identities and image hashes.
+The promotion finding retains severity `unknown`; its verification score does not
+invent severity. The independent assessment was static, not a claim of human
+review or the external LLM auto-verifier.
+
+![Dead-letter console before engine execution](assets/ui/notification-events/live/scan-deadletter-console.png)
+
+![Promoted SAST finding after restart](assets/ui/notification-events/live/promoted-finding-console.png)
+
+The isolated PostgreSQL, local object store, mailboxes and sealed settings are
+retained. All ten services were stopped and resumed successfully: the signed
+three-link promotion evidence chain kept its head, and the sealed fixture
+artifact downloaded byte-for-byte unchanged. The services were then stopped to
+release resources. The private resume command derives current container addresses
+and uses retained configuration; no manual provider setup is needed for these
+completed journeys. Older in-memory artifacts are not restored by adding the
+object store.
+
+### Navigation equivalence
+
+The [eight lifecycle manifests](notification-lifecycle-events.md#local-evidence-artifacts)
+retain 704 reviewed cells and 48 clicked destination groups. Each provider covers
+approval, engagement, evidence, finding, incident and response route families.
+Those are destination proofs, not a claim that every event or screenshot was
+clicked. New source operations add actual finding clicks for retest, SLA,
+promotion and local SMTP, scan-error navigation for recovery/dead-letter, and an
+evidence-failure engagement view. Mattermost and Rocket.Chat also have integrated
+finding clicks. Reuse is limited to the same destination behavior; synthetic
+response payloads still do not prove a governed host response operation.
+
+### PostgreSQL refresh
+
+The full PostgreSQL package ran on a fresh isolated database at
+`cc6e25977340badb9ba194f585b4f42bb27ca828`, which contains B05 merge
+`b88812e15fce7c88604bc735872532fe5cae75f3`. Command:
+`go test -count=1 -timeout=45m -json ./internal/infrastructure/persistence/postgres -run .`.
+It exited 0 after 2,079.495 seconds with 1,215 pass events and four skips.
+`TestResponseHaltWriterRoleIsolation` then passed separately at the same revision
+with distinct runtime and halt-writer roles. The other skips were two opt-in scale
+benchmarks and the interactive assessment UI worker. The earlier timeout stays
+failed evidence; no hosted Actions result is claimed.
+
+### Governed process response
+
+The governed host-response environment was subsequently completed on 2026-10-29.
+Two retained, isolated Linux KVM guests supplied a real executor and a distinct
+observer. A consultant submitted the exact process fingerprint and an operator
+recorded the authorized decisions. Stop reached `verified_succeeded`; the separately
+approved best-effort restart reached `rolled_back` with verification `succeeded`.
+The replacement used the pinned executable, cwd and UID, with a different process
+entity ID. The reversal receipt keeps the original exit timestamp before the
+reversal window and binds the exact child's successful exec event.
+
+The [correlated receipt](assets/ui/notification-events/live/governed-process-response.json)
+records component binary hashes, changed-source hashes, both sealed verification
+records and three immutable source/event pairs. `applied`, `verified` and `reverted`
+each reached Slack through the durable worker once with HTTP 200. The Vietnamese
+[native receipt](assets/ui/notification-events/live/process-confirmed-slack-native.png)
+was inspected; its Open response link opened the HTTPS console and, after sign-in,
+showed [Reverted / succeeded](assets/ui/notification-events/live/process-confirmed-native-link-console.png).
+The later failed message belongs to a separate wrong-asset diagnostic request that
+was rejected at human approval, not the verified operation. Out-of-scope admission,
+wildcards and a consultant's approval attempt returned 403, 400 and 403 respectively.
+
+This rehearsal used a five-minute command/verification budget and the normal
+two-minute work lease. Earlier failed and timed-out attempts remain unchanged.
+The observer was upgraded during reversal; the executor stayed running to preserve
+its pinned restart descriptors. This proves the governed local operation and Slack
+journey, not production capacity, other operating systems or deferred clients.
+
+### Restored Gmail SMTP
+
+On 2026-10-30 (Asia/Bangkok), the retained identity sandbox delivered four
+self-mails through Google OAuth SMTP: an initial channel test, one real manual
+finding in EN/VI, and a channel test after worker restart. Each delivery has one
+SMTP 250 attempt and exactly one matching Message-ID in the Gmail Inbox. The
+[receipt](assets/ui/notification-events/live/gmail-smtp-live.json) binds the
+finding's immutable source record, projected event, deliveries and actual runtime
+image digests. Received subject, plain text and HTML match the stored-event
+preview for both source messages.
+
+The [English](assets/ui/notification-events/live/gmail-source-en.png) and
+[Vietnamese](assets/ui/notification-events/live/gmail-source-vi.png) native body
+crops show the red critical label, intact Vietnamese title and literal hostile
+strings. The full URL is defanged and the only HTML anchor is the generated
+console link. A native Gmail click, repeated after normal sign-in, opened the
+[exact finding](assets/ui/notification-events/live/gmail-finding-console.png)
+under the existing readonly membership. The unauthenticated sign-in returned to
+Dashboard; automatic deep-link restoration is not claimed.
+
+The existing personal project supplied a new Desktop client and an explicitly
+approved self-test grant. No project, API enablement, compute or billing change
+was made. Client material and tokens are encrypted locally; mailbox headers and
+raw MIME stay private. The operator resume command was exercised without fresh
+consent or enrollment. The test rule and channels are disabled and the worker is
+parked, with configuration retained. This Testing grant expires around
+2026-11-05 16:55 UTC; encrypted storage does not remove the provider's expiry.
+This is representative current SMTP/source proof, not every event/client cell
+or Microsoft SMTP acceptance. Historical receipts keep their original scope.
+
+### Governed Azure CSPM
+
+The owner-approved Azure sandbox now has representative source-to-delivery proof.
+A durable run executed through the native capless worker, independently signed
+scope grant, root egress broker and pinned sandbox helper. The final API/worker
+rollout was exercised through the retained resume command. The
+[receipt](assets/ui/notification-events/live/cspm-azure-live.json) records the
+binary hashes, source digest, signed evidence chain and one Vietnamese detail
+`cspm.run_finished` Slack delivery: HTTP 200 on its first attempt.
+
+The result is partial: one subscription asset, zero findings and explicit
+effective-network and identity-activity coverage gaps. Existing Foundry accounts
+and projects are outside the connector filter; this does not prove a clean
+subscription. [Native Slack rendering](assets/ui/notification-events/live/slack-cspm-vi.png)
+was inspected with intact Vietnamese text and the partial outcome. Clicking its
+link opened the correct engagement after normal sandbox sign-in, with evidence
+verified. This acceptance covers governed execution and its representative Slack
+journey, with the inventory limits retained.
+Only the existing subscription's approved Reader grant was added. No cloud
+resource, model call, new cloud credential or paid service was created.
+
+### Governed local recon
+
+A real HTTPX run used the existing native execution tier against an owned static
+HTTP fixture inside the local VM. The [receipt](assets/ui/notification-events/live/recon-live.json)
+records the pinned tool, one scope-restricted destination, the fixture's HTTP 200
+GET and one persisted in-scope result. Submission was denied with live recon
+disabled and for a different, out-of-scope port before the successful run.
+
+Containment and tool output were sealed into an intact signed evidence chain.
+The terminal source produced one Vietnamese detail Slack delivery, HTTP 200 on
+attempt one. [Native rendering](assets/ui/notification-events/live/slack-recon-vi.png)
+was inspected; its link opened the correct engagement after normal sandbox
+sign-in, and the [Recon tab](assets/ui/notification-events/live/recon-console.png)
+showed the succeeded run, one in-scope result and
+`sandboxed-live` containment. The retained resume command restores this setup
+without another account grant. No public exposure, cloud target or paid service
+was added. This is representative HTTPX proof, not subfinder, naabu or DAST proof.
+
+### Governed HTTP verification
+
+The safe DAST verifier now has representative functional proof through the same
+native execution tier. A synthetic engagement reachability judgment was proposed
+through the application service, then a human approved one ordinary GET of an
+immutable public repository document. The [receipt](assets/ui/notification-events/live/dast-verifier-live.json)
+binds the exact probe digest, durable run, consumed approval owner and independently
+committed one-shot grant. A previously expired proposal stayed unconsumed; its
+identical replacement was approved before execution.
+
+The pinned curl process returned HTTP 200 with the expected marker. The durable
+run succeeded with `runtime_confirmed`; all five evidence links were intact and
+the head was signed. The broker recorded one destination rule and namespace
+cleanup. No packet or eBPF connection receipt is claimed. The trusted workflow
+binds the exact URL; the broker enforces process, IP and port independently, not
+HTTPS path against a compromised worker.
+
+The terminal event delivered to Slack on its first attempt with HTTP 200.
+[Native Vietnamese rendering](assets/ui/notification-events/live/slack-dast-vi.png)
+showed the succeeded outcome and unavailable finding counts. Clicking its link
+and signing in with the existing local operator opened the
+[correct engagement with verified evidence](assets/ui/notification-events/live/dast-link-console.png).
+The [verifier UI](assets/ui/notification-events/live/dast-verifier-console.png)
+showed the terminal verdict and HTTP status without another submission. The
+retained resume command was exercised with one existing run, no new approval,
+probe or cloud operation. No credential, cloud resource or paid service was added.
+
+This proves the governed verifier and representative Slack journey. The seeded
+judgment and static marker are functional inputs, not a vulnerability claim.
+Authenticated crawling/scanning remains unavailable in dispatch-only posture.
+
+Final review also closed shared-address SSRF and transaction anchoring/ledger-read
+findings. Focused race and actual PostgreSQL checks cover those corrections.
+The retained runtime was updated and readied without another probe; the receipt
+keeps the successful run's original binary hashes separate from that final rollout.
+
+### Remaining environments
+
+Four service setups remain unavailable after the Gmail restoration above. The
+direct environment audit on 2026-10-28 recorded five. This is a setup count,
+not a count of all untested acceptance cells; SharePoint and OneDrive Business
+are grouped together.
+The Google Chat personal session was rechecked on 2026-10-29; no space or
+webhook was created. Google's [documented webhook prerequisites](https://developers.google.com/workspace/chat/quickstart/webhooks)
+require an eligible Workspace account and organization permission. The other
+setup rows retain their original audit date.
+
+| Setup | Verified gap |
+| --- | --- |
+| Teams | No authorized work tenant with a usable test bot and conversation; the current personal account was rejected. |
+| Microsoft SMTP / Outlook | No authorized Exchange mailbox and SMTP entitlement verified. Entra Free sign-in does not provide a mailbox. |
+| SharePoint / OneDrive Business | No Business site/drive and restricted-reader setup verified. An Entra app alone is insufficient. |
+| Google Chat | No current eligible configured space/webhook in the personal session. Historical receipts remain valid. |
+
+Okta, Google Workspace identity, PingOne and PagerDuty are intentionally excluded
+by the maintainer and are not counted in those four. Google Workspace identity
+and Gmail SMTP are separate integrations.
+
+Representative DAST verification, recon and Azure CSPM paths are recorded above,
+without implying authenticated DAST scanning, other recon tools, AWS/GCP or full
+cloud-posture coverage. Custody failure was exercised in a disposable chain and
+reporting failed closed; retained audit/evidence history was untouched.
+The [custody receipt](assets/ui/notification-events/live/functional-followup.json)
+records the verifier transition, HTTP 400 report denial and one delivered event.
+These source rehearsals reuse retained sandbox configuration with optional paid
+model calls disabled. Provider subscription and billing status are separate from
+delivery proof; verify them before resuming a cloud destination.

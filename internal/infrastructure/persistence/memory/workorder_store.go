@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -200,11 +201,14 @@ func (s *WorkOrderStore) TransitionLeasedWithAudit(_ context.Context, tenantID, 
 	if o.State != expected || o.LeaseID != leaseID || (to == workorder.StateRunning && (!o.NotAfter.After(now) || !o.LeaseUntil.After(now))) {
 		return ports.FleetAuditIntent{}, shared.ErrConflict
 	}
-	o.State, o.RefuseReason, o.Audit.UpdatedAt = to, reason, now
-	intent, err := workOrderAuditIntent("work_order.transitioned:v1:"+tenantID.String()+":"+id.String()+":"+string(to), actor, "work_order.transitioned", id.String(), now, map[string]string{"tenant_id": tenantID.String(), "from": string(expected), "to": string(to), "reason": reason})
+	intent, err := workOrderAuditIntent("work_order.transitioned:v1:"+tenantID.String()+":"+id.String()+":"+string(to)+":"+leaseID, actor, "work_order.transitioned", id.String(), now, map[string]string{"tenant_id": tenantID.String(), "from": string(expected), "to": string(to), "reason": reason})
 	if err != nil {
 		return ports.FleetAuditIntent{}, err
 	}
+	if existing, found := s.auditIntents[fleetAuditKey{tenant: tenantID, id: intent.ID}]; found && !ports.SameFleetAuditIntent(existing, intent) {
+		return ports.FleetAuditIntent{}, shared.ErrConflict
+	}
+	o.State, o.RefuseReason, o.Audit.UpdatedAt = to, reason, now
 	s.auditIntents[fleetAuditKey{tenant: tenantID, id: intent.ID}] = cloneMemoryFleetAuditIntent(intent)
 	return intent, nil
 }
@@ -235,17 +239,35 @@ func (s *WorkOrderStore) CancelResponsesBelowGenerationWithAudit(_ context.Conte
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	key := "work_order.responses_fenced:v1:" + tenantID.String() + ":" + fmt.Sprint(generation)
+	if existing, found := s.auditIntents[fleetAuditKey{tenant: tenantID, id: key}]; found {
+		cancelled, err := strconv.Atoi(existing.Entry.Metadata["cancelled"])
+		if err != nil || cancelled < 0 {
+			return 0, ports.FleetAuditIntent{}, shared.ErrConflict
+		}
+		candidate, err := workOrderAuditIntent(key, actor, "work_order.responses_fenced", tenantID.String(), existing.Entry.At, map[string]string{"tenant_id": tenantID.String(), "generation": fmt.Sprint(generation), "cancelled": fmt.Sprint(cancelled), "reason": reason})
+		if err != nil {
+			return 0, ports.FleetAuditIntent{}, err
+		}
+		if !ports.SameFleetAuditIntent(existing, candidate) {
+			return 0, ports.FleetAuditIntent{}, shared.ErrConflict
+		}
+		return cancelled, cloneMemoryFleetAuditIntent(existing), nil
+	}
 	cancelled := 0
 	for _, order := range s.byID {
 		if order.TenantID == tenantID && order.Capability == workorder.CapabilityResponseProcess && isLive(order.State) && order.ResponseCommand != nil && order.ResponseCommand.HaltGeneration < generation {
-			order.State, order.RefuseReason, order.Audit.UpdatedAt = workorder.StateCancelled, reason, now
 			cancelled++
 		}
 	}
-	key := "work_order.responses_fenced:v1:" + tenantID.String() + ":" + fmt.Sprint(generation)
 	intent, err := workOrderAuditIntent(key, actor, "work_order.responses_fenced", tenantID.String(), now, map[string]string{"tenant_id": tenantID.String(), "generation": fmt.Sprint(generation), "cancelled": fmt.Sprint(cancelled), "reason": reason})
 	if err != nil {
 		return 0, ports.FleetAuditIntent{}, err
+	}
+	for _, order := range s.byID {
+		if order.TenantID == tenantID && order.Capability == workorder.CapabilityResponseProcess && isLive(order.State) && order.ResponseCommand != nil && order.ResponseCommand.HaltGeneration < generation {
+			order.State, order.RefuseReason, order.Audit.UpdatedAt = workorder.StateCancelled, reason, now
+		}
 	}
 	s.auditIntents[fleetAuditKey{tenant: tenantID, id: intent.ID}] = cloneMemoryFleetAuditIntent(intent)
 	return cancelled, intent, nil

@@ -93,3 +93,19 @@ func TestProbeCurrentHostDoesNotUseKernelVersionGating(t *testing.T) {
 	}
 	t.Logf("host capability probe: %+v", got)
 }
+
+func TestProcessAndNetworkBTFChecksAreIndependent(t *testing.T) {
+	load := func() (kernelTypeLookup, error) {
+		return func(name string) (btf.Type, error) {
+			if name == "sock" {
+				return nil, btf.ErrNotFound
+			}
+			return &btf.Int{Name: name, Size: 4}, nil
+		}, nil
+	}
+	process := probeClassCapabilities("amd64", "amd64", load, []string{"task_struct", "signal_struct"})
+	network := probeHostCapabilities("amd64", "amd64", load)
+	if !process.CORE || network.CORE {
+		t.Fatalf("process=%+v network=%+v", process, network)
+	}
+}

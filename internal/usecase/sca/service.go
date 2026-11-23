@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,6 +124,7 @@ type Service struct {
 	sbomCache                        ports.SBOMCache                       // optional content+version-addressed cache of the generated SBOM
 	sbomCrossCheck                   ports.SBOMCrossCheckRecorder          // optional SBOM-producer disagreement → judgment minter
 	taint                            ports.TaintScanner                    // optional deterministic taint-analysis → gated CapSAST proposals
+	taintSelection                   *TaintSelection                       // the operator's semantic-engine selection, recorded by the composition root
 	pythonTaint                      ports.TaintScanner                    // optional Python semantic value-flow → gated CapSAST proposals
 	jsTaint                          ports.TaintScanner                    // optional JavaScript/TypeScript semantic value-flow → gated CapSAST proposals
 	javaTaint                        ports.TaintScanner                    // optional Java semantic value-flow → gated CapSAST proposals
@@ -354,6 +356,9 @@ func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
 const (
 	defaultFPTriageMaxFindings = 100
 	maxFPTriageMaxFindings     = 1000
+	// maxUnresolvedInputsReported bounds how many unresolved IaC attributes a warning names, so a large
+	// configuration cannot push an unbounded list into the sealed result.
+	maxUnresolvedInputsReported = 20
 )
 
 // SetFPTriageMaxFindings sets the hard per-scan LLM candidate cap. Invalid values restore the finite
@@ -404,11 +409,6 @@ func (s *Service) SetArtifactCataloger(c ports.ArtifactCataloger) { s.artifactCa
 // miss or error never affects correctness, only whether the cataloging step is skipped.
 func (s *Service) SetSBOMCache(c ports.SBOMCache) { s.sbomCache = c }
 
-// sbomProducerVersion is the SBOM-producer identity used as the cache-invalidation version: the versions of
-// the components that determine SBOM OUTPUT – the syft binary, the language classifier, and the synapse
-// binary that carries the owned parsers/enrichers. It deliberately excludes advisory/KEV/EPSS DB versions
-// (they don't change the generated SBOM). Empty when no producer version is known, which keeps the cache
-// off rather than serving an SBOM that can't be soundly version-keyed.
 // sbomGeneratorKey names the SBOM producer's version by the role it fills rather than by one
 // implementation of it. The owned parsers are the default producer, and filing their version under
 // "syft" made the manifest contradict itself: `"syft": "ownsbom/0.8.0"`, naming a tool that did not
@@ -428,15 +428,49 @@ func sbomGeneratorVersion(tv map[string]string) string {
 	return tv[legacySBOMGeneratorKey]
 }
 
-func sbomProducerVersion(tv map[string]string) string {
-	if tv == nil {
-		return ""
+// sbomProducerIdentity resolves the selected producer and its input eligibility before lookup.
+// Unknown identities and inputs that cannot be represented by the key disable caching.
+func (s *Service) sbomProducerIdentity(ctx context.Context, dir string) (string, bool) {
+	identified, ok := s.sbomGen.(ports.SBOMProducerIdentity)
+	if !ok {
+		return "", false
 	}
-	v := sbomGeneratorVersion(tv) + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
-	if strings.Trim(v, "\x00") == "" {
-		return ""
+	id, cacheable, err := identified.SBOMProducerIdentity(ctx, dir)
+	if err != nil || !cacheable || strings.TrimSpace(id) == "" {
+		return "", false
 	}
-	return v
+	return id + "\x00" + s.prov.ToolVersions["go-enry"] + "\x00" + s.prov.ToolVersions["synapse"], true
+}
+
+// loadOrGenerateSBOM serves the inventory for dir from the cache when, and only when, the selected
+// producer can be identified before the lookup, otherwise it generates. It returns the document,
+// whether the cache served it, and the producer error that degrades the scan to an empty inventory.
+//
+// The identity gate is the fix for #1638: a key derived from the provenance map is written only
+// after a successful generation, so a lookup made with it reads the same key for every producer and
+// hands one producer's inventory to another. A producer that cannot say who it is disables the
+// cache for this scan rather than being served someone else's components.
+func (s *Service) loadOrGenerateSBOM(ctx context.Context, dir string) (*sbom.SBOM, bool, error) {
+	var producerVer string
+	cacheEligible := false
+	if s.sbomCache != nil {
+		producerVer, cacheEligible = s.sbomProducerIdentity(ctx, dir)
+	}
+	if cacheEligible {
+		if cached, ok, _ := s.sbomCache.Load(ctx, dir, producerVer); ok && cached != nil {
+			return cached, true, nil
+		}
+	}
+	doc, err := s.sbomGen.Generate(ctx, dir)
+	if err != nil {
+		return &sbom.SBOM{}, false, err
+	}
+	if cacheEligible {
+		// Store re-fingerprints dir; this assumes the generator did NOT mutate the workspace (Syft +
+		// the owned parsers read only), so the stored key matches the next clean scan's Load key.
+		_ = s.sbomCache.Store(ctx, dir, producerVer, doc) // best-effort; a store error never fails the scan
+	}
+	return doc, false, nil
 }
 
 func boolToInt(b bool) int {
@@ -947,6 +981,35 @@ func (s *Service) SetJsTaint(t ports.TaintScanner) { s.jsTaint = t }
 // engines it is propose-only: positive witnesses become gated CapSAST proposals and partial coverage never
 // becomes a clean conclusion. A setter keeps NewService call sites unchanged.
 func (s *Service) SetJavaTaint(t ports.TaintScanner) { s.javaTaint = t }
+
+// TaintSelection is what the operator asked for, separately from what this process could build. Without it
+// the selection would be read back from the adapter, and an engine that was selected but could not be
+// constructed would be indistinguishable from one nobody asked for.
+//
+// Supported says whether this entry point runs semantic taint at all. The CLI does not: these engines mint
+// gated judgments through the propose-verify-confirm lifecycle, which needs a judgment store the CLI has
+// no access to, and pattern evidence is not a substitute for semantic proof.
+type TaintSelection struct {
+	Supported  bool
+	Go         bool
+	Python     bool
+	JavaScript bool
+	Java       bool
+}
+
+// SetTaintSelection records the semantic-engine selection for this process. A composition root calls it
+// with the configured flags whether or not it then manages to build each adapter, so an adapter that is
+// absent reports as unavailable rather than as unselected. Not calling it leaves the legacy behaviour, in
+// which a wired adapter is read as its own selection.
+func (s *Service) SetTaintSelection(sel TaintSelection) { s.taintSelection = &sel }
+
+// taintSelected reports whether engine was selected, and whether this entry point supports it at all.
+func (s *Service) taintSelected(configured bool, pick func(TaintSelection) bool) (selected, supported bool) {
+	if s.taintSelection == nil {
+		return configured, true
+	}
+	return pick(*s.taintSelection), s.taintSelection.Supported
+}
 
 // SetGraphResolver configures the optional transitive-edge resolver (Go via `go mod graph`). nil ⇒
 // no resolved Go edges. Best-effort + opt-in: a non-Go target / no module cache / tool error adds no edges
@@ -3490,31 +3553,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Content+version-addressed cache (opt-in): on an unchanged tree scanned with the same producer, reuse
 	// the cataloged SBOM and skip generation; a producer version bump makes the key miss (Trivy's
 	// analyzer-version invalidation). Best-effort – a miss/error just regenerates.
-	producerVer := sbomProducerVersion(s.prov.ToolVersions)
-	var doc *sbom.SBOM
-	var sbomGenErr error // non-nil ⇒ SBOM production failed; degrade to an empty inventory + INCOMPLETE
-	cacheHit := false
-	if s.sbomCache != nil {
-		if cached, ok, _ := s.sbomCache.Load(ctx, ws.Dir, producerVer); ok && cached != nil {
-			doc, cacheHit = cached, true
-		}
-	}
-	if doc == nil {
-		doc, err = s.sbomGen.Generate(ctx, ws.Dir)
-		if err != nil {
-			// Degrade, don't abort. An SBOM producer (syft) failing or being absent must NOT discard the
-			// source-only analyzers (secret / SAST / misconfig) — they run in-process, need no SBOM, and
-			// doctor advertises them as available with no external setup. Continue with an empty inventory
-			// and mark the scan INCOMPLETE (below) so the missing dependency/vuln/license coverage is
-			// explicit, never a silent clean result.
-			trace.fail(step, err)
-			sbomGenErr = err
-			doc = &sbom.SBOM{}
-		} else if s.sbomCache != nil {
-			// Store re-fingerprints ws.Dir; this assumes the generator did NOT mutate the workspace (Syft +
-			// the owned parsers read only), so the stored key matches the next clean scan's Load key.
-			_ = s.sbomCache.Store(ctx, ws.Dir, producerVer, doc) // best-effort; a store error never fails the scan
-		}
+	// The cache key names the producer that will run, resolved BEFORE the lookup. The provenance map
+	// cannot provide it: the generator's version is stamped there only after a successful generation,
+	// so a key built from it reads the same for every producer and serves one producer's inventory to
+	// another (#1638). An identity that cannot be established disables the cache for this scan, so a
+	// selected-but-unavailable producer fails visibly instead of being masked by a hit.
+	doc, cacheHit, sbomGenErr := s.loadOrGenerateSBOM(ctx, ws.Dir)
+	if sbomGenErr != nil {
+		// Degrade, don't abort. An SBOM producer (syft) failing or being absent must NOT discard the
+		// source-only analyzers (secret / SAST / misconfig) — they run in-process, need no SBOM, and
+		// doctor advertises them as available with no external setup. Continue with an empty inventory
+		// and mark the scan INCOMPLETE (below) so the missing dependency/vuln/license coverage is
+		// explicit, never a silent clean result.
+		trace.fail(step, sbomGenErr)
 	}
 	// Stamp the SBOM's creation time from the scan clock (an NTIA minimum element the producers don't set).
 	// Applied AFTER the cache block so it is the CURRENT scan's time on both a fresh generate and a cache hit
@@ -3586,6 +3637,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	osApproximateDistro := ""
 	osCatalogFailed := false
 	inventoryPassIncomplete := false
+	// inventoryWarnings carries the cataloging gaps found here into the run's source warnings, which are
+	// assembled further down.
+	var inventoryWarnings []string
 	if s.osPkgCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
@@ -3598,6 +3652,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			osCatalogFailed = true
 		}
 		osPkgsCataloged = len(osRes.Components)
+		if osRes.InventoryWarning != "" && !slices.ContainsFunc(doc.Components, func(c sbom.Component) bool { return isOSPackage(c.PURL) }) {
+			inventoryWarnings = append(inventoryWarnings, osRes.InventoryWarning)
+			inventoryPassIncomplete = true
+		}
 		osPkgsAdded := mergeComponents(doc, osRes.Components)
 		if oerr == nil {
 			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
@@ -3625,11 +3683,33 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if s.instCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "installed-package-catalog", "bincat-cataloger", "Catalog installed Go/Python packages from image rootfs", map[string]int{"components": before})
-		if instComps, ierr := s.instCataloger.CatalogInstalled(ctx, ws.RootFS); ierr != nil {
+		var instReport ports.InstalledCatalogReport
+		var ierr error
+		reporter, hasInstalledReport := s.instCataloger.(ports.InstalledPackageCatalogReporter)
+		if hasInstalledReport {
+			instReport, ierr = reporter.CatalogInstalledReport(ctx, ws.RootFS)
+		} else {
+			instReport.Components, ierr = s.instCataloger.CatalogInstalled(ctx, ws.RootFS)
+		}
+		switch {
+		case ierr != nil:
 			trace.fail(step, ierr)
 			inventoryPassIncomplete = true
-		} else {
-			trace.succeed(step, "Installed-package cataloging completed", map[string]int{"packages_added": mergeComponents(doc, instComps)})
+		default:
+			trace.succeed(step, "Installed-package cataloging completed", map[string]int{"packages_added": mergeComponents(doc, instReport.Components)})
+			// A catalog that stopped at a bound, or skipped entries it could not read, found real packages
+			// and did not look everywhere. The components stand; the claim of a complete inventory does not.
+			if instReport.Truncated || instReport.Unreadable > 0 {
+				inventoryPassIncomplete = true
+				warning := "the installed-package catalog did not cover the whole image root filesystem, so its inventory is a lower bound"
+				if len(instReport.TruncationReasons) > 0 {
+					warning += ": " + strings.Join(instReport.TruncationReasons, "; ")
+				}
+				if instReport.Unreadable > 0 {
+					warning += fmt.Sprintf("; %d root-filesystem entries could not be read", instReport.Unreadable)
+				}
+				inventoryWarnings = append(inventoryWarnings, warning)
+			}
 		}
 	}
 	// Owned SBOM producer over the materialized image ROOTFS (D7.1): an owned producer's scan of the OCI layout
@@ -4041,6 +4121,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// a result is reproducible/explainable ("why did this differ from last month?").
 	grypeDB := ""
 	var sourceWarnings []string
+	sourceWarnings = append(sourceWarnings, inventoryWarnings...)
 	// A build-system resolver that ERRORED (vs "not this ecosystem") leaves the transitive tree
 	// uncaptured. The scan is already flagged INCOMPLETE, but surface WHY so the operator can act
 	// (e.g. unreachable private repo, missing mvn, un-resolvable parent POM) instead of guessing.
@@ -4177,7 +4258,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	osCoverageIncomplete := applyOSCoverageCompleteness(&result.Completeness, osUnsupportedDistro, osDistroUnresolved)
 	if inventoryPassIncomplete {
 		result.Completeness.Confident = false
-		const inventoryGap = "image inventory cataloging was incomplete; package coverage is not exhaustive"
+		inventoryGap := strings.Join(inventoryWarnings, "; ")
+		if inventoryGap == "" {
+			inventoryGap = "image inventory cataloging was incomplete; package coverage is not exhaustive"
+		}
 		if result.Completeness.Warning == "" {
 			result.Completeness.Warning = inventoryGap
 		} else {
@@ -4372,7 +4456,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 				} else {
 					rootfsReport, rerr := s.secretScanner.ScanFiles(ctx, ws.RootFS)
 					if rerr != nil {
-						result.mergeEnginePassError("secrets", rerr)
+						result.mergeEnginePassError("secrets", rerr, nil)
 						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan skipped: "+rerr.Error())
 						if errors.Is(rerr, context.Canceled) {
 							return result, rerr
@@ -4425,6 +4509,30 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 					}
 					result.SourceWarnings = append(result.SourceWarnings, warning)
 				}
+				// A capability that could not evaluate its input leaves that input unassessed. The raw
+				// manifests behind it were still scanned, so coverage is partial rather than failed, and the
+				// difference between "nothing wrong" and "nothing applied" reaches the caller.
+				if misReport.UnassessedInputs > 0 {
+					result.partialEngine("iac", scanrun.ReasonAnalysisIncomplete, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(misReport.Findings)), scanrun.MeasureFilesUnscanned: int64(misReport.UnassessedInputs)})
+					warning := fmt.Sprintf("%d infrastructure-as-code input(s) were NOT evaluated by the capability that owns them",
+						misReport.UnassessedInputs)
+					if len(misReport.UnassessedReasons) > 0 {
+						warning += ": " + strings.Join(misReport.UnassessedReasons, "; ")
+					}
+					result.SourceWarnings = append(result.SourceWarnings, warning)
+				}
+				// An attribute whose effective value the bounded evaluator could not establish is a place a
+				// rule read source text rather than a value. Coverage stays complete, because the evaluation
+				// contract is documented and these are inside it, but the reader is told where it stopped.
+				if n := len(misReport.UnresolvedInputs); n > 0 {
+					shown := misReport.UnresolvedInputs
+					if len(shown) > maxUnresolvedInputsReported {
+						shown = shown[:maxUnresolvedInputsReported]
+					}
+					result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+						"%d infrastructure-as-code attribute(s) did not resolve to a value, so the rules read their source text: %s",
+						n, strings.Join(shown, "; ")))
+				}
 			} else {
 				misRaws, merr = s.misconfig.ScanConfigs(ctx, ws.Dir)
 			}
@@ -4464,15 +4572,34 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 						rootfsReport.Findings, rerr = s.misconfig.ScanConfigs(ctx, ws.RootFS)
 					}
 					counts := map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(rootfsReport.Findings)), scanrun.MeasureUnrenderedCharts: int64(rootfsReport.UnrenderedCharts)}
+					if rootfsReport.UnassessedInputs > 0 {
+						counts[scanrun.MeasureFilesUnscanned] = int64(rootfsReport.UnassessedInputs)
+						warning := fmt.Sprintf("%d image-filesystem infrastructure-as-code input(s) were NOT evaluated by the capability that owns them", rootfsReport.UnassessedInputs)
+						if len(rootfsReport.UnassessedReasons) > 0 {
+							warning += ": " + strings.Join(rootfsReport.UnassessedReasons, "; ")
+						}
+						result.SourceWarnings = append(result.SourceWarnings, warning)
+					}
+					if n := len(rootfsReport.UnresolvedInputs); n > 0 {
+						shown := rootfsReport.UnresolvedInputs
+						if len(shown) > maxUnresolvedInputsReported {
+							shown = shown[:maxUnresolvedInputsReported]
+						}
+						result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+							"%d image-filesystem infrastructure-as-code attribute(s) did not resolve to a value, so the rules read their source text: %s",
+							n, strings.Join(shown, "; ")))
+					}
 					switch {
 					case rerr != nil:
-						result.mergeEnginePassError("iac", rerr)
+						result.mergeEnginePassError("iac", rerr, counts)
 						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem misconfig scan skipped: "+rerr.Error())
 						if errors.Is(rerr, context.Canceled) {
 							return result, rerr
 						}
 					case rootfsReport.Truncated || rootfsReport.UnrenderedCharts > 0:
 						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonTruncated, counts)
+					case rootfsReport.UnassessedInputs > 0:
+						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonAnalysisIncomplete, counts)
 					case !hasMisconfigReport:
 						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoverageUnknown, scanrun.ReasonLegacyReporter, counts)
 					default:
@@ -5124,12 +5251,28 @@ func (s *Service) engineOutcomePlan(opts ScanOptions, imported, sourceApplicable
 	addRequested("code_quality", opts.CodeQuality, s.codeQuality != nil, sourceApplicable)
 	_, historySupported := s.secretScanner.(ports.SecretHistoryScanner)
 	addRequested("secret_history", opts.scansVulnerabilities() && s.secretHistory, historySupported, sourceApplicable)
-	// Semantic engines stay optional until configured, then become selected
-	// security work whose absence or truncation affects coverage.
-	addRequested("taint_go", opts.scansVulnerabilities() && s.taint != nil, s.taint != nil, sourceApplicable)
-	addRequested("taint_python", opts.scansVulnerabilities() && s.pythonTaint != nil, s.pythonTaint != nil, sourceApplicable)
-	addRequested("taint_javascript", opts.scansVulnerabilities() && s.jsTaint != nil, s.jsTaint != nil, sourceApplicable)
-	addRequested("taint_java", opts.scansVulnerabilities() && s.javaTaint != nil, s.javaTaint != nil, sourceApplicable)
+	// Semantic engines are selected by the operator, not by whether this process managed to build their
+	// adapter. A selected engine that could not be built reports unavailable, and one this entry point does
+	// not support at all reports not applicable with its reason. Neither becomes a silent not_selected.
+	addSemantic := func(engine string, pick func(TaintSelection) bool, adapter ports.TaintScanner) {
+		selected, supported := s.taintSelected(adapter != nil, pick)
+		switch {
+		case !sourceApplicable:
+			add(engine, false, false)
+		case !opts.scansVulnerabilities() || !selected:
+			add(engine, false, true)
+		case !supported:
+			plan = append(plan, scanrun.EngineOutcome{Engine: engine, Required: false, Execution: scanrun.EngineNotRun, Coverage: scanrun.CoverageNotApplicable, Reason: scanrun.ReasonNotApplicable})
+		case adapter == nil:
+			plan = append(plan, scanrun.EngineOutcome{Engine: engine, Required: true, Execution: scanrun.EngineNotRun, Coverage: scanrun.CoverageUnknown, Reason: scanrun.ReasonUnavailable})
+		default:
+			add(engine, true, true)
+		}
+	}
+	addSemantic("taint_go", func(t TaintSelection) bool { return t.Go }, s.taint)
+	addSemantic("taint_python", func(t TaintSelection) bool { return t.Python }, s.pythonTaint)
+	addSemantic("taint_javascript", func(t TaintSelection) bool { return t.JavaScript }, s.jsTaint)
+	addSemantic("taint_java", func(t TaintSelection) bool { return t.Java }, s.javaTaint)
 	return plan
 }
 
@@ -5216,7 +5359,7 @@ func (r *ScanResult) mergeEnginePass(engine string, execution scanrun.EngineExec
 	r.updateEngine(engine, execution, coverage, reason, combined)
 }
 
-func (r *ScanResult) mergeEnginePassError(engine string, err error) {
+func (r *ScanResult) mergeEnginePassError(engine string, err error, counts map[scanrun.EngineMeasure]int64) {
 	execution, reason := scanrun.EngineFailed, scanrun.ReasonEngineError
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -5224,7 +5367,7 @@ func (r *ScanResult) mergeEnginePassError(engine string, err error) {
 	case budgetExpired(err):
 		execution, reason = scanrun.EngineTimedOut, scanrun.ReasonDeadlineExceeded
 	}
-	r.mergeEnginePass(engine, execution, scanrun.CoveragePartial, reason, nil)
+	r.mergeEnginePass(engine, execution, scanrun.CoveragePartial, reason, counts)
 }
 
 func (r *ScanResult) completeEngine(engine string) {
@@ -6333,6 +6476,7 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 			LicensePct:              res.LicenseCoverage.Pct,
 			Confident:               res.Completeness.Confident,
 			CompletenessNote:        res.Completeness.Warning,
+			CoverageWarnings:        reportCoverageWarnings(res.SourceWarnings),
 			EngineOutcomes:          scanrun.CloneEngineOutcomes(res.EngineOutcomes),
 			EngineCoverage:          coverage,
 			ExecutionMode:           res.ExecutionMode,
@@ -6371,6 +6515,31 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 		ins.EvidenceKeyID = ev.Attestation.KeyID
 	}
 	return ins, nil
+}
+
+// reportCoverageWarnings selects the existing persisted coverage messages for report
+// consumers. Other source diagnostics can contain internal tool or filesystem errors.
+func reportCoverageWarnings(warnings []string) []string {
+	var out []string
+	for _, warning := range warnings {
+		if strings.HasPrefix(warning, "the installed-package catalog did not cover ") ||
+			strings.HasPrefix(warning, "infrastructure-as-code scan hit its file cap,") ||
+			warning == stageBudgetWarning("infrastructure-as-code scan") {
+			out = append(out, warning)
+			continue
+		}
+		count, message, _ := strings.Cut(warning, " ")
+		if n, err := strconv.Atoi(count); err != nil || n <= 0 {
+			continue
+		}
+		message = strings.TrimPrefix(message, "image-filesystem ")
+		if strings.HasPrefix(message, "infrastructure-as-code input(s) were NOT evaluated ") ||
+			strings.HasPrefix(message, "infrastructure-as-code attribute(s) did not resolve ") ||
+			strings.HasPrefix(message, "Helm chart(s) could not be rendered,") {
+			out = append(out, warning)
+		}
+	}
+	return out
 }
 
 // EvidenceReport is the engagement's evidence ledger plus its verification status.

@@ -95,7 +95,7 @@ func issueInput(idem string, bucket int64) IssueInput {
 
 func responseIssueInput(t *testing.T, private ed25519.PrivateKey, idem string, bucket int64) IssueInput {
 	t.Helper()
-	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +108,8 @@ func responseIssueInput(t *testing.T, private ed25519.PrivateKey, idem string, b
 		ProtocolVersion: fleetagent.ResponseCommandProtocolVersion, CommandID: "command-1", TenantID: "t1",
 		AgentID: "ag1", AssetID: "as1", EngagementID: "eng1", Action: action, ActionDigest: digest,
 		AttemptKey: idem, VerificationChallenge: strings.Repeat("a", 64),
-		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "process-1"}, Target: responsesaga.TargetFingerprint{
-			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "as1", ProcessEntityID: "process-1",
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: "pe_11111111111111111111111111111111"}, Target: responsesaga.TargetFingerprint{
+			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "as1", ProcessEntityID: "pe_11111111111111111111111111111111",
 		},
 		IssuedAt: issuedAt, NotAfter: time.Unix(9999, 0).UTC(), SigningKeyID: evidence.KeyFingerprint(private.Public().(ed25519.PublicKey)),
 	}

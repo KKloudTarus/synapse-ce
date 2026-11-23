@@ -26,4 +26,8 @@ func (*Registry) RestartProcess(context.Context, shared.ID) (bool, error) {
 	return false, fmt.Errorf("%w: live process response is supported only on Linux", shared.ErrForbidden)
 }
 
+func (*Registry) RestartProcessCorrelated(context.Context, shared.ID) (bool, shared.ID, error) {
+	return false, "", fmt.Errorf("%w: live process response is supported only on Linux", shared.ErrForbidden)
+}
+
 func (*Registry) Close() error { return nil }

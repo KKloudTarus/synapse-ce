@@ -263,6 +263,9 @@ func (w *WorkOrder) ValidateResponseBinding() error {
 	if err != nil {
 		return err
 	}
+	if result.State == fleetagent.ResponseExecutionApplied && ((command.Reversal && (result.ReplacementProcessEntityID.IsZero() || result.ReplacementProcessEntityID == command.Target.ProcessEntityID)) || (!command.Reversal && !result.ReplacementProcessEntityID.IsZero())) {
+		return fmt.Errorf("%w: response replacement identity disagrees with command", shared.ErrForbidden)
+	}
 	if result.AttemptKey != command.AttemptKey || result.CommandDigest != fleetagent.ResponseCommandDigest(*command) ||
 		result.LeaseID == "" || result.LeaseID != w.LeaseID || w.State != wantState {
 		return fmt.Errorf("%w: response execution result is not bound to its work order", shared.ErrForbidden)

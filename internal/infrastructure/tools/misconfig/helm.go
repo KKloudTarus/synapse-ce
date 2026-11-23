@@ -3,6 +3,7 @@ package misconfig
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,20 +30,21 @@ const (
 // egress denied), or an explicit trusted-local direct exec is used (the CLI). With NEITHER set, Helm
 // rendering is skipped. Always argv (never a shell), fixed release name, no chart hooks; best-effort.
 func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, helmBin, chartDir, relDir string) k8sScanResult {
-	if helmBin == "" {
-		return k8sScanResult{}
-	}
 	// A chart that will not render is NOT a chart with no findings, and the difference has to reach the
 	// caller. On one live repository 112 of 126 charts refused to render and the scan reported nothing about
-	// it, so every one of those apps read as clean.
+	// it, so every one of those apps read as clean. A chart nobody rendered BECAUSE the capability is off is
+	// the same clean-looking nothing, so it is reported the same way, with its own reason.
 	failed := func(reason string) k8sScanResult {
 		return k8sScanResult{chartRenderFailures: 1, chartRenderReasons: []string{reason}}
 	}
 	// A LIBRARY chart ships template helpers for other charts and declares no resources of its own, so
 	// `helm template` refusing it is correct and there is nothing to evaluate. Counting it as a chart the scan
 	// could not cover reported a coverage gap that does not exist.
-	if isHelmLibraryChart(chartDir) {
+	if IsHelmLibraryChart(filepath.Join(chartDir, "Chart.yaml")) {
 		return k8sScanResult{}
+	}
+	if helmBin == "" {
+		return failed("helm rendering is not configured, so the chart's values were not applied")
 	}
 	args := []string{"template", "synapse-scan", chartDir, "--skip-tests"}
 	var rendered []byte
@@ -68,7 +70,7 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 		// Trusted-local (CLI) direct exec, matching the CLI's maven/gradle posture. Output is capped
 		// DURING capture so a chart rendering gigabytes cannot OOM the process before a post-hoc cap.
 		if _, err := exec.LookPath(helmBin); err != nil {
-			return k8sScanResult{} // helm is absent: not a per-chart failure, the whole feature is off
+			return failed("the helm binary was not found, so the chart's values were not applied")
 		}
 		cctx, cancel := context.WithTimeout(ctx, helmRenderTimeout)
 		defer cancel()
@@ -82,7 +84,9 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 		}
 		rendered = cw.buf.Bytes()
 	default:
-		return k8sScanResult{} // Helm rendering not enabled (no sandbox runner, not trusted-local)
+		// Rendering an untrusted chart executes it, so it is off unless a sandbox runner or an explicit
+		// trusted-local exec is configured. That is a deliberate posture, and the chart is still unassessed.
+		return failed("helm rendering is not enabled for this scan, so the chart's values were not applied")
 	}
 	if len(rendered) > maxRenderedBytes {
 		rendered = rendered[:maxRenderedBytes]
@@ -291,11 +295,22 @@ func helmSourceComment(chunk []byte) string {
 	return ""
 }
 
-// isHelmLibraryChart reports whether the chart declares `type: library`. Such a chart is not installable by
+// IsHelmChartRoot identifies Chart.yaml files outside vendored charts directories.
+// The path is relative to the scanned workspace.
+func IsHelmChartRoot(relPath string) bool {
+	return filepath.Base(relPath) == "Chart.yaml" && !strings.Contains("/"+filepath.ToSlash(relPath), "/charts/")
+}
+
+// IsHelmLibraryChart reports whether Chart.yaml declares `type: library`. Such a chart is not installable by
 // design, so its render refusal is expected rather than a gap in coverage. An unreadable or unparsable
 // Chart.yaml is treated as an ordinary chart, so a real gap is never hidden by a failed read.
-func isHelmLibraryChart(chartDir string) bool {
-	data, err := os.ReadFile(filepath.Join(chartDir, "Chart.yaml"))
+func IsHelmLibraryChart(chartFile string) bool {
+	f, err := os.Open(chartFile) // #nosec G304 -- regular Chart.yaml discovered by the caller's bounded walk.
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxChartMetadataBytes+1))
 	if err != nil || len(data) > maxChartMetadataBytes {
 		return false
 	}

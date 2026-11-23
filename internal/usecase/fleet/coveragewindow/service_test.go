@@ -3,6 +3,7 @@ package coveragewindow
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -207,21 +208,102 @@ func TestComposeCanonicalizesPostgresTimestampPrecision(t *testing.T) {
 	}
 }
 
-func TestComposeRejectsMultiplePreWindowStatesForClass(t *testing.T) {
+func TestComposeSelectsLatestCarryPerClassFromCompleteReports(t *testing.T) {
 	since := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
-	service, store := newTestService(t, &sourceFixture{states: []sensorstate.Observation{
-		coverageObservation("older", since.Add(-2*time.Minute), detection.StateActive, ""),
-		coverageObservation("latest", since.Add(-time.Minute), detection.StateDegraded, "sensor gap"),
-	}})
-	_, err := service.Compose(context.Background(), ComposeRequest{
-		AgentID: "agent-1", AssetID: "asset-1", HostID: "host-1",
-		Since: since, Until: since.Add(time.Hour),
-	})
-	if !errors.Is(err, shared.ErrValidation) {
-		t.Fatalf("Compose() error = %v, want validation error", err)
+	for _, tc := range []struct {
+		name                  string
+		oldState, latestState detection.ClassState
+		sameTime              bool
+	}{
+		{"recovered before window", detection.StateFailed, detection.StateActive, false},
+		{"failed before window", detection.StateActive, detection.StateFailed, false},
+		{"same timestamp uses greatest report id", detection.StateFailed, detection.StateActive, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := coverageObservation("report-a", since.Add(-2*time.Minute), tc.oldState, "old process state")
+			network := old.States[0]
+			network.Class, network.State, network.Reason = detection.ClassNetwork, detection.StateActive, ""
+			old.States = append(old.States, network)
+			latest := coverageObservation("report-z", since.Add(-time.Minute), tc.latestState, "latest process state")
+			if tc.sameTime {
+				latest.ObservedAt = old.ObservedAt
+			}
+			original := append([]detection.ClassCoverage(nil), old.States...)
+			req := ComposeRequest{AgentID: "agent-1", AssetID: "asset-1", HostID: "host-1", Since: since, Until: since.Add(time.Hour)}
+			var previous sensorstate.CoverageWindow
+			for i, observations := range [][]sensorstate.Observation{{old, latest}, {latest, old}} {
+				service, store := newTestService(t, &sourceFixture{states: observations})
+				got, err := service.Compose(context.Background(), req)
+				if err != nil {
+					t.Fatalf("Compose() error = %v", err)
+				}
+				want := []detection.ClassCoverage{network, latest.States[0]}
+				if !reflect.DeepEqual(got.States, want) {
+					t.Fatalf("States = %#v, want %#v", got.States, want)
+				}
+				if i > 0 && (got.Revision != previous.Revision || got.InputDigest != previous.InputDigest) {
+					t.Fatal("carry composition depends on source order")
+				}
+				again, err := service.Compose(context.Background(), req)
+				if err != nil || again.Revision != got.Revision || len(store.windows) != 1 {
+					t.Fatalf("replay not idempotent: %v, windows=%d", err, len(store.windows))
+				}
+				previous = got
+			}
+			if !reflect.DeepEqual(old.States, original) {
+				t.Fatal("composition mutated signed source states")
+			}
+			old.States = append([]detection.ClassCoverage(nil), old.States...)
+			old.States[0].Reason = "different superseded source fact"
+			service, _ := newTestService(t, &sourceFixture{states: []sensorstate.Observation{old, latest}})
+			changed, err := service.Compose(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed.InputDigest == previous.InputDigest || changed.Revision == previous.Revision || !reflect.DeepEqual(changed.States, previous.States) {
+				t.Fatal("complete source provenance was lost or superseded state affected coverage")
+			}
+		})
 	}
-	if len(store.windows) != 0 {
-		t.Fatalf("persisted %d windows after invalid reader result", len(store.windows))
+}
+
+func TestComposeKeepsWindowBoundaryFailureAfterCarryRecovery(t *testing.T) {
+	since := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	service, _ := newTestService(t, &sourceFixture{states: []sensorstate.Observation{
+		coverageObservation("old", since.Add(-2*time.Minute), detection.StateFailed, "old failure"),
+		coverageObservation("carry", since.Add(-time.Minute), detection.StateActive, ""),
+		coverageObservation("boundary", since, detection.StateFailed, "window boundary failure"),
+		coverageObservation("recovery", since.Add(time.Minute), detection.StateActive, ""),
+	}})
+	got, err := service.Compose(context.Background(), ComposeRequest{AgentID: "agent-1", AssetID: "asset-1", HostID: "host-1", Since: since, Until: since.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.States) != 1 || got.States[0].Reason != "window boundary failure" || got.Vector.Process != 0 {
+		t.Fatalf("in-window failure lost: %#v", got)
+	}
+}
+
+func TestComposeValidatesSupersededCarryFacts(t *testing.T) {
+	since := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name    string
+		corrupt func(*sensorstate.Observation)
+	}{
+		{"foreign asset", func(o *sensorstate.Observation) { o.AssetID = "other-asset" }},
+		{"malformed digest", func(o *sensorstate.Observation) { o.PayloadDigest = "invalid" }},
+		{"duplicate class in source", func(o *sensorstate.Observation) { o.States = append(o.States, o.States[0]) }},
+		{"invalid state", func(o *sensorstate.Observation) { o.States[0].State = "invalid" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := coverageObservation("old", since.Add(-2*time.Minute), detection.StateFailed, "failure")
+			tc.corrupt(&old)
+			service, store := newTestService(t, &sourceFixture{states: []sensorstate.Observation{old, coverageObservation("new", since.Add(-time.Minute), detection.StateActive, "")}})
+			_, err := service.Compose(context.Background(), ComposeRequest{AgentID: "agent-1", AssetID: "asset-1", HostID: "host-1", Since: since, Until: since.Add(time.Hour)})
+			if !errors.Is(err, shared.ErrValidation) || len(store.windows) != 0 {
+				t.Fatalf("invalid superseded fact accepted: err=%v, windows=%d", err, len(store.windows))
+			}
+		})
 	}
 }
 

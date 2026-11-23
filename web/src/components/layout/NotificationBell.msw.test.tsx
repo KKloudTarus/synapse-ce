@@ -24,7 +24,7 @@ const server = setupServer(
 )
 
 beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
+  server.listen({ onUnhandledFrame: 'error' })
   server.events.on('response:mocked', ({ response }) => {
     answered.push(response.status)
   })

@@ -23,6 +23,32 @@ func TestEgressGrantCanonicalizerUsesBrokerCanonicalContract(t *testing.T) {
 	}
 }
 
+func TestEgressGrantCanonicalizerPreservesDomainPortLimits(t *testing.T) {
+	rules, err := (EgressGrantCanonicalizer{}).Canonicalize(context.Background(), ports.EgressPolicy{
+		AllowDomainRules: []ports.DomainRule{{Host: "localhost", Ports: []uint16{443}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) == 0 {
+		t.Fatal("domain resolved without a kernel allow rule")
+	}
+	for _, rule := range rules {
+		if !rule.Allow || len(rule.Ports) != 1 || rule.Ports[0] != 443 {
+			t.Fatalf("HTTPS domain permission widened: %+v", rule)
+		}
+	}
+}
+
+func TestEgressGrantCanonicalizerDoesNotDuplicateExplicitPins(t *testing.T) {
+	rules, err := (EgressGrantCanonicalizer{}).Canonicalize(context.Background(), ports.EgressPolicy{
+		PinnedHosts: map[string][]netip.Addr{"localhost": {netip.MustParseAddr("127.0.0.1")}},
+	})
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("explicit pin must produce one rule: %+v, %v", rules, err)
+	}
+}
+
 func TestEgressGrantSignerPreservesAuthorityBinding(t *testing.T) {
 	brokerSigner, err := NewGrantSigner(make([]byte, ed25519.SeedSize))
 	if err != nil {

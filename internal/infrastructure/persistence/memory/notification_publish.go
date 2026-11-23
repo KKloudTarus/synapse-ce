@@ -75,6 +75,7 @@ func (r *NotificationRepository) publish(ctx context.Context, e notification.Eve
 		e = projected
 	}
 	targets, revisions, matched, digestTargets := r.fanoutTargets(e, only)
+	r.filterPagerTargets(e, targets)
 	if len(targets) > 0 && r.countOpenDeliveries(e.TenantID) >= maxOpenDeliveries {
 		return nil, capacityReached("delivery")
 	}
@@ -89,10 +90,13 @@ func (r *NotificationRepository) publish(ctx context.Context, e notification.Eve
 	}
 	r.events[notificationKey{e.TenantID, e.ID}] = storedEvent{event: cloneNotificationEvent(e), matched: matched, revisions: revisions}
 	r.eventIDs[source] = e.ID
+	pagerKeys := r.registerPagerPublication(e, newDeliveries)
+	newDeliveries = append(newDeliveries, r.schedulePagerCloses(e)...)
 	digestKeys := r.recordMemoryDigestMembers(e, digestTargets)
 	if err := r.enqueueDeliveries(ctx, newDeliveries); err != nil {
 		r.forgetEvent(e, newDeliveries)
 		r.forgetMemoryDigestMembers(e.ID, digestKeys)
+		r.forgetPagerPublication(e, pagerKeys, newDeliveries)
 		return nil, err
 	}
 	ids := make([]shared.ID, len(newDeliveries))

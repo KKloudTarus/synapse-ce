@@ -26,7 +26,7 @@ type artifactExpectation struct {
 
 var artifactExpectations = []artifactExpectation{
 	{base: "connlog", programs: []string{"connlog_connect4", "connlog_connect6"}, maps: []string{"conn_events"}},
-	{base: "exec", programs: []string{"detect_execve"}, maps: []string{"exec_events"}},
+	{base: "exec", programs: []string{"enter_execve", "enter_execveat", "exit_execve", "exit_execveat", "process_exec", "process_exit"}, maps: []string{"exec_events", "exec_scratch", "process_live", "process_dropped"}},
 	{base: "file", programs: []string{"detect_openat"}, maps: []string{"file_events"}},
 	{base: "priv", programs: []string{"detect_setuid", "detect_setresuid"}, maps: []string{"priv_events"}},
 	{base: "netconn", programs: []string{"detect_udp_sendmsg", "detect_tcp_connect"}, maps: []string{"net_events"}},
@@ -127,6 +127,20 @@ func TestNativeBuildEmbedsOnlyMatchingObjects(t *testing.T) {
 		_, committed := loadCommittedSpec(t, base, embeddedObjectArch)
 		if !bytes.Equal(embedded, committed) {
 			t.Errorf("%s embedded bytes do not match committed %s object", base, embeddedObjectArch)
+		}
+	}
+}
+
+func TestProcessObjectsBoundLiveIdentitiesAndLossCounter(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		spec, _ := loadCommittedSpec(t, "exec", arch)
+		live := spec.Maps["process_live"]
+		if live == nil || live.Type != cebpf.Hash || live.MaxEntries != 16384 {
+			t.Errorf("%s: process_live must be a bounded non-evicting hash: %+v", arch, live)
+		}
+		counter := spec.Maps["process_dropped"]
+		if counter == nil || counter.Type != cebpf.Array || counter.MaxEntries != 1 || counter.ValueSize != 8 {
+			t.Errorf("%s: invalid process loss counter: %+v", arch, counter)
 		}
 	}
 }

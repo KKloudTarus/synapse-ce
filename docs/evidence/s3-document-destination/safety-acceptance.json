@@ -1,0 +1,86 @@
+{
+  "environment": {
+    "postgres": "PostgreSQL 17 over TLS on localhost:15432",
+    "minio": "TLS MinIO on localhost:19400",
+    "reader_gateway": "TLS authenticated gateway on localhost:19443",
+    "api": "HTTP API on localhost:18090",
+    "api_bucket": "synapse-evidence",
+    "adapter_live_bucket": "synapse-adapter-evidence"
+  },
+  "integration": {
+    "provider": "s3-compatible",
+    "endpoint": "https://192.168.112.10:9000",
+    "read_endpoint": "https://localhost:19443/synapse-evidence",
+    "read_principal": "acceptance-reader",
+    "connection_test": "succeeded"
+  },
+  "api_worker_flow": {
+    "initial_publish": "done",
+    "updated_report_republish": "done",
+    "public_policy_denial": {
+      "http_status": 500,
+      "provider_code": "public_bucket_policy"
+    },
+    "recovery_after_exact_policy_restore": "done",
+    "unpublish": "done"
+  },
+  "reader_results": {
+    "anonymous": 401,
+    "wrong_audience": 403,
+    "authenticated_published_report": 200,
+    "after_actual_unpublish": 404,
+    "relative_asset": 200,
+    "relative_pdf_http": {
+      "status": 200,
+      "content_type": "application/pdf",
+      "signature": "%PDF-",
+      "pdfinfo": "valid FPDF 1.7 document"
+    },
+    "browser_publication_after_unpublish": 404
+  },
+  "captured_on": "2026-10-25",
+  "source_base_commit": "adefb3d8ac043f128f40f8befd98f3eacd75720d",
+  "source_scope": "S3 publication safety corrections in the working tree; exact shipping fingerprint is in the worktree Taurus verification report.",
+  "browser": {
+    "anonymous": "authentication required",
+    "wrong_reader": "audience denied",
+    "authorized_reader": "HTML report rendered in IAB and Edge",
+    "after_unpublish": "404 visibly confirmed",
+    "temporary_ca": "imported with user authorization, removed after proof; NSS trust list restored to empty",
+    "pdf_visual_limit": "PDF plugin snapshots were blank; the relative link, authenticated HTTPS response and valid PDF bytes were verified separately"
+  },
+  "adapter_live": [
+    "TestS3LiveLifecycle",
+    "TestS3LiveContentRaceAndHistory",
+    "TestS3LiveLegalHold"
+  ],
+  "checks": {
+    "go_tests": "456 packages passed",
+    "build": "all cmd packages built",
+    "lint": "0 issues",
+    "vet": "passed",
+    "race": "documentproviders and docpublish passed"
+  },
+  "post_concurrency_history_proof": {
+    "api_worker_publish": "done",
+    "api_worker_unpublish": "done",
+    "s3_live_tests": [
+      "TestS3LiveLifecycle",
+      "TestS3LiveContentRaceAndHistory",
+      "TestS3LiveLegalHold"
+    ],
+    "s3_live_result": "passed"
+  },
+  "latency_regression": {
+    "versions": 192,
+    "object_lock": "enabled, unheld and unretained",
+    "simulated_request_latency_ms": 60,
+    "per_delete_guard_latency_ms": 5,
+    "deadline_seconds": 35,
+    "elapsed_seconds": 21.802713365,
+    "requests": 773,
+    "deleted_versions": 192,
+    "remaining_versions": 0,
+    "verification_concurrency": 4
+  }
+}

@@ -31,16 +31,3 @@ func TestSBOMGeneratorVersionReadsBothKeys(t *testing.T) {
 		})
 	}
 }
-
-// The cache key must not change when the same run is described under the old key, or every stored
-// SBOM would be treated as produced by a different version and re-generated.
-func TestSBOMProducerVersionIsStableAcrossTheRename(t *testing.T) {
-	current := sbomProducerVersion(map[string]string{sbomGeneratorKey: "ownsbom/0.8.0", "go-enry": "v2.9.6", "synapse": "v0.1.9"})
-	legacy := sbomProducerVersion(map[string]string{legacySBOMGeneratorKey: "ownsbom/0.8.0", "go-enry": "v2.9.6", "synapse": "v0.1.9"})
-	if current != legacy {
-		t.Fatalf("producer version differs across the key rename: %q vs %q", current, legacy)
-	}
-	if current == "" {
-		t.Fatal("producer version is empty, which disables the SBOM cache")
-	}
-}

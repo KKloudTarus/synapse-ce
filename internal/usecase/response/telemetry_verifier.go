@@ -2,6 +2,7 @@ package response
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -61,6 +62,9 @@ func (v *TelemetryEffectVerifier) Verify(ctx context.Context, req VerificationRe
 	if !found {
 		if v.dispatcher != nil {
 			if dispatchErr := v.dispatcher.EnsureObservation(ctx, req); dispatchErr != nil {
+				if errors.Is(dispatchErr, ports.ErrResponseTargetEvidencePending) {
+					return VerificationReceipt{Outcome: VerificationPending}, ErrVerificationPending
+				}
 				return VerificationReceipt{Outcome: VerificationPending}, fmt.Errorf("dispatch response observer: %w", dispatchErr)
 			}
 		}
@@ -84,6 +88,9 @@ func (v *TelemetryEffectVerifier) Verify(ctx context.Context, req VerificationRe
 	}
 	if receipt.TenantID != req.TenantID || receipt.EngagementID != req.EngagementID || receipt.ActionID != req.Action.ID || receipt.ActionDigest != responseActionDigest(req.Action) || receipt.VerificationChallenge != req.VerificationChallenge || receipt.Target != req.Target || receipt.Reversal != req.Reversal || receipt.AttemptKey != req.AttemptKey || !receipt.AttemptedAt.Equal(req.AttemptedAt.UTC().Truncate(time.Microsecond)) || receipt.WindowUntil.After(req.DeadlineAt) {
 		return VerificationReceipt{}, fmt.Errorf("%w: target evidence receipt is not bound to attempt", shared.ErrForbidden)
+	}
+	if req.Reversal && (receipt.OriginalEvidence == nil || receipt.OriginalEvidence.AttemptKey != req.OriginalAttemptKey || !receipt.OriginalEvidence.AttemptedAt.Equal(req.OriginalAttemptedAt.UTC().Truncate(time.Microsecond)) || receipt.ReplacementProcessEntityID != req.ReplacementProcessEntityID || req.ReplacementProcessEntityID.IsZero()) {
+		return VerificationReceipt{}, fmt.Errorf("%w: reversal evidence is not bound to original and replacement", shared.ErrForbidden)
 	}
 	source.Receipt, source.Timeline, source.Coverage = receipt, receipt.Timeline, receipt.Coverage
 	outcome := VerificationUnknown
@@ -119,7 +126,21 @@ func deriveTelemetryVerification(req VerificationRequest, receipt fleetagent.Res
 		return VerificationUnknown, nil
 	}
 	targetExited, targetRunning := false, false
-	replacement := shared.ID("")
+	replacementSeen := false
+	if req.Reversal {
+		original := receipt.OriginalEvidence
+		if original == nil || original.AttemptKey != req.OriginalAttemptKey || !original.AttemptedAt.Equal(req.OriginalAttemptedAt.UTC().Truncate(time.Microsecond)) || receipt.ReplacementProcessEntityID != req.ReplacementProcessEntityID || req.ReplacementProcessEntityID.IsZero() {
+			return VerificationUnknown, nil
+		}
+		originalReq := req
+		originalReq.AttemptedAt = original.AttemptedAt
+		originalReceipt := receipt
+		originalReceipt.WindowUntil = original.Exit.OccurredAt.UTC().Truncate(time.Microsecond).Add(time.Microsecond)
+		originalReceipt.Coverage = original.Coverage
+		if !completeProcessCoverage(originalReq, originalReceipt) {
+			return VerificationUnknown, nil
+		}
+	}
 	for _, entry := range receipt.Timeline {
 		if entry.TenantID != req.TenantID || entry.AssetID != req.Target.ProcessAssetID || entry.SourceAgentID != receipt.SourceAgentID || entry.SourceAgentSessionID != receipt.SourceAgentSessionID || entry.OccurredAt.Before(req.AttemptedAt) || entry.OccurredAt.After(receipt.WindowUntil) {
 			return VerificationUnknown, fmt.Errorf("%w: receipt timeline contains unbound entry", shared.ErrForbidden)
@@ -133,12 +154,8 @@ func deriveTelemetryVerification(req VerificationRequest, receipt fleetagent.Res
 			}
 			continue
 		}
-		if req.Reversal && targetExited && (entry.Kind == endpoint.TimelineProcessStart || entry.Kind == endpoint.TimelineProcessExec) {
-			if replacement.IsZero() {
-				replacement = entry.EntityID
-			} else if replacement != entry.EntityID {
-				return VerificationUnknown, nil
-			}
+		if req.Reversal && entry.Kind == endpoint.TimelineProcessExec && entry.EntityID == req.ReplacementProcessEntityID {
+			replacementSeen = true
 		}
 	}
 	if !req.Reversal {
@@ -156,7 +173,7 @@ func deriveTelemetryVerification(req VerificationRequest, receipt fleetagent.Res
 	if targetRunning {
 		return VerificationFailed, nil
 	}
-	if targetExited && !replacement.IsZero() {
+	if replacementSeen {
 		return VerificationSucceeded, nil
 	}
 	return VerificationUnknown, nil
@@ -170,7 +187,7 @@ func completeProcessCoverage(req VerificationRequest, receipt fleetagent.Respons
 			return false
 		}
 		key := window.Since.String() + "/" + window.Until.String()
-		if current, ok := latest[key]; !ok || current.Revision < window.Revision {
+		if current, ok := latest[key]; !ok || window.CreatedAt.After(current.CreatedAt) || (window.CreatedAt.Equal(current.CreatedAt) && healthyVerificationWindow(current) && !healthyVerificationWindow(window)) {
 			latest[key] = window
 		}
 	}
@@ -180,7 +197,7 @@ func completeProcessCoverage(req VerificationRequest, receipt fleetagent.Respons
 	}
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Since.Before(ordered[j].Since) })
 	for _, window := range ordered {
-		if window.Since.After(cursor) || !window.Until.After(cursor) || window.Vector.Process != 100 || window.SampledCount != 0 || window.TruncatedCount != 0 || window.DroppedCount != 0 || window.GapCount != 0 || window.BatchCount == 0 {
+		if window.Since.After(cursor) || !window.Until.After(cursor) || !healthyVerificationWindow(window) {
 			continue
 		}
 		cursor = window.Until
@@ -189,4 +206,8 @@ func completeProcessCoverage(req VerificationRequest, receipt fleetagent.Respons
 		}
 	}
 	return false
+}
+
+func healthyVerificationWindow(w sensorstate.CoverageWindow) bool {
+	return w.Vector.Process == 100 && w.SampledCount == 0 && w.TruncatedCount == 0 && w.DroppedCount == 0 && w.GapCount == 0 && w.BatchCount > 0
 }

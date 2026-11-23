@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Package, RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Package, RefreshCw01 } from '@untitledui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, Card, EmptyState, ErrorState, SevBadge, Spinner, cn } from '../../components/ui'
@@ -185,7 +185,7 @@ export function ProjectSourceFindings() {
       </Card>
       {selected && (
         <div id={`finding-${selected.id}-detail`} className="space-y-4">
-          <Card title={<span className="flex flex-wrap items-center gap-2"><SevBadge sev={selected.severity} /> <span>{selected.title}</span></span>} actions={<Button variant="secondary" className="px-2 py-1" onClick={refreshSelected}><RefreshCw className="size-4" /> Refresh</Button>} bodyClass="space-y-4">
+          <Card title={<span className="flex flex-wrap items-center gap-2"><SevBadge sev={selected.severity} /> <span>{selected.title}</span></span>} actions={<Button variant="secondary" className="px-2 py-1" onClick={refreshSelected}><RefreshCw01 className="size-4" /> Refresh</Button>} bodyClass="space-y-4">
             {selected.description && <p className="whitespace-pre-wrap text-sm leading-relaxed text-secondary">{selected.description}</p>}
             <div className="grid gap-3 border-y border-secondary py-3 sm:grid-cols-3"><Detail label="Status" value={statusLabel(selected.status)} /><Detail label="CWE" value={selected.cwe || 'Not recorded'} /><Detail label="Fixed in" value={selected.fixedVersion || 'No fixed version recorded'} /></div>
             <section aria-label="Source provenance"><h2 className="mb-2 text-sm font-semibold text-primary">Source provenance</h2><Sources sources={selected.sources} /></section>

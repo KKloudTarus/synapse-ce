@@ -51,13 +51,29 @@ type ScheduleDependencies struct {
 	}
 }
 
-type ScheduleService struct{ deps ScheduleDependencies }
+type ScheduleService struct {
+	deps         ScheduleDependencies
+	transactions ports.TenantTransactionRunner
+	events       ports.NotificationOutbox
+}
 
 func NewScheduleService(deps ScheduleDependencies) (*ScheduleService, error) {
 	if deps.Store == nil || deps.Authority == nil || deps.ReportPolicy == nil || deps.Artifacts == nil || deps.Channels == nil || deps.Integrations == nil || deps.EmailConfig == nil || deps.EmailSender == nil || deps.Publisher == nil || deps.Executor == nil || deps.Audit == nil || deps.IDs == nil || deps.Clock == nil {
 		return nil, fmt.Errorf("%w: document schedule dependencies required", shared.ErrValidation)
 	}
 	return &ScheduleService{deps: deps}, nil
+}
+
+// SetNotifications makes a first frozen occurrence artifact and its
+// report.generated record atomic. It is optional for compositions that do not
+// enable notifications.
+func (s *ScheduleService) SetNotifications(transactions ports.TenantTransactionRunner, outbox ports.NotificationOutbox) error {
+	if transactions == nil || outbox == nil {
+		return fmt.Errorf("%w: document schedule notification transaction and outbox are required", shared.ErrValidation)
+	}
+	s.transactions = transactions
+	s.events = outbox
+	return nil
 }
 
 // ScheduleInput contains only configuration that an administrator may choose.
@@ -308,7 +324,7 @@ func (s *ScheduleService) executeOccurrence(ctx context.Context, tenant shared.I
 			return err
 		}
 		occurrence.Artifact, occurrence.ArtifactStored, occurrence.Occurrence.ArtifactDigest = artifact, true, digest
-		saved, err := s.deps.Store.SaveDocumentScheduleOccurrence(ctx, tenant, occurrence, occurrence.Occurrence.Version, now)
+		saved, err := s.persistFrozenArtifact(ctx, tenant, current.Source, occurrence, now)
 		if err != nil {
 			return err
 		}
@@ -318,6 +334,32 @@ func (s *ScheduleService) executeOccurrence(ctx context.Context, tenant shared.I
 		return s.executeDocumentOccurrence(ctx, tenant, current, actor, occurrence, now)
 	}
 	return s.executeEmailOccurrence(ctx, tenant, current, actor, occurrence, now)
+}
+
+func (s *ScheduleService) persistFrozenArtifact(ctx context.Context, tenant shared.ID, source domain.Source, occurrence ports.DocumentScheduleOccurrence, now time.Time) (ports.DocumentScheduleOccurrence, error) {
+	if s.transactions == nil || s.events == nil {
+		return s.deps.Store.SaveDocumentScheduleOccurrence(ctx, tenant, occurrence, occurrence.Occurrence.Version, now)
+	}
+	var saved ports.DocumentScheduleOccurrence
+	err := s.transactions.Run(ctx, tenant, func(txCtx context.Context) error {
+		var err error
+		saved, err = s.deps.Store.SaveDocumentScheduleOccurrence(txCtx, tenant, occurrence, occurrence.Occurrence.Version, now)
+		if err != nil {
+			return err
+		}
+		record, err := reportGeneratedRecord(tenant, source, saved.Artifact)
+		if err != nil {
+			return err
+		}
+		if err = s.events.Append(txCtx, record); err != nil {
+			return fmt.Errorf("append report notification: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.DocumentScheduleOccurrence{}, err
+	}
+	return saved, nil
 }
 
 func (s *ScheduleService) executeDocumentOccurrence(ctx context.Context, tenant shared.ID, schedule domain.Schedule, actor ports.DocumentActor, occurrence ports.DocumentScheduleOccurrence, now time.Time) error {

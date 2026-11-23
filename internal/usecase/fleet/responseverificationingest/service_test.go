@@ -84,7 +84,7 @@ func newIngestHarness(t *testing.T, state responsesaga.SagaState) ingestHarness 
 	t.Helper()
 	ctx := shared.WithTenant(context.Background(), "tenant-1")
 	at := time.Unix(2_000_000, 0).UTC()
-	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func newIngestHarness(t *testing.T, state responsesaga.SagaState) ingestHarness 
 	challenge := strings.Repeat("a", 64)
 	attempt := responsesaga.ResponseAttempt{
 		ActionID: action.ID, Attempt: 1, IdempotencyKey: "attempt-1",
-		Target: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		Target: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		State:  state, CommandOutcome: "applied", VerificationChallenge: challenge,
 		ObservedRadius: offensivepolicy.RadiusStateChanging, AffectedCount: 1,
 		ExecutorID: "agent:response-executor", ExecutorAgentID: "response-executor", At: at, DeadlineAt: at.Add(time.Hour),

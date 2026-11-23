@@ -131,6 +131,15 @@ and the [SMTP AUTH enablement requirements](https://learn.microsoft.com/en-us/ex
 The [client SMTP submission guide](https://learn.microsoft.com/en-us/exchange/mail-flow-best-practices/how-to-set-up-a-multifunction-device-or-application-to-send-email-using-microsoft-365-or-office-365)
 requires STARTTLS; Microsoft 365 does not support port 465 for this path.
 
+Microsoft's [revised SMTP AUTH Basic authentication schedule](https://techcommunity.microsoft.com/blog/exchange/updated-exchange-online-smtp-auth-basic-authentication-deprecation-timeline/4489835)
+was checked on 2026-10-29. It leaves Basic authentication unchanged through
+December 2026, then turns it off by default for existing tenants at month end.
+Tenants created after December 2026 use OAuth by default. Microsoft plans to
+announce the final Basic authentication removal date in the second half of 2027;
+that is an announcement milestone, not the removal date itself. These milestones
+concern Basic authentication, not Synapse's OAuth/XOAUTH2 flow. The mailbox,
+Exchange grants and SMTP AUTH policy above still require independent verification.
+
 ```json
 {
   "host": "smtp.office365.com",
@@ -146,6 +155,14 @@ requires STARTTLS; Microsoft 365 does not support port 465 for this path.
 }
 ```
 
+## Google Chat webhook prerequisites
+
+Google's [incoming webhook quickstart](https://developers.google.com/workspace/chat/quickstart/webhooks)
+requires a Business or Enterprise Workspace account whose organization permits
+incoming webhooks, plus a destination space. Access to the personal Gmail Chat UI
+or the ability to create a personal space does not establish those prerequisites.
+Check the authorized account and space before creating a webhook credential.
+
 ## Threading and tests
 
 For a notification with a declared subject, delivery selects the earliest
@@ -153,8 +170,26 @@ successfully acknowledged remote reference for the same tenant, channel, pinned
 channel-secret version, and subject. It orders by acknowledgement time and then
 delivery ID, so later delivery has a deterministic anchor. Concurrent first sends
 can both create a top-level message because neither has an earlier acknowledgement
-yet. The event catalog currently declares no trusted closure state, so arbitrary
-event data never causes closure or resolution to be inferred.
+yet. This chat-thread behavior is separate from pager lifecycle admission.
+
+For newly captured finding and incident events, pagers use a source episode and
+revision recorded in the business transaction. Findings end an episode at
+`remediated` or `false_positive`; incidents end it at `resolved` or `closed`.
+Moving from a terminal state back to an active state starts another episode and
+another provider alias. An incident disposition does not close an alert. Historical
+events without this metadata retain their legacy behavior; event JSON and template
+text cannot request closure.
+
+Each channel uses one alert alias per episode and serializes the matched updates
+sent to that alert. A terminal event closes the admitted alert after submitted
+updates have settled, even if the rule only matches creation.
+A terminal event received before an unsent trigger suppresses that trigger. JSM
+request handles survive worker lease expiry and resume through status reads. A
+mutation whose outcome is unknown remains blocked instead of being sent again;
+a new episode remains independent. Disabling, pausing or rotating a channel keeps
+its outstanding obligation, and prevents follow-up sends using a retired version.
+A send already admitted before a configuration change may still finish; its
+receipt is retained.
 
 Telegram replies to the selected message ID and permits a missing parent to fall
 back to a new message. Google Chat derives a stable thread key from the tenant,
@@ -182,6 +217,24 @@ pending JSM request persistence also ignore stored request IDs and can repeat a
 POST instead of resuming its status GET. Keep JSM disabled across the entire pool
 until all workers support the new persistence contract. Drain pending JSM requests
 before downgrading workers; preserve their request IDs and schema during rollback.
+
+For pager lifecycle rollout, stop both producers and notification workers before
+applying migrations `0267–0269`, then upgrade both before resuming. Producer code
+assigns episodes, so a mixed deployment with old producers is unsupported. The
+source and attempt guards reject old workers processing classified records.
+Preserve episode tombstones, pending operations, pinned credentials and terminal
+events during recovery; they cannot expire while old source events can replay.
+The pager transport and gate migrations intentionally require forward recovery
+instead of a Down migration that would erase unresolved external operations.
+
+The JSM sandbox rehearsal on 2026-10-29 exercised a source-created finding,
+worker restart with a persisted accepted request, two same-episode comments,
+automatic close, reopen with a distinct alias, and a second automatic close.
+All six operations reached provider-confirmed success. Native JSM inspection
+showed both comments on the first alert and the reopened alert as a separate
+record. The rehearsal used the existing Free integration without billing changes.
+This covers the pager lifecycle path; it does not establish live PagerDuty
+acceptance or complete the broader event/client matrix.
 
 For an immediate rollback, keep the current binaries and disable the affected
 providers. If reverting binaries, quiesce deliveries and coordinate both API and
@@ -222,7 +275,7 @@ flow passed.
 | Mattermost and Rocket.Chat | Reconciled commit `eae4c40c` delivered ten built-in RenderMessage → formatter → Sender messages per Docker client across five scenarios and EN/VI. Native captures include Rocket.Chat light/dark desktop. | Real console navigation, metadata-to-color mapping, live failure cases and remaining client/device coverage. Local webhook routing uses an explicit HTTP fixture transport; it does not establish public webhook TLS. |
 | Slack | Reconciled commit `eae4c40c` delivered ten built-in messages and four incident replies to the dedicated test channel. A separate probe kept two concurrent replies on their parent. | Slack accepted a send after deletion of its own synthetic root; this did not exercise the explicit missing-parent fallback. Remaining live retry/failure and client/device coverage; no history-read permission added. |
 | SMTP | Reconciled commit `eae4c40c` sent ten built-in EN/VI messages to each real Docker relay: verified STARTTLS 587 and implicit TLS 465. Stored MIME checks covered Date, Message-ID, UTF-8 multipart, scan deltas and escaped hostile HTML. | Representative relay rollout and real email client/device matrix. Mailpit is a test client; fixture console links are inert. |
-| Gmail | Commit `a8e2d1b9` completed ten real SMTP/XOAUTH2 self-mails and grant cleanup. Commit `993fc712` defangs explicit body URLs; its unchanged proof HTML was pasted into Gmail, self-sent and received with only the checked console anchor. | Latest proof is client rendering through Gmail UI, not a new SMTP run. Bare domains, URLs split across HTML formatting nodes, remaining client/device coverage and deployed console navigation are not established. |
+| Gmail | Historical commits `a8e2d1b9` and `993fc712` retain ten SMTP self-mails and the later UI-only defanging check. The [restored SMTP receipt](assets/ui/notification-events/live/gmail-smtp-live.json) adds four current self-mail deliveries, real finding EN/VI MIME parity, native inspection, a console click after sign-in and worker restart. | Representative source proof; not every event/device. Bare domains and URLs split across HTML formatting nodes retain their documented limits. The new Testing grant has a recorded expiry. |
 | Microsoft SMTP | Local client-credentials and XOAUTH2 contracts pass. Controlled work-account preflight found Entra access errors and insufficient Exchange administration. | Live testing deferred; an authorized test mailbox and Entra/Exchange setup are still needed. No coworker mailbox or tenant policy was changed. |
 | Teams personal delivery | Bot, one-time link-code/contact flow and personal delivery are present from merged PR #1571. Local contracts do not establish a real Teams delivery. | A dedicated Microsoft 365 test tenant/Azure Bot is not available yet. Capture the real 1:1 link flow, verified Synapse contact, personal notification and correlated delivery history, then follow Open in Synapse to its expected console destination. Record the tested commit/environment and have the reviewer inspect the evidence before closing #1420. Mobile and an exhaustive theme/locale matrix are not required by the updated reviewer criterion. |
 | PagerDuty | Local trigger/paired-resolve, HMAC dedup and signal-only contracts pass. | Live testing deferred at the operator's request and tracked in #1385, WS3 #1331 and EPIC #1327. A dedicated test service/key and trusted closure producer are still required. |

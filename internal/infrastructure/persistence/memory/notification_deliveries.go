@@ -425,6 +425,15 @@ func (r *NotificationRepository) DeadLetterDelivery(_ context.Context, tenant, d
 		if job == nil || job.tenantID != tenant || job.status != "failed" || job.claimFence != fence {
 			return false, nil
 		}
+		if r.wakePagerConfirmationLocked(key, fence) {
+			return false, nil
+		}
+		if pagerKey, ok := r.pagerDeliveries[key]; ok && stored.delivery.LastError == "pager_waiting" {
+			r.wakePagerLaneLocked(pagerKey.episode, pagerKey.channel)
+			if job.status == "queued" {
+				return false, nil
+			}
+		}
 	}
 	return r.closeDelivery(key, notification.DeliveryDead, reason), nil
 }

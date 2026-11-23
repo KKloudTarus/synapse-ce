@@ -58,11 +58,8 @@ func (c *IncidentCoordinator) Apply(ctx context.Context, incidentID shared.ID, a
 	if err := action.Validate(); err != nil {
 		return Record{}, err
 	}
-	if err := bindIncidentTarget(inc, action, fingerprint); err != nil {
+	if err := bindIncidentTarget(inc, action, target, fingerprint); err != nil {
 		return Record{}, err
-	}
-	if target.Value != action.Target.String() {
-		return Record{}, fmt.Errorf("%w: admitted target %q does not match the action target %q", shared.ErrForbidden, target.Value, action.Target)
 	}
 	requested := incident.ResponseRef{
 		ActionID: action.ID, EngagementID: inc.EngagementID, ActionDigest: responseActionDigest(action), Target: fingerprint,
@@ -185,7 +182,7 @@ func (c *IncidentCoordinator) appendResponseEvent(ctx context.Context, incidentI
 	}
 }
 
-func bindIncidentTarget(inc incident.Incident, action rdom.Action, fingerprint responsesaga.TargetFingerprint) error {
+func bindIncidentTarget(inc incident.Incident, action rdom.Action, target engagement.Target, fingerprint responsesaga.TargetFingerprint) error {
 	switch action.Kind {
 	case rdom.KindStopProcess:
 		if fingerprint.Kind != responsesaga.FingerprintProcess || fingerprint.ProcessAssetID != inc.AssetID || fingerprint.ProcessEntityID != action.Target {
@@ -200,7 +197,7 @@ func bindIncidentTarget(inc incident.Incident, action rdom.Action, fingerprint r
 	default:
 		return fmt.Errorf("%w: unsupported incident response kind %q", shared.ErrForbidden, action.Kind)
 	}
-	return bindFingerprint(action, fingerprint)
+	return rdom.ValidateTargetBinding(action, target, fingerprint)
 }
 
 func sameIncidentResponseBinding(left, right incident.ResponseRef) bool {

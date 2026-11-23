@@ -118,6 +118,25 @@ func (s *Service) renderLinks(event domain.Event) []ports.RenderedLink {
 			link, err = s.links.Engagement(event.EngagementID)
 			label = "Open engagement"
 		}
+	case domain.EventReportGenerated:
+		data := decodeEventData(event.Data)
+		switch domain.ReportGeneratedKind(data.text("report_kind")) {
+		case domain.ReportKindEngagement:
+			if !event.EngagementID.IsZero() {
+				link, err = s.links.Engagement(event.EngagementID)
+				label = "Open report"
+			}
+		case domain.ReportKindAssessmentCycle:
+			if cycleID := shared.ID(data.text("cycle_id")); !cycleID.IsZero() {
+				link, err = s.links.AssessmentCycle(cycleID)
+				label = "Open report"
+			}
+		case domain.ReportKindProjectQuality:
+			if projectKey := data.text("project_key"); projectKey != "" {
+				link, err = s.links.Project(projectKey)
+				label = "Open report"
+			}
+		}
 	}
 	if err != nil || link.Href() == "" {
 		return nil

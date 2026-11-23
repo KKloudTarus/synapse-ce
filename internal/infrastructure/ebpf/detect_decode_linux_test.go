@@ -25,7 +25,7 @@ func TestDecodeUsesKernelOccurredAt(t *testing.T) {
 	const ktime = uint64(5 * 1_000_000_000)    // event occurred 5s after boot
 	want := epoch.Add(5 * time.Second)
 
-	rec := rawExec{Ktime: ktime, PID: 4242, UID: 0}
+	rec := rawExec{Ktime: ktime, Start: 42, Kind: 1, PID: 4242, UID: 0}
 	copy(rec.Filename[:], "/usr/bin/curl")
 	ev, ok := decodeExec("host-1", mustBytes(t, &rec), epoch)
 	if !ok {
@@ -60,12 +60,12 @@ func TestDecodeUsesKernelOccurredAt(t *testing.T) {
 func TestDecodeFallsBackWhenNoKernelTimestamp(t *testing.T) {
 	before := time.Now().UTC().Add(-time.Second)
 	// Zero ktime -> fallback to userspace now.
-	ev, ok := decodeExec("h", mustBytes(t, &rawExec{PID: 1}), time.Unix(1_700_000_000, 0).UTC())
+	ev, ok := decodeExec("h", mustBytes(t, &rawExec{PID: 1, Start: 1, Kind: 1}), time.Unix(1_700_000_000, 0).UTC())
 	if !ok || ev.At.Before(before) {
 		t.Fatalf("zero ktime must fall back to a recent time, got %v", ev.At)
 	}
 	// Zero epoch (clock read failed) -> fallback even with a real ktime.
-	ev2, ok := decodeExec("h", mustBytes(t, &rawExec{Ktime: 5_000_000_000, PID: 1}), time.Time{})
+	ev2, ok := decodeExec("h", mustBytes(t, &rawExec{Ktime: 5_000_000_000, PID: 1, Start: 1, Kind: 1}), time.Time{})
 	if !ok || ev2.At.Before(before) {
 		t.Fatalf("zero epoch must fall back to a recent time, got %v", ev2.At)
 	}
@@ -82,5 +82,29 @@ func TestKernelOccurredAtHelper(t *testing.T) {
 	}
 	if kernelOccurredAt(time.Time{}, 5).IsZero() {
 		t.Fatal("zero epoch must not yield a zero time")
+	}
+}
+
+func TestDecodeProcessLifecycleIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		kind  uint32
+		want  string
+		valid bool
+	}{
+		{1, "exec", true}, {2, "exit", true}, {0, "", false}, {3, "", false},
+	} {
+		raw := rawExec{Kind: tc.kind, PID: 123, Start: 987654321}
+		event, ok := decodeExec("host", mustBytes(t, &raw), time.Now())
+		if ok != tc.valid {
+			t.Fatalf("kind %d: ok=%v", tc.kind, ok)
+		}
+		if ok && (event.Process.Kind != tc.want || event.Process.PID != 123 || event.Process.StartTimeNanos != raw.Start) {
+			t.Fatalf("kind %d lost identity: %+v", tc.kind, event.Process)
+		}
+	}
+	for _, raw := range []rawExec{{Kind: 1, PID: 0, Start: 1}, {Kind: 2, PID: 123}} {
+		if _, ok := decodeExec("host", mustBytes(t, &raw), time.Now()); ok {
+			t.Fatalf("accepted zero identity: %+v", raw)
+		}
 	}
 }

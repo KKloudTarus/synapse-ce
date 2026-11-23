@@ -20,6 +20,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -246,16 +247,17 @@ func (c *Client) SubmitResult(ctx context.Context, token, orderID, leaseID, stat
 }
 
 type ResponseResultRequest struct {
-	Status         string                            `json:"status"`
-	Reason         string                            `json:"reason"`
-	AttemptKey     string                            `json:"attempt_key"`
-	CommandDigest  string                            `json:"command_digest"`
-	ExecutionState fleetagent.ResponseExecutionState `json:"execution_state"`
-	ObservedRadius offensivepolicy.Radius            `json:"observed_radius"`
-	AffectedCount  int                               `json:"affected_count"`
-	AlreadyApplied bool                              `json:"already_applied"`
-	CompletedAt    time.Time                         `json:"completed_at"`
-	LeaseID        string                            `json:"lease_id"`
+	Status                     string                            `json:"status"`
+	Reason                     string                            `json:"reason"`
+	AttemptKey                 string                            `json:"attempt_key"`
+	CommandDigest              string                            `json:"command_digest"`
+	ExecutionState             fleetagent.ResponseExecutionState `json:"execution_state"`
+	ObservedRadius             offensivepolicy.Radius            `json:"observed_radius"`
+	AffectedCount              int                               `json:"affected_count"`
+	AlreadyApplied             bool                              `json:"already_applied"`
+	ReplacementProcessEntityID shared.ID                         `json:"replacement_process_entity_id"`
+	CompletedAt                time.Time                         `json:"completed_at"`
+	LeaseID                    string                            `json:"lease_id"`
 }
 
 func (c *Client) SubmitResponseResult(ctx context.Context, token, orderID string, request ResponseResultRequest) error {

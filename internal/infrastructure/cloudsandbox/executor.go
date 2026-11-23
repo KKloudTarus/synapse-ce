@@ -38,7 +38,14 @@ func New(runner ports.ToolRunner, vault ports.CredentialVault, binary string, ra
 	if runner == nil || vault == nil || strings.TrimSpace(binary) == "" || timeout <= 0 || maxOutput < 1 {
 		return nil, fmt.Errorf("%w: invalid cloud sandbox executor", shared.ErrValidation)
 	}
-	return &Executor{runner: runner, vault: vault, binary: binary, rate: rate, timeout: timeout, maxOutput: maxOutput, egressHost: egressHosts}, nil
+	copiedHosts := make(map[cloudposture.Provider][]string, len(egressHosts))
+	for provider, hosts := range egressHosts {
+		if _, err := ports.CSPMEgressPolicy(provider, hosts); err != nil {
+			return nil, err
+		}
+		copiedHosts[provider] = append([]string(nil), hosts...)
+	}
+	return &Executor{runner: runner, vault: vault, binary: binary, rate: rate, timeout: timeout, maxOutput: maxOutput, egressHost: copiedHosts}, nil
 }
 
 // diagnosticCap bounds how much helper stderr reaches an error message. The helper writes one
@@ -188,9 +195,9 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	if strings.TrimSpace(scope.EgressExecutionKind) == "" || strings.TrimSpace(scope.EgressExecutionID) == "" {
 		return cloudposture.Inventory{}, nil, fmt.Errorf("%w: CSPM execution requires authoritative signed execution grants", shared.ErrValidation)
 	}
-	policy := &ports.EgressPolicy{}
-	for _, host := range hosts {
-		policy.AllowDomainRules = append(policy.AllowDomainRules, ports.DomainRule{Host: host, Ports: []uint16{443}})
+	policy, err := ports.CSPMEgressPolicy(scope.Provider, hosts)
+	if err != nil {
+		return cloudposture.Inventory{}, nil, err
 	}
 	secret, err := e.vault.Resolve(ctx, scope.EngagementID, scope.CredentialRef)
 	if err != nil {
@@ -257,7 +264,7 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	}()
 	result, runErr := e.runner.Run(ctx, ports.ToolSpec{
 		Name: e.binary, Stdin: input, Timeout: e.timeout, MaxOutputBytes: e.maxOutput,
-		EngagementID: scope.EngagementID, EgressPolicy: policy,
+		EngagementID: scope.EngagementID, EgressPolicy: &policy,
 		EgressExecutionKind: scope.EgressExecutionKind, EgressExecutionID: scope.EgressExecutionID,
 		ExtraFiles: []*os.File{credentialR, requestW, decisionR},
 		Env: []string{

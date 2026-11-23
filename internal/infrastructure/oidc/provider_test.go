@@ -3,6 +3,7 @@ package oidc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
+	"golang.org/x/oauth2"
 )
 
 type responseTransport struct{ response *http.Response }
@@ -25,8 +29,16 @@ func TestHTTPSIssuer(t *testing.T) {
 		}
 	}
 	got, err := httpsIssuer("https://issuer.example/")
-	if err != nil || got != "https://issuer.example" {
+	if err != nil || got != "https://issuer.example/" {
 		t.Fatalf("httpsIssuer() = %q, %v", got, err)
+	}
+}
+
+func TestNewRejectsMalformedAuth0OrganizationID(t *testing.T) {
+	for _, organizationID := range []string{"org_", "other_value", "org_has space", "org_has\ncontrol"} {
+		if _, err := New(t.Context(), Config{Issuer: "https://issuer.example", ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback", Auth0OrganizationID: organizationID}); err == nil {
+			t.Errorf("New accepted malformed Auth0 organization ID %q", organizationID)
+		}
 	}
 }
 
@@ -100,7 +112,7 @@ func TestCappedTransportRejectsCompressedAndOversizedResponses(t *testing.T) {
 	}
 }
 
-func TestTLSProviderFixtureRequiresS256AndSendsPKCEAndMaxAge(t *testing.T) {
+func TestTLSProviderFixtureRequiresS256AndSendsProtectedParametersAndAuth0Organization(t *testing.T) {
 	var issuer string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
@@ -115,7 +127,7 @@ func TestTLSProviderFixtureRequiresS256AndSendsPKCEAndMaxAge(t *testing.T) {
 	}))
 	defer server.Close()
 	issuer = server.URL
-	provider := newProvider(Config{Issuer: issuer, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback"}, issuer, server.Client())
+	provider := newProvider(Config{Issuer: issuer, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback", Auth0OrganizationID: "org_CaseSensitive"}, issuer, server.Client())
 	authorizationURL, err := provider.AuthorizationURLWithMaxAge(t.Context(), "state", "nonce", "verifier", 10*time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -125,11 +137,52 @@ func TestTLSProviderFixtureRequiresS256AndSendsPKCEAndMaxAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	query := parsed.Query()
-	if query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" || query.Get("nonce") != "nonce" || query.Get("max_age") != "600" {
+	if query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" || query.Get("nonce") != "nonce" || query.Get("max_age") != "600" || query.Get("organization") != "org_CaseSensitive" || len(query["organization"]) != 1 {
 		t.Fatalf("authorization query = %v", query)
 	}
 	if _, err := provider.ExchangeAndVerify(t.Context(), "bad", "verifier", "nonce"); err == nil {
 		t.Fatal("token-exchange failure was accepted")
+	}
+}
+
+func TestTLSProviderTokenEndpointClassifiesOnlyServerFailuresAsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		status          int
+		body            string
+		wantUnavailable bool
+	}{
+		{name: "temporary upstream failure", status: http.StatusServiceUnavailable, body: `{"error":"temporarily_unavailable"}`, wantUnavailable: true},
+		{name: "invalid authorization code", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`},
+		{name: "invalid client credential", status: http.StatusUnauthorized, body: `{"error":"invalid_client"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var issuer string
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/.well-known/openid-configuration":
+					_ = json.NewEncoder(w).Encode(map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token", "jwks_uri": issuer + "/keys", "code_challenge_methods_supported": []string{"S256"}})
+				case "/token":
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+				default:
+					http.NotFound(w, request)
+				}
+			}))
+			defer server.Close()
+			issuer = server.URL
+			provider := newProvider(Config{Issuer: issuer, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback"}, issuer, server.Client())
+
+			_, err := provider.ExchangeAndVerify(t.Context(), "code", "verifier", "nonce")
+			if err == nil || errors.Is(err, authz.ErrAuthenticationUnavailable) != tc.wantUnavailable {
+				t.Fatalf("ExchangeAndVerify() error = %v, unavailable = %t, want unavailable = %t", err, errors.Is(err, authz.ErrAuthenticationUnavailable), tc.wantUnavailable)
+			}
+			var retrieve *oauth2.RetrieveError
+			if !errors.As(err, &retrieve) || retrieve.Response == nil || retrieve.Response.StatusCode != tc.status {
+				t.Fatalf("ExchangeAndVerify() did not preserve token endpoint response: %v", err)
+			}
+		})
 	}
 }
 
@@ -254,9 +307,12 @@ func discoveryMetadata(issuer string) map[string]any {
 // normalization the link command uses must be the verifier's own.
 func TestNormalizeIssuerMatchesVerifierForm(t *testing.T) {
 	for input, want := range map[string]string{
-		"https://issuer.example":        "https://issuer.example",
-		"https://issuer.example/":       "https://issuer.example",
-		" https://issuer.example/realm": "https://issuer.example/realm",
+		"https://issuer.example":         "https://issuer.example",
+		"https://issuer.example/":        "https://issuer.example/",
+		"https://issuer.example/realm/":  "https://issuer.example/realm/",
+		"https://issuer.example/realm//": "https://issuer.example/realm//",
+		"https://issuer.example/a%2Fb/":  "https://issuer.example/a%2Fb/",
+		" https://issuer.example/realm":  "https://issuer.example/realm",
 	} {
 		got, err := NormalizeIssuer(input)
 		if err != nil || got != want {

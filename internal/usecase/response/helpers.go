@@ -79,25 +79,6 @@ func validVerificationChallenge(value string) bool {
 	return err == nil && len(decoded) == sha256.Size
 }
 
-func bindFingerprint(action rdom.Action, f responsesaga.TargetFingerprint) error {
-	if err := f.Validate(); err != nil {
-		return err
-	}
-	valid := false
-	switch action.Kind {
-	case rdom.KindIsolateHost:
-		valid = f.Kind == responsesaga.FingerprintHost && f.HostID == action.Target
-	case rdom.KindStopProcess:
-		valid = f.Kind == responsesaga.FingerprintProcess && f.ProcessEntityID == action.Target
-	case rdom.KindQuarantineFile:
-		valid = f.Kind == responsesaga.FingerprintFile && f.FilePath == action.Target.String()
-	}
-	if !valid {
-		return fmt.Errorf("%w: response %s target fingerprint does not bind kind %s to target %s", shared.ErrForbidden, action.ID, action.Kind, action.Target)
-	}
-	return nil
-}
-
 func sameAction(a, b rdom.Action) bool {
 	left, leftErr := json.Marshal(a)
 	right, rightErr := json.Marshal(b)

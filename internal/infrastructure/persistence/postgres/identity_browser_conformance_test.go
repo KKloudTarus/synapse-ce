@@ -55,6 +55,28 @@ func (f browserFactory) ProviderForConnection(_ context.Context, connection port
 	return p, nil
 }
 
+type organizationMismatchBrowserProvider struct{ browserProvider }
+
+func (p organizationMismatchBrowserProvider) ExchangeAndVerifyWithMaxAge(ctx context.Context, code, verifier, nonce string, maxAge time.Duration) (ports.OIDCIdentity, error) {
+	if code == "wrong-organization" {
+		return ports.OIDCIdentity{}, fmt.Errorf("configured Auth0 organization claim did not match")
+	}
+	return p.browserProvider.ExchangeAndVerifyWithMaxAge(ctx, organizationMismatchSubject(code), verifier, nonce, maxAge)
+}
+
+func organizationMismatchSubject(code string) string {
+	if code == "wrong-organization" {
+		return "approved-subject"
+	}
+	return code
+}
+
+type organizationMismatchBrowserFactory struct{ clock browserClock }
+
+func (f organizationMismatchBrowserFactory) ProviderForConnection(_ context.Context, connection ports.IdentityConnection) (ports.OIDCProvider, error) {
+	return organizationMismatchBrowserProvider{browserProvider: browserProvider{clock: f.clock, issuer: connection.Issuer}}, nil
+}
+
 type browserMailer struct{}
 
 func (browserMailer) SendContactVerification(context.Context, string, string, shared.ID) ports.NotificationSendResult {
@@ -96,6 +118,9 @@ func TestIdentityBrowserPostgresConformance(t *testing.T) {
 	}
 	protocol, err := identityenterprise.NewService(f.store, f.store, browserFactory{browserProvider{clock: clock}}, protector, clock, ids)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.SetBootstrapCredentialID(bootstrap.Credential.ID); err != nil {
 		t.Fatal(err)
 	}
 	admission, err := identityenterprise.NewAdmissionService(f.store, browserMailer{}, ids, clock)
@@ -297,6 +322,107 @@ func TestIdentityBrowserPostgresConformance(t *testing.T) {
 	}
 }
 
+func TestIdentityBrowserOrganizationMismatchCallbackDoesNotMutateIdentityState(t *testing.T) {
+	f := newIdentityFixture(t)
+	ctx := context.Background()
+	tenant := shared.ID("browser-organization-mismatch")
+	f.tenants(t, tenant.String())
+	f.declare(t, tenant.String())
+	clock := browserClock{at: time.Now().UTC().Truncate(time.Microsecond)}
+	ids := &browserIDs{}
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	protector := oidc.NewSecretProtector(cipher)
+	connections, err := identityenterprise.NewConnections(f.store, protector, clock, ids, "https://app.example/api/auth/enterprise/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := authz.Principal{ActorID: authz.BootstrapActorID, TenantID: tenant.String(), Credential: authz.Credential{Kind: authz.KindBootstrap, ID: "deployment"}}
+	eligibility, err := connections.BeginBootstrap(ctx, bootstrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := connections.SaveDraft(ctx, bootstrap, eligibility, identityenterprise.ConnectionDraftInput{ID: "workforce", DisplayName: "Workforce", Issuer: "https://issuer.example", ClientID: "client", ClientSecret: "secret", Auth0OrganizationID: "org_CaseSensitive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := connections.AdminProof(ctx, bootstrap, eligibility)
+	if err != nil {
+		t.Fatal(err)
+	}
+	protocol, err := identityenterprise.NewService(f.store, f.store, organizationMismatchBrowserFactory{clock: clock}, protector, clock, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.SetBootstrapCredentialID(bootstrap.Credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	admission, err := identityenterprise.NewAdmissionService(f.store, browserMailer{}, ids, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser, err := identityenterprise.NewBrowser(f.store, protocol, admission, protector, clock, ids, identityenterprise.BrowserConfig{TenantID: tenant, ReadEnabled: func(string) bool { return true }, MutationEnabled: func(string) bool { return true }, SessionTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := func() map[string]int {
+		return map[string]int{
+			"sessions":         f.adminCount(t, `SELECT count(*) FROM identity_sessions WHERE tenant_id=$1`, tenant),
+			"credentials":      f.adminCount(t, `SELECT count(*) FROM identity_credentials WHERE tenant_id=$1`, tenant),
+			"persons":          f.adminCount(t, `SELECT count(*) FROM identity_persons`),
+			"memberships":      f.adminCount(t, `SELECT count(*) FROM identity_memberships WHERE tenant_id=$1`, tenant),
+			"authenticators":   f.adminCount(t, `SELECT count(*) FROM identity_authenticators WHERE tenant_id=$1`, tenant),
+			"connection_tests": f.adminCount(t, `SELECT count(*) FROM identity_connection_tests WHERE tenant_id=$1`, tenant),
+		}
+	}
+	testStart, err := browser.Begin(ctx, identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: draft.ID, Purpose: ports.IdentityAuthorizationTest, CallerNonce: "connection-test", AdminProof: &proof})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = browser.Complete(ctx, identityenterprise.BrowserCallback{TenantID: tenant, State: conformanceState(t, testStart.AuthorizationURL), Code: "tester", CallerNonce: "connection-test"}); err != nil {
+		t.Fatal(err)
+	}
+	active, err := connections.Activate(ctx, bootstrap, eligibility, draft.ID, draft.DraftRevision, draft.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitation, err := admission.CreateInvitation(ctx, tenant, "approved-subject@example.test", user.RoleReadOnly, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitationStart, err := browser.Begin(ctx, identityenterprise.BrowserAuthorization{ConnectionID: active.ID, Purpose: ports.IdentityAuthorizationInvitation, InvitationCode: invitation.Code, CallerNonce: "approved-invitation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := browser.Complete(ctx, identityenterprise.BrowserCallback{TenantID: tenant, State: conformanceState(t, invitationStart.AuthorizationURL), Code: "approved-subject", CallerNonce: "approved-invitation"})
+	if err != nil || accepted.Session.Token == "" {
+		t.Fatalf("approve test subject result=%+v err=%v", accepted, err)
+	}
+	ordinary, err := browser.Begin(ctx, identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: active.ID, Purpose: ports.IdentityAuthorizationLogin, CallerNonce: "approved-login"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = browser.Complete(ctx, identityenterprise.BrowserCallback{TenantID: tenant, State: conformanceState(t, ordinary.AuthorizationURL), Code: "approved-subject", CallerNonce: "approved-login"}); err != nil {
+		t.Fatalf("otherwise-approved subject login failed: %v", err)
+	}
+	before := counts()
+	started, err := browser.Begin(ctx, identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: active.ID, Purpose: ports.IdentityAuthorizationLogin, CallerNonce: "organization-mismatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = browser.Complete(ctx, identityenterprise.BrowserCallback{TenantID: tenant, State: conformanceState(t, started.AuthorizationURL), Code: "wrong-organization", CallerNonce: "organization-mismatch"}); err == nil {
+		t.Fatal("organization mismatch callback was accepted")
+	}
+	after := counts()
+	for name, want := range before {
+		if got := after[name]; got != want {
+			t.Fatalf("organization mismatch changed %s from %d to %d", name, want, got)
+		}
+	}
+}
+
 func TestIdentityBrowserStepUpRefreshesAgedSessionButLinkRequiresRecentAuthentication(t *testing.T) {
 	f := newIdentityFixture(t)
 	ctx := context.Background()
@@ -330,6 +456,9 @@ func TestIdentityBrowserStepUpRefreshesAgedSessionButLinkRequiresRecentAuthentic
 	}
 	protocol, err := identityenterprise.NewService(f.store, f.store, browserFactory{browserProvider{clock: clock}}, protector, clock, ids)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.SetBootstrapCredentialID(bootstrap.Credential.ID); err != nil {
 		t.Fatal(err)
 	}
 	admission, err := identityenterprise.NewAdmissionService(f.store, browserMailer{}, ids, clock)

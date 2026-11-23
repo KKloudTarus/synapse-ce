@@ -1,0 +1,5 @@
+{
+  "text": "🟠 Severity: high\n\nSeverity: high\nReport type: engagement_report\nFindings: 7\nGenerated: 2026-10-23T09:00:00Z\nEngagement: Live acceptance\nTitle: Security assessment report: Live acceptance\nContent hash: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5",
+  "subject": "Report generated",
+  "html_body": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003e🟠 Severity: high\u003c/p\u003e\n\u003cp\u003eSeverity: high\u003cbr\u003e\nReport type: engagement_report\u003cbr\u003e\nFindings: 7\u003cbr\u003e\nGenerated: 2026-10-23T09:00:00Z\u003cbr\u003e\nEngagement: Live acceptance\u003cbr\u003e\nTitle: Security assessment report: Live acceptance\u003cbr\u003e\nContent hash: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+}

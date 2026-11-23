@@ -6,14 +6,21 @@ package syft
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -49,6 +56,123 @@ func New(bin string) *Generator {
 func (g *Generator) WithRunner(r ports.ToolRunner) *Generator { g.runner = r; return g }
 
 var _ ports.SBOMGenerator = (*Generator)(nil)
+var _ ports.SBOMProducerIdentity = (*Generator)(nil)
+
+// SBOMProducerIdentity includes the executable contents and the effective configuration
+// loaded in the same execution boundary as the scan. Unidentifiable inputs disable both
+// cache lookup and storage without changing normal generation.
+func (g *Generator) SBOMProducerIdentity(ctx context.Context, targetRef string) (string, bool, error) {
+	// A sandbox may resolve a bare name against a curated PATH rather than the host PATH.
+	if g.runner != nil && !filepath.IsAbs(g.bin) {
+		return "", false, nil
+	}
+	resolved, err := exec.LookPath(g.bin)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve syft executable: %w", err)
+	}
+	cacheable, err := syftInputCacheable(ctx, targetRef)
+	if err != nil || !cacheable {
+		return "", false, err
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return "", false, fmt.Errorf("open syft executable: %w", err)
+	}
+	h := sha256.New()
+	_, err = io.Copy(h, file)
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		return "", false, fmt.Errorf("read syft executable")
+	}
+	binaryHash := h.Sum(nil)
+
+	runner := g.runner
+	if runner == nil {
+		runner = toolrunner.NewExecRunner(10*time.Second, 1<<20)
+	}
+	result, err := runner.Run(ctx, ports.ToolSpec{
+		Name: g.bin, Args: []string{"config", "--load"}, ReadOnlyPaths: []string{targetRef},
+		Timeout: 10 * time.Second, MaxOutputBytes: 1 << 20,
+	})
+	// Runner errors and stderr can contain configuration secrets; never expose them.
+	if err != nil || result.ExitCode != 0 || result.TimedOut || result.Truncated || len(result.Stdout) == 0 || len(result.Stdout) > 1<<20 || len(result.Stderr) > 1<<20 {
+		return "", false, nil
+	}
+	var config struct {
+		Enrich []string `yaml:"enrich"`
+		Golang struct {
+			SearchLocalModCacheLicenses bool `yaml:"search-local-mod-cache-licenses"`
+			SearchLocalVendorLicenses   bool `yaml:"search-local-vendor-licenses"`
+			SearchRemoteLicenses        bool `yaml:"search-remote-licenses"`
+			UsePackagesLib              bool `yaml:"use-packages-lib"`
+		} `yaml:"golang"`
+		JavaScript struct {
+			SearchRemoteLicenses bool `yaml:"search-remote-licenses"`
+		} `yaml:"javascript"`
+		Python struct {
+			SearchRemoteLicenses bool `yaml:"search-remote-licenses"`
+		} `yaml:"python"`
+	}
+	var document yaml.Node
+	if yaml.Unmarshal(result.Stdout, &document) != nil || document.Kind != yaml.DocumentNode || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return "", false, nil
+	}
+	hasEnrich := false
+	for i := 0; i+1 < len(document.Content[0].Content); i += 2 {
+		if document.Content[0].Content[i].Value == "enrich" {
+			hasEnrich = true
+		}
+	}
+	if !hasEnrich || document.Decode(&config) != nil || len(config.Enrich) != 0 ||
+		config.Golang.SearchLocalModCacheLicenses || config.Golang.SearchLocalVendorLicenses ||
+		config.Golang.SearchRemoteLicenses || config.Golang.UsePackagesLib ||
+		config.JavaScript.SearchRemoteLicenses || config.Python.SearchRemoteLicenses {
+		return "", false, nil
+	}
+	configHash := sha256.Sum256(result.Stdout)
+	return fmt.Sprintf("syft:v2:%x:%x", binaryHash, configHash), true, nil
+}
+
+// Maven resolution can read mutable local or remote POMs not represented by the
+// target digest. Images and archives can contain such inputs without exposing their
+// names to a filesystem walk, so decline caching rather than assume they are absent.
+func syftInputCacheable(ctx context.Context, targetRef string) (bool, error) {
+	if sourceScheme(targetRef) != "dir" {
+		return false, nil
+	}
+	const maxEntries = 300000 // At most the SBOM cache's fingerprint walk budget.
+	entries := 0
+	cacheable := true
+	err := filepath.WalkDir(targetRef, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entries++
+		if entries > maxEntries || entry.Type()&os.ModeSymlink != 0 {
+			cacheable = false
+			return fs.SkipAll
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(entry.Name())
+		ext := strings.ToLower(filepath.Ext(name))
+		switch ext {
+		case ".pom", ".jar", ".war", ".ear", ".jpi", ".hpi", ".zip", ".tar", ".gz", ".tgz":
+			cacheable = false
+			return fs.SkipAll
+		}
+		if name == "pom.xml" {
+			cacheable = false
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return cacheable, err
+}
 
 // Generate runs `syft scan dir:<target> -o cyclonedx-json` and maps the result
 // to the domain SBOM. argv (no shell); the `dir:` source scheme both pins the

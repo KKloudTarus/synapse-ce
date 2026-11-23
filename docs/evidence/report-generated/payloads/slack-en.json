@@ -1,0 +1,79 @@
+{
+  "body": {
+    "blocks": [
+      {
+        "text": {
+          "emoji": false,
+          "text": "🟠 Report generated",
+          "type": "plain_text"
+        },
+        "type": "header"
+      },
+      {
+        "elements": [
+          {
+            "elements": [
+              {
+                "text": "Severity: high",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Report type: engagement_report",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Findings: 7",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Generated: 2026-10-23T09:00:00Z",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Engagement: Live acceptance",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Title: Security assessment report: Live acceptance",
+                "type": "text"
+              },
+              {
+                "text": "\n",
+                "type": "text"
+              },
+              {
+                "text": "Content hash: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5",
+                "type": "text"
+              }
+            ],
+            "type": "rich_text_section"
+          }
+        ],
+        "type": "rich_text"
+      }
+    ],
+    "text": "🟠 Report generated",
+    "unfurl_links": false,
+    "unfurl_media": false
+  }
+}

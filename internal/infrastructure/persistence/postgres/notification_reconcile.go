@@ -36,6 +36,56 @@ func notificationAdmission(ctx context.Context, tx pgx.Tx, tenant shared.ID, kin
 }
 
 func (r *NotificationRepository) reconcileTx(ctx context.Context, tx pgx.Tx, tenant shared.ID) error {
+	// A receipt may commit before a reclaimed worker dead-letters its blocked
+	// attempt. Recover that race even if the callback never ran after a crash.
+	pagerRows, err := tx.Query(ctx, `SELECT d.id FROM jobs j JOIN notification_deliveries d ON d.tenant_id=j.tenant_id AND j.id='notification-'||d.id JOIN notification_pager_operations o ON o.tenant_id=d.tenant_id AND o.delivery_id=d.id WHERE j.tenant_id=$1 AND j.kind='notification.deliver' AND (j.status='failed' OR (j.status='done' AND d.state='cancelled' AND o.state IN ('done','confirming'))) AND d.state IN ('dead_letter','cancelled') AND (o.state='done' OR (o.state='confirming' AND (d.last_error IN ('pager_sending','pager_unknown') OR (j.status='done' AND d.state='cancelled')) AND EXISTS (SELECT 1 FROM notification_channels c WHERE c.tenant_id=d.tenant_id AND c.id=d.channel_id AND c.enabled AND c.deleted_at IS NULL AND c.paused_at IS NULL AND c.secret_version=d.channel_version) AND NOT EXISTS (SELECT 1 FROM notification_events e JOIN notification_engagement_settings s ON s.tenant_id=e.tenant_id AND s.engagement_id=e.engagement_id WHERE e.tenant_id=d.tenant_id AND e.id=d.event_id AND s.external_notifications='none'))) ORDER BY j.updated_at,d.id LIMIT 200 FOR UPDATE OF j SKIP LOCKED`, tenant)
+	if err != nil {
+		return err
+	}
+	var pagerDeliveries []shared.ID
+	for pagerRows.Next() {
+		var id shared.ID
+		if err := pagerRows.Scan(&id); err != nil {
+			pagerRows.Close()
+			return err
+		}
+		pagerDeliveries = append(pagerDeliveries, id)
+	}
+	err = pagerRows.Err()
+	pagerRows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range pagerDeliveries {
+		if _, err := wakeKnownPagerRequestTx(ctx, tx, tenant, id, ""); err != nil {
+			return err
+		}
+	}
+	// Wake at most the earliest parked delivery per idle lane. Unknown writes
+	// remain in the unresolved lane and can never be retried here.
+	waitingRows, err := tx.Query(ctx, `SELECT d.id FROM jobs j JOIN notification_deliveries d ON d.tenant_id=j.tenant_id AND j.id='notification-'||d.id JOIN notification_pager_operations o ON o.tenant_id=d.tenant_id AND o.delivery_id=d.id WHERE j.tenant_id=$1 AND j.kind='notification.deliver' AND j.status='failed' AND d.state='dead_letter' AND d.last_error='pager_waiting' AND o.state='pending' AND NOT EXISTS (SELECT 1 FROM notification_pager_operations busy WHERE busy.tenant_id=o.tenant_id AND busy.subject_kind=o.subject_kind AND busy.subject_id=o.subject_id AND busy.episode=o.episode AND busy.channel_id=o.channel_id AND busy.state IN ('sending','confirming','unknown')) AND NOT EXISTS (SELECT 1 FROM notification_pager_operations earlier JOIN notification_deliveries ed ON ed.tenant_id=earlier.tenant_id AND ed.id=earlier.delivery_id WHERE earlier.tenant_id=o.tenant_id AND earlier.subject_kind=o.subject_kind AND earlier.subject_id=o.subject_id AND earlier.episode=o.episode AND earlier.channel_id=o.channel_id AND earlier.state='pending' AND ed.state<>'cancelled' AND (ed.created_at,ed.id)<(d.created_at,d.id)) ORDER BY j.updated_at,d.id LIMIT 200 FOR UPDATE OF j SKIP LOCKED`, tenant)
+	if err != nil {
+		return err
+	}
+	var waiting []shared.ID
+	for waitingRows.Next() {
+		var id shared.ID
+		if err := waitingRows.Scan(&id); err != nil {
+			waitingRows.Close()
+			return err
+		}
+		waiting = append(waiting, id)
+	}
+	err = waitingRows.Err()
+	waitingRows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range waiting {
+		if err := wakePagerLaneHeadTx(ctx, tx, tenant, id); err != nil {
+			return err
+		}
+	}
 	// Repair the crash window between queue.Deadletter and OnDeadLetter. Lock the
 	// failed job before its delivery, matching redrive and the callback. A query
 	// that only joins job state could observe a pre-redrive snapshot and incorrectly

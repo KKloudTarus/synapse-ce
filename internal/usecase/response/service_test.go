@@ -600,7 +600,7 @@ func act(id string) rdom.Action {
 // target matches the action's Target ("host-1") — Apply binds the admitted scope target to the executed
 // action target, so they must be the same asset.
 func target() engagement.Target {
-	return engagement.Target{Kind: engagement.TargetIP, Value: "host-1"}
+	return engagement.Target{Kind: engagement.TargetDomain, Value: "host-1"}
 }
 
 func fingerprint() responsesaga.TargetFingerprint {

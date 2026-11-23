@@ -47,7 +47,7 @@ func (d pagerDutyDriver) Send(ctx context.Context, w ports.NotificationWork, con
 	if !ok {
 		return ports.NotificationSendResult{ErrorCode: "pager_key_unavailable", TemplateFallback: fallback}
 	}
-	if w.SubjectResolved && strings.TrimSpace(w.SubjectAnchor) == "" {
+	if w.SubjectResolved && (strings.TrimSpace(w.SubjectAnchor) == "" || (w.Event.PagerLifecycle.Episode > 0 && w.SubjectAnchor != dedup)) {
 		// A close without an acknowledged trigger could close an unrelated alert if the provider
 		// happens to have the same alias. The worker persists pager aliases as RemoteRef only after
 		// a successful attempt, so a nonempty anchor proves the matching trigger was accepted.
@@ -100,7 +100,7 @@ func (d jsmDriver) Send(ctx context.Context, w ports.NotificationWork, config po
 	if !ok {
 		return ports.NotificationSendResult{ErrorCode: "format_failed", TemplateFallback: fallback}
 	}
-	if w.SubjectResolved && strings.TrimSpace(w.SubjectAnchor) == "" {
+	if w.SubjectResolved && (strings.TrimSpace(w.SubjectAnchor) == "" || (w.Event.PagerLifecycle.Episode > 0 && w.SubjectAnchor != alias)) {
 		return ports.NotificationSendResult{ErrorCode: "pager_resolve_unpaired", TemplateFallback: fallback}
 	}
 	target := jsmAlertsURL
@@ -166,6 +166,7 @@ func jsmLifecycleEvent(event notification.EventType) bool {
 	case notification.EventEngagementCreated, notification.EventEngagementStatusChanged,
 		notification.EventEngagementWindowStarting, notification.EventEngagementWindowEnding,
 		notification.EventFindingCommented, notification.EventFindingMentioned,
+		notification.EventFindingStatusChanged, notification.EventFindingRetestCompleted,
 		notification.EventApprovalRequested, notification.EventApprovalDecided, notification.EventApprovalTimedOut,
 		notification.EventIncidentUpdated, notification.EventResponseFinished, notification.EventEvidenceChainBroken:
 		return true
@@ -326,5 +327,9 @@ func (s *Sender) pagerDedupKey(w ports.NotificationWork) (string, bool) {
 	_, _ = mac.Write([]byte(subjectKind))
 	_, _ = mac.Write([]byte{0})
 	_, _ = mac.Write([]byte(subjectID))
+	if w.Event.PagerLifecycle.Episode > 0 {
+		_, _ = mac.Write([]byte("\x00episode-v1\x00"))
+		_, _ = mac.Write([]byte(strconv.FormatInt(w.Event.PagerLifecycle.Episode, 10)))
+	}
 	return hex.EncodeToString(mac.Sum(nil)), true
 }

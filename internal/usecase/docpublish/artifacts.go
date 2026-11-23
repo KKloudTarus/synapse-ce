@@ -133,16 +133,24 @@ func (b *ArtifactBuilder) BuildSourceArtifact(ctx context.Context, tenant shared
 	if err := source.Validate(); err != nil {
 		return ports.DocumentArtifact{}, err
 	}
+	var (
+		artifact ports.DocumentArtifact
+		err      error
+	)
 	switch source.SourceKind {
 	case document.EngagementReport:
-		return b.buildEngagement(ctx, tenant, source)
+		artifact, err = b.buildEngagement(ctx, tenant, source)
 	case document.AssessmentClosureReport:
-		return b.buildClosure(ctx, tenant, source)
+		artifact, err = b.buildClosure(ctx, tenant, source)
 	case document.ProjectQualitySummary:
-		return b.buildQuality(ctx, tenant, source)
+		artifact, err = b.buildQuality(ctx, tenant, source)
 	default:
 		return ports.DocumentArtifact{}, fmt.Errorf("%w: unsupported document source", shared.ErrValidation)
 	}
+	if err != nil {
+		return ports.DocumentArtifact{}, err
+	}
+	return artifact, nil
 }
 
 func (b *ArtifactBuilder) buildEngagement(ctx context.Context, tenant shared.ID, source document.Source) (ports.DocumentArtifact, error) {
@@ -384,6 +392,7 @@ func (b *ArtifactBuilder) buildClosureByProjectScope(ctx context.Context, tenant
 		EvidenceHead:   finalHead,
 		SourceRevision: "closure:" + manifest.ID.String() + ":" + strings.TrimSpace(stored.ContentHash),
 		GeneratedAt:    stored.GeneratedAt.UTC(),
+		CycleID:        cycleID,
 	}
 	pdf, err := b.projector.RenderDocumentArtifact(ctx, projection)
 	if err != nil {
@@ -482,6 +491,7 @@ func (b *ArtifactBuilder) buildQuality(ctx context.Context, tenant shared.ID, so
 		SourceRevision: summary.SourceRevision,
 		GeneratedAt:    summary.GeneratedAt.UTC(),
 		Images:         cloneImages(summary.Images),
+		ProjectKey:     summary.ProjectKey,
 	}
 	pdf, err := b.projector.RenderDocumentArtifact(ctx, projection)
 	if err != nil {

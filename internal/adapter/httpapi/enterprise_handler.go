@@ -8,7 +8,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -63,16 +66,18 @@ func (rt *Router) enterpriseDiscover(w http.ResponseWriter, r *http.Request, tok
 }
 
 type enterpriseDeps struct {
-	browser     *identityenterprise.Browser
-	connections *identityenterprise.Connections
-	recovery    *identityrecovery.Service
-	admission   *identityenterprise.AdmissionService
-	store       identityenterprise.BrowserStore
-	protector   ports.IdentitySecretProtector
-	clock       ports.Clock
-	tenant      shared.ID
-	frontend    string
-	limit       *enterpriseAdmissionLimit
+	browser      *identityenterprise.Browser
+	connections  *identityenterprise.Connections
+	recovery     *identityrecovery.Service
+	admission    *identityenterprise.AdmissionService
+	store        identityenterprise.BrowserStore
+	protector    ports.IdentitySecretProtector
+	clock        ports.Clock
+	tenant       shared.ID
+	frontend     string
+	limit        *enterpriseAdmissionLimit
+	provisioning *identityenterprise.Provisioning
+	protocol     *identityenterprise.Service
 }
 
 func (rt *Router) SetEnterprise(browser *identityenterprise.Browser, connections *identityenterprise.Connections, recovery *identityrecovery.Service, admission *identityenterprise.AdmissionService, store identityenterprise.BrowserStore, protector ports.IdentitySecretProtector, clock ports.Clock, tenant shared.ID, frontend string) error {
@@ -156,7 +161,20 @@ func enterpriseDecode(w http.ResponseWriter, r *http.Request, v any) bool {
 func (rt *Router) enterpriseContext(w http.ResponseWriter, r *http.Request) {
 	enterprisePrivate(w)
 	e := rt.enterprise
-	if err := e.browser.CheckAuthority(r.Context(), e.tenant, false); err != nil {
+	tenant, selected, err := enterpriseQueryTenant(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid organization selector"})
+		return
+	}
+	if !selected {
+		tenant = e.tenant
+	}
+	if selected {
+		if err = rt.enterprisePublicLoginTenant(r.Context(), tenant); err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+	} else if err = e.browser.CheckAuthority(r.Context(), tenant, false); err != nil {
 		state, stateErr := e.store.CutoverState(r.Context(), e.tenant)
 		if stateErr != nil || state.Declared {
 			writeAuthenticationError(w, authz.ErrAuthenticationUnavailable)
@@ -165,12 +183,12 @@ func (rt *Router) enterpriseContext(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
 		return
 	}
-	policy, err := e.store.GetIdentityRecoveryPolicy(r.Context(), e.tenant)
+	policy, err := e.store.GetIdentityRecoveryPolicy(r.Context(), tenant)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	connections, err := e.store.ListIdentityConnections(r.Context(), e.tenant, true)
+	connections, err := e.store.ListIdentityConnections(r.Context(), tenant, true)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
@@ -179,7 +197,58 @@ func (rt *Router) enterpriseContext(w http.ResponseWriter, r *http.Request) {
 	for _, c := range connections {
 		choices = append(choices, map[string]string{"id": c.ID.String(), "name": c.DisplayName})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "tenant_id": e.tenant, "requirement": policy.Organization.Requirement, "connections": choices, "bootstrap_eligible": false})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "tenant_id": tenant, "requirement": policy.Organization.Requirement, "connections": choices, "bootstrap_eligible": false})
+}
+
+// enterpriseTenantID accepts only the exact tenant identifier supplied by the caller. The
+// selected identifier is never read from a callback URL; callbacks use the sealed nonce tenant.
+func enterpriseTenantID(value string) (shared.ID, error) {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > 128 {
+		return "", shared.ErrValidation
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return "", shared.ErrValidation
+		}
+	}
+	return shared.ID(value), nil
+}
+
+func enterpriseQueryTenant(r *http.Request) (shared.ID, bool, error) {
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return "", false, shared.ErrValidation
+	}
+	values, present := query["tenant_id"]
+	if !present {
+		return "", false, nil
+	}
+	if len(values) != 1 {
+		return "", true, shared.ErrValidation
+	}
+	tenant, err := enterpriseTenantID(values[0])
+	return tenant, true, err
+}
+
+func enterpriseBodyTenant(raw json.RawMessage) (shared.ID, bool, error) {
+	if len(raw) == 0 {
+		return "", false, nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", true, shared.ErrValidation
+	}
+	tenant, err := enterpriseTenantID(value)
+	return tenant, true, err
+}
+
+// An explicit public login needs both read and mutation authority. This prevents a selector
+// from creating a session for a tenant that the current process cannot subsequently serve.
+func (rt *Router) enterprisePublicLoginTenant(ctx context.Context, tenant shared.ID) error {
+	if err := rt.enterprise.browser.CheckAuthority(ctx, tenant, false); err != nil {
+		return err
+	}
+	return rt.enterprise.browser.CheckAuthority(ctx, tenant, true)
 }
 
 type enterpriseNonce struct {
@@ -197,6 +266,7 @@ func (rt *Router) enterpriseBegin(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Router) enterpriseBeginAllowed(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		TenantID             json.RawMessage                    `json:"tenant_id"`
 		ConnectionID         shared.ID                          `json:"connection_id"`
 		Purpose              ports.IdentityAuthorizationPurpose `json:"purpose"`
 		BootstrapEligibility string                             `json:"bootstrap_eligibility"`
@@ -206,12 +276,27 @@ func (rt *Router) enterpriseBeginAllowed(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	e := rt.enterprise
+	tenant, selected, err := enterpriseBodyTenant(body.TenantID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid organization selector"})
+		return
+	}
+	if selected && body.Purpose != ports.IdentityAuthorizationLogin {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "organization selector is only valid for login"})
+		return
+	}
+	if !selected {
+		tenant = e.tenant
+	} else if err = rt.enterprisePublicLoginTenant(r.Context(), tenant); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
 	nonce, err := secureHTTPNonce()
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	in := identityenterprise.BrowserAuthorization{TenantID: e.tenant, ConnectionID: body.ConnectionID, Purpose: body.Purpose, CallerNonce: nonce, CSRFToken: r.Header.Get("X-CSRF-Token"), InvitationCode: body.InvitationCode}
+	in := identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: body.ConnectionID, Purpose: body.Purpose, ExplicitTenant: selected, CallerNonce: nonce, CSRFToken: r.Header.Get("X-CSRF-Token"), InvitationCode: body.InvitationCode}
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
 		in.SourceToken = cookie.Value
 	}
@@ -248,7 +333,12 @@ func (rt *Router) enterpriseBeginAllowed(w http.ResponseWriter, r *http.Request)
 		writeError(w, rt.log, err)
 		return
 	}
-	plain, err := json.Marshal(enterpriseNonce{Tenant: in.TenantID, CallerNonce: nonce, ExpiresAt: result.ExpiresAt})
+	rt.enterpriseAuthorizationResponse(w, r, in.TenantID, nonce, result)
+}
+
+func (rt *Router) enterpriseAuthorizationResponse(w http.ResponseWriter, r *http.Request, tenant shared.ID, nonce string, result identityenterprise.BeginResult) {
+	e := rt.enterprise
+	plain, err := json.Marshal(enterpriseNonce{Tenant: tenant, CallerNonce: nonce, ExpiresAt: result.ExpiresAt})
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
@@ -366,7 +456,12 @@ func (rt *Router) enterpriseCallback(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, authz.ErrAuthenticationUnavailable) {
 			reason = "unavailable"
 		}
-		destination, ok := frontendURLWithAuthError(e.frontend, reason)
+		var initial *identityenterprise.ProvisioningCallbackError
+		if errors.As(err, &initial) {
+			http.Redirect(w, r, rt.provisioningReturnURL(initial.TenantID, reason), http.StatusSeeOther)
+			return
+		}
+		destination, ok := enterpriseFrontendURL(e.frontend, nonce.Tenant, reason)
 		if !ok {
 			writeError(w, rt.log, err)
 			return
@@ -386,14 +481,39 @@ func (rt *Router) enterpriseCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: enterpriseInvitationCookie, Value: sealed, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 600})
-		destination, _ := frontendURLWithAuthError(e.frontend, "mailbox_verification_required")
+		destination, _ := enterpriseFrontendURL(e.frontend, nonce.Tenant, "mailbox_verification_required")
 		http.Redirect(w, r, destination, http.StatusSeeOther)
 		return
 	}
 	if !result.TestOnly {
 		setSessionCookie(w, result.Session.Token)
 	}
-	http.Redirect(w, r, e.frontend, http.StatusSeeOther)
+	if result.TestOnly && !result.ProvisioningTenantID.IsZero() {
+		http.Redirect(w, r, rt.provisioningReturnURL(result.ProvisioningTenantID, ""), http.StatusSeeOther)
+		return
+	}
+	destination, ok := enterpriseFrontendURL(e.frontend, nonce.Tenant, "")
+	if !ok {
+		writeError(w, rt.log, shared.ErrValidation)
+		return
+	}
+	http.Redirect(w, r, destination, http.StatusSeeOther)
+}
+
+// enterpriseFrontendURL adds only server-owned, non-secret callback context to the configured
+// frontend destination. Callback request query parameters never influence the destination.
+func enterpriseFrontendURL(frontend string, tenant shared.ID, reason string) (string, bool) {
+	destination, err := url.Parse(frontend)
+	if err != nil || frontend == "" || tenant.IsZero() {
+		return "", false
+	}
+	query := destination.Query()
+	query.Set("tenant_id", tenant.String())
+	if reason != "" {
+		query.Set("auth_error", reason)
+	}
+	destination.RawQuery = query.Encode()
+	return destination.String(), true
 }
 
 func (rt *Router) enterpriseRecovery(w http.ResponseWriter, r *http.Request) {

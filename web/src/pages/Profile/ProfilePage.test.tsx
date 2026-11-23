@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../../lib/api'
 import { ProfilePage } from './ProfilePage'
 
+const { useOptionalAuth } = vi.hoisted(() => ({ useOptionalAuth: vi.fn() }))
+vi.mock('../../auth/AuthContext', () => ({ useOptionalAuth }))
+vi.mock('./EnterpriseIdentities', () => ({ EnterpriseIdentities: () => <section aria-label="Enterprise identities" /> }))
+
 vi.mock('../../lib/api', () => ({
   api: { listMyContacts: vi.fn(), addMyEmail: vi.fn(), deleteMyContact: vi.fn(), requestMyContactVerification: vi.fn(), verifyMyContact: vi.fn() },
   ApiError: class ApiError extends Error { constructor(public status: number, message: string) { super(message) } },
@@ -25,6 +29,14 @@ describe('ProfilePage', () => {
     fireEvent.click(screen.getByRole('button',{name:'Verify'}))
     await waitFor(() => expect(api.verifyMyContact).toHaveBeenCalledWith('contact-1','01234567'))
     expect(await screen.findByText('Verified')).toBeInTheDocument()
+  })
+
+  it('keeps enterprise identities available when personal contacts are disabled', async () => {
+    useOptionalAuth.mockReturnValue({ currentUser: { features: { enterpriseIdentity: true } } })
+    vi.mocked(api.listMyContacts).mockRejectedValue(new ApiError(404, 'not found'))
+    render(<ProfilePage />)
+    expect(await screen.findByText('Personal contacts are unavailable on this deployment.')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Enterprise identities' })).toBeInTheDocument()
   })
 
   it('distinguishes an unavailable deployment from an empty contact list', async () => {

@@ -135,6 +135,28 @@ func TestCreateLinearTreatsGraphQLErrorsAsFailure(t *testing.T) {
 	}
 }
 
+func TestAzureIdentityUsesPreviewConnectionDataVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/org/_apis/connectionData" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Query().Get("api-version") != "7.1-preview.1" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"typeKey":"VssInvalidPreviewVersionException"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"authenticatedUser":{"id":"sandbox-user"}}`))
+	}))
+	defer server.Close()
+	base, _ := url.Parse(server.URL)
+	a := &Adapter{provider: AzureProvider, base: base, client: server.Client(), token: []byte("synthetic-token"), project: "org/project/Task"}
+	got, err := a.TicketIdentity(context.Background())
+	if err != nil || got != "sandbox-user" {
+		t.Fatalf("identity = %q, error = %v", got, err)
+	}
+}
+
 func TestServiceNowIdentityRequiresExactlyOneCurrentUserID(t *testing.T) {
 	const userID = "0123456789abcdef0123456789abcdef"
 	for _, tc := range []struct {

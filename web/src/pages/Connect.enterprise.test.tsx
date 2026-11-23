@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Connect } from './Connect'
 
 const retry = vi.fn(async () => {})
@@ -28,10 +28,13 @@ describe('Connect enterprise sign-in', () => {
   const fetchSpy = vi.fn<typeof fetch>()
 
   beforeEach(() => {
+    window.history.replaceState(null, '', '/')
     retry.mockClear()
     fetchSpy.mockReset()
     vi.stubGlobal('fetch', fetchSpy)
   })
+
+  afterEach(() => vi.unstubAllGlobals())
 
   it('shows the one server-approved connection without legacy sign-in choices', async () => {
     fetchSpy.mockResolvedValueOnce(json({ enabled: true, tenant_id: 'tenant-a', requirement: 'required', connections: [{ id: 'connection-a', name: 'Example identity' }], bootstrap_eligible: false }))
@@ -90,4 +93,44 @@ describe('Connect enterprise sign-in', () => {
     expect(retry).not.toHaveBeenCalled()
     await waitFor(() => expect(fetchSpy).toHaveBeenLastCalledWith('/api/auth/enterprise/recovery', expect.objectContaining({ method: 'POST', body: JSON.stringify({ secret: 'secret code' }) })))
   })
+
+  it('loads the explicit organization and submits that context to Login', async () => {
+    window.history.replaceState(null, '', '/?tenant_id=tenant-b')
+    fetchSpy
+      .mockResolvedValueOnce(json({ enabled: true, tenant_id: 'tenant-b', requirement: 'optional', connections: [{ id: 'connection-b', name: 'Secondary identity' }] }))
+      .mockResolvedValueOnce(json({ authorization_url: 'https://id.example/authorize' }))
+    render(<Connect />)
+    const button = await screen.findByRole('button', { name: 'Continue with Secondary identity' })
+    expect(fetchSpy).toHaveBeenCalledWith('/api/auth/enterprise/context?tenant_id=tenant-b', expect.anything())
+    expect(screen.getByText('tenant-b')).toBeInTheDocument()
+    const assign = vi.fn()
+    vi.stubGlobal('location', { assign, href: window.location.href, search: window.location.search })
+    fireEvent.click(button)
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('https://id.example/authorize'))
+    expect(fetchSpy).toHaveBeenLastCalledWith('/api/auth/enterprise/begin', expect.objectContaining({
+      body: JSON.stringify({ connection_id: 'connection-b', purpose: 'login', tenant_id: 'tenant-b' }),
+    }))
+  })
+
+  it.each([
+    ['missing endpoint', 404, null],
+    ['disabled tenant', 200, { enabled: false }],
+    ['wrong returned tenant', 200, { enabled: true, tenant_id: 'tenant-a', requirement: 'optional', connections: [] }],
+  ])('fails closed for an explicit organization: %s', async (_name, status, body) => {
+    window.history.replaceState(null, '', '/?tenant_id=tenant-b')
+    fetchSpy.mockResolvedValueOnce(json(body, status))
+    render(<Connect />)
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByLabelText('API token')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Sign in with your organization' })).not.toBeInTheDocument()
+  })
+
+  it('rejects duplicate organization selectors even when a response names one', async () => {
+    window.history.replaceState(null, '', '/?tenant_id=tenant-b&tenant_id=tenant-a')
+    fetchSpy.mockResolvedValueOnce(json({ enabled: true, tenant_id: 'tenant-b', requirement: 'optional', connections: [] }))
+    render(<Connect />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('selected organization could not be loaded')
+    expect(fetchSpy).toHaveBeenCalledWith('/api/auth/enterprise/context?tenant_id=tenant-b&tenant_id=tenant-a', expect.anything())
+  })
+
 })

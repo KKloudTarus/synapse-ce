@@ -50,6 +50,7 @@ var v1DataFields = map[EventType]string{
 	"incident.updated":                 "title summary incident_id engagement_id update_kind",
 	"response.finished":                "title summary response_id engagement_id outcome action_kind",
 	"evidence.chain_broken":            "title summary engagement_id evidence_chain_id reason_code",
+	"report.generated":                 "title summary report_id report_kind content_hash generated_at",
 }
 
 func equalFieldSet(a, b []string) bool {
@@ -282,6 +283,7 @@ func TestPublishedV1FieldConstraints(t *testing.T) {
 		"incident.updated":                 "engagement_id severity",
 		"response.finished":                "engagement_id",
 		"evidence.chain_broken":            "engagement_id severity",
+		"report.generated":                 "engagement_id severity",
 	}
 	closedEnums := map[EventType]map[string]string{
 		"vulnerability_action.created":     {"action_type": strings.Join(ActionTypes(), " ")},
@@ -321,6 +323,7 @@ func TestPublishedV1FieldConstraints(t *testing.T) {
 		"incident.updated":                 "incident_id engagement_id",
 		"response.finished":                "response_id engagement_id",
 		"evidence.chain_broken":            "engagement_id evidence_chain_id reason_code",
+		"report.generated":                 "report_id report_kind content_hash",
 	}
 	for _, spec := range EventCatalog() {
 		fields, ok := optionalEnvelope[spec.Type]

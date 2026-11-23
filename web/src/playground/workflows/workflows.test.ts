@@ -8,7 +8,7 @@ import { AI_CASES, DETECTIONS, LANGUAGES, QUALITY_ISSUES } from './catalog'
 import { WORKFLOW_STEPS } from './steps'
 
 const server = setupServer(...workflowHandlers, http.get('/api/v1/projects', () => HttpResponse.json([{ key: 'overview-project' }])))
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterAll(() => server.close())
 beforeEach(() => updateWorkflows(s => Object.assign(s, emptyWorkflows())))
 async function call(path: string, method = 'GET', body?: unknown) {

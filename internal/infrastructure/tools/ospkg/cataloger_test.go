@@ -332,6 +332,41 @@ func TestCatalogWolfi(t *testing.T) {
 	}
 }
 
+func TestCatalogAPKRelocatedDatabase(t *testing.T) {
+	for _, id := range []string{"wolfi", "chainguard", "alpine"} {
+		t.Run(id, func(t *testing.T) {
+			root := writeRootfs(t, map[string]string{
+				"etc/os-release":           "ID=" + id + "\nVERSION_ID=3.24\n",
+				"usr/lib/apk/db/installed": "P:libssl3\nV:3.3.1-r0\nA:aarch64\no:openssl\n",
+			})
+			res, err := New().Catalog(context.Background(), root)
+			if err != nil || len(res.Components) != 1 || !res.DistroResolved || res.InventoryWarning != "" {
+				t.Fatalf("relocated APK inventory: %+v err=%v", res, err)
+			}
+			tag := id
+			if id == "alpine" {
+				tag += "-3.24"
+			}
+			want := "pkg:apk/" + id + "/libssl3@3.3.1-r0?arch=aarch64&distro=" + tag + "&upstream=openssl"
+			if res.Components[0].PURL != want || res.Components[0].Location != filepath.Join(root, "usr/lib/apk/db/installed") {
+				t.Fatalf("identity/location lost: %+v", res.Components[0])
+			}
+		})
+	}
+}
+
+func TestCatalogAPKDatabaseLocationsDoNotDuplicatePackages(t *testing.T) {
+	root := writeRootfs(t, map[string]string{
+		"etc/os-release":           "ID=wolfi\n",
+		"lib/apk/db/installed":     "P:glibc\nV:2.39-r0\nA:x86_64\n",
+		"usr/lib/apk/db/installed": "P:glibc\nV:2.39-r0\nA:x86_64\n",
+	})
+	res, err := New().Catalog(context.Background(), root)
+	if err != nil || len(res.Components) != 1 || res.Components[0].Location != filepath.Join(root, "lib/apk/db/installed") {
+		t.Fatalf("APK databases must not double count: %+v err=%v", res, err)
+	}
+}
+
 // upstreamQualifier extracts the raw (still percent-encoded) value of the deb PURL "upstream=" qualifier.
 func upstreamQualifier(purl string) string {
 	i := strings.IndexByte(purl, '?')

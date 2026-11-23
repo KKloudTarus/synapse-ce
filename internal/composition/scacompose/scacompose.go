@@ -595,6 +595,20 @@ type TaintProposer interface {
 // degrades to a clean no-op when the sidecar is not installed, so it is safe to attach by default. A nil
 // proposer (judgments disabled) attaches nothing. A coordinator init error is returned so a misconfigured
 // analyzer is a loud startup failure at the composition root, never a silently degraded scan.
+// RecordSemanticSelection records the operator's semantic-engine selection on svc, before any adapter is
+// built. The selection is the configured flags; whether this process then manages to build each adapter is
+// a separate fact. Recording them separately is what lets a selected engine that could not be constructed,
+// or whose prerequisites are missing, report as unavailable instead of as an engine nobody asked for.
+func RecordSemanticSelection(svc *scauc.Service, cfg config.Config) {
+	svc.SetTaintSelection(scauc.TaintSelection{
+		Supported:  true,
+		Go:         cfg.TaintEnabled,
+		Python:     cfg.PythonTaintEnabled,
+		JavaScript: cfg.JsTaintEnabled,
+		Java:       cfg.JavaTaintEnabled,
+	})
+}
+
 func ConfigureJudgmentScanners(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, proposer TaintProposer, audit ports.AuditLogger, clock ports.Clock, log *slog.Logger) error {
 	if err := configureJVMTier2(svc, cfg, proposer, audit, clock, log); err != nil {
 		return err

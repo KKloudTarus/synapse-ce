@@ -3,10 +3,12 @@ package response
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -25,13 +27,13 @@ func (s *verifierEvidenceSealer) SealOnce(_ context.Context, engagementID shared
 
 func telemetryVerificationRequest(t *testing.T) VerificationRequest {
 	t.Helper()
-	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return VerificationRequest{
 		TenantID: "tenant-1", EngagementID: "eng-1", Action: action,
-		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		ExecutorID: "agent:response-executor", ExecutorAgentID: "response-executor", AttemptKey: "attempt-1",
 		VerificationChallenge: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		AttemptedAt:           time.Unix(1_000, 0).UTC(),
@@ -182,5 +184,48 @@ func TestVerificationSourceRejectsLateObservationOrReceipt(t *testing.T) {
 	source.RecordedAt = req.DeadlineAt
 	if err := source.validateBinding(req); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("receipt at deadline error=%v, want validation", err)
+	}
+}
+
+func TestReversalVerificationRequiresExactReplacement(t *testing.T) {
+	req := telemetryVerificationRequest(t)
+	req.Reversal = true
+	req.OriginalAttemptKey = "original-attempt"
+	req.OriginalAttemptedAt = req.AttemptedAt.Add(-time.Second)
+	req.ReplacementProcessEntityID = "pe_22222222222222222222222222222222"
+	source, _, err := newE2EVerificationSource(req, VerificationSucceeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := deriveTelemetryVerification(req, source.Receipt)
+	if err != nil || outcome != VerificationSucceeded {
+		t.Fatalf("valid outcome=%s err=%v", outcome, err)
+	}
+	source.Receipt.Timeline[0].EntityID = "pe_33333333333333333333333333333333"
+	source.Receipt.Digest = fleetagent.ResponseTargetEvidenceReceiptDigest(source.Receipt)
+	outcome, err = deriveTelemetryVerification(req, source.Receipt)
+	if err != nil || outcome != VerificationUnknown {
+		t.Fatalf("unrelated replacement outcome=%s err=%v", outcome, err)
+	}
+}
+
+type pendingEvidenceDispatcher struct{}
+
+func (pendingEvidenceDispatcher) EnsureObservation(context.Context, ports.ResponseVerificationRequest) error {
+	return fmt.Errorf("late projection: %w", ports.ErrResponseTargetEvidencePending)
+}
+func TestTelemetryEffectVerifierTreatsLateEvidenceAsOrdinaryPending(t *testing.T) {
+	ctx := shared.WithTenant(context.Background(), "tenant-1")
+	verifier, err := NewTelemetryEffectVerifier("control-plane:response-verifier", memory.NewResponseVerificationStore(), memory.NewResponseVerificationStore(), memory.NewEndpointTimelineStore(), memory.NewCoverageWindowStore(), &verifierEvidenceSealer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier.SetObservationDispatcher(pendingEvidenceDispatcher{})
+	_, err = verifier.Verify(ctx, telemetryVerificationRequest(t))
+	if !errors.Is(err, ErrVerificationPending) {
+		t.Fatalf("late evidence error=%v", err)
+	}
+	if !onlyVerificationPending(verificationPendingError("action-1", "waiting", err)) {
+		t.Fatal("late evidence reported as an operational failure")
 	}
 }

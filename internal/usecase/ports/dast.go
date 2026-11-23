@@ -63,6 +63,10 @@ type DASTObservation struct {
 	BodyTruncated bool     `json:"body_truncated"`
 	BodyExcerpt   string   `json:"body_excerpt,omitempty"`
 	Headers       []string `json:"headers,omitempty"`
+	// HeadersCaptured separates "the response carried no header we record" from "this observation
+	// captured no headers at all". Without it a header check cannot tell an observed missing header
+	// from unavailable evidence, and silently reads the second as a secure response (#1638).
+	HeadersCaptured bool `json:"headers_captured,omitempty"`
 }
 
 // DASTOutcome is emitted by the helper. Incomplete denotes a bounded authentication
@@ -98,6 +102,7 @@ type DASTClosedObservation struct {
 	Status          int      `json:"status"`
 	BodySHA256      string   `json:"body_sha256"`
 	Headers         []string `json:"headers,omitempty"`
+	HeadersCaptured bool     `json:"headers_captured,omitempty"`
 	Signature       string   `json:"signature,omitempty"`
 	PredicateTokens []string `json:"predicate_tokens,omitempty"`
 }

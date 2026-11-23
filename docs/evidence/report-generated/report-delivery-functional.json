@@ -1,0 +1,161 @@
+{
+  "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+  "manifest_id": "8dbcf7e72c2c6ae6dacbc524071b9a94",
+  "job_id": "37e26d6ac97f49deef29f424408e2956",
+  "coverage_guard_refused": true,
+  "coverage_override": "explicit synthetic-only; no exhaustive coverage claim",
+  "report_get_before_worker_terminal": false,
+  "job": {
+    "status": "done",
+    "attempts": 1
+  },
+  "source": {
+    "source_id": "assessment_closure_report:d9b81856eae7e817280219a1ae2f469d1c821ffd3dbd43a00df0fee5cf05edcb",
+    "processed": false,
+    "data": {
+      "title": "Report generated",
+      "summary": "A report artifact was sealed from stored data.",
+      "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+      "report_id": "d9b81856eae7e817280219a1ae2f469d1c821ffd3dbd43a00df0fee5cf05edcb",
+      "report_kind": "assessment_closure_report",
+      "content_hash": "d9b81856eae7e817280219a1ae2f469d1c821ffd3dbd43a00df0fee5cf05edcb",
+      "generated_at": "2026-10-24T13:10:59Z",
+      "report_title": "Assessment closure report"
+    }
+  },
+  "deliveries": [
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "153a5601b79bf22b10876cfff9bbdddb",
+      "type": "discord",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "174115f753d17d36acf7efa6fa75db5b",
+      "type": "slack",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "243f90650d909635e129ee91c55a7fa3",
+      "type": "slack",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "2d28d74dfc6fa081b4e406343bd75aad",
+      "type": "discord",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "89496b8316b55f8f21692a071a479f82",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "9987831e3b4e862bbf683e6c70bc05ab",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "b89630e5a9f85e2611eda0ef55e75502",
+      "type": "discord",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "c65f7a5877dc553acfd750cddddac90c",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "cd9001bccd5a6a4fe751e5b76a292d37",
+      "type": "slack",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "e1fed3f19f3dafb7cc33b67bdd45f82f",
+      "type": "discord",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "ee06ed30366f60cb2d5ed8378631af53",
+      "type": "slack",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "event_id": "0689734b0e4827ed3730a390943e1a85",
+      "channel_id": "f7562be8cdb6cc58c583a0ef3df3d287",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    }
+  ],
+  "canonical_json_sha256": "846d7f9a0ebc0e3a63cc2759a8e615fd005e2b72810070658afd9950c10818f4",
+  "idempotent_commit_replay": true,
+  "cached_report_stable": true,
+  "counts_after_runtime_restart": {
+    "sources": 1,
+    "events": 1,
+    "deliveries": 12,
+    "delivered": 12
+  },
+  "report_stable_after_runtime_restart": true,
+  "baseline_non_native_source_count": 1,
+  "counts_after_replay_all_sources": {
+    "sources": 2,
+    "events": 2,
+    "deliveries": 12
+  },
+  "counts_after_replay": {
+    "sources": 1,
+    "events": 1,
+    "deliveries": 12,
+    "delivered": 12
+  },
+  "browser_receipts": {
+    "slack": {
+      "en_vi": true,
+      "signal_detail": true,
+      "screenshot": "report-slack-receipt.png"
+    },
+    "discord": {
+      "en_vi": true,
+      "signal_detail": true,
+      "screenshot": "report-discord-receipt.png"
+    },
+    "telegram": {
+      "en_vi": true,
+      "signal_detail": true,
+      "screenshot": "report-telegram-receipt.png"
+    }
+  },
+  "slack_console_link": {
+    "target": "/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478",
+    "browser_verified": true,
+    "readonly_mutation_denied": true
+  },
+  "telegram_console_link": {
+    "anchors_observed": 0,
+    "rendered_label": "Open report",
+    "limitation": "Web client rendered localhost link as plain text; no clickable-link acceptance claim"
+  }
+}

@@ -185,6 +185,11 @@ func (e *Engine) process(ctx context.Context, ev detection.Event) {
 	if !e.enabled[ev.Class] {
 		return
 	}
+	// Exit observations are used by the sensor's lifecycle consumers, but process
+	// detection rules and their context describe executions, not process exits.
+	if ev.Class == detection.ClassProcess && ev.Process != nil && ev.Process.Kind == "exit" {
+		return
+	}
 	e.maybeShed(ev.Class)
 
 	e.mu.Lock()

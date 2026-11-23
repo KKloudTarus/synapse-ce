@@ -9,6 +9,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- `notion` destination-managed snapshot publication, enabled only by the explicit
+  `destination_managed_snapshot_v1` integration profile. Each manual publish creates a new page
+  with the stored report PDF and summary; unpublish moves only the current page to recoverable
+  Trash. Notion sharing remains workspace-owner managed, so Synapse does not claim effective ACL
+  verification or permanent deletion, and the profile is excluded from schedules.
+- `report.generated` notification event for a sealed report artifact, with built-in English
+  and Vietnamese templates in every channel family, a published JSON schema and fixture, and
+  capture from engagement, project-quality and assessment-cycle report generation. The outbox
+  key is the report kind and its content digest, so rebuilding a report and releasing it later
+  announce it once.
 - Private GitHub Issues, confidential GitLab Issues, Azure Boards, ServiceNow and
   Linear ticket destinations with frozen native previews, tenant-scoped credentials,
   and polling observations. ServiceNow descriptions render readable plain text;
@@ -17,6 +27,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Restricted Google Drive and SharePoint/OneDrive Business publication through the
   shared document release workflow, with opaque revision fences and guarded permanent
   unpublish.
+- Governed publication to a restricted prefix of an S3-compatible bucket. The bucket
+  policy is the access authority: exactly one reader principal for the publication
+  prefix, versioning required, a public grant reported as a lost restriction, and an
+  unreadable policy refusing the release. Unpublish removes every object version and
+  delete marker, and refuses a publication held by Object Lock.
 
 - Jira Cloud and Data Center finding synchronization, Project vulnerability grouping,
   proposal-only inbound status/comment observations, and bounded reconciliation.
@@ -29,11 +44,78 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- New DAST public-artifact proofs use v3 and include the version in the proof
+  hash. Existing v1 and v2 proofs remain verifiable. In a mixed-version rollout,
+  update proof readers and verifiers before deploying producers that emit v3 (#1638).
+
+- `synapse-cli doctor` reports misconfiguration readiness as Partial when
+  discovered Helm or Kustomize inputs need a missing or unusable renderer, or
+  when the target inventory is truncated (#1638).
+
+- HTML, DOCX and PDF scan reports include stored IaC and installed-package
+  inventory coverage warnings (#1638).
+
 - **The syslog sink's RFC 5424 timestamp was out of specification (#1458).** `TIME-SECFRAC` is bounded at six digits and the sink wrote nine, because it formatted with `time.RFC3339Nano` and `time.Now` has nanosecond resolution on Linux. Every message a nanosecond clock produced was malformed. The timestamp is now capped at six fractional digits; nothing else about the frame changes, and a receiver that tolerated the nine-digit form keeps working.
 
 - A blocked or throttled Splunk sink now reads plainly in the console. The driver's own wording started with `splunk `, which the diagnostic scrubber treats as a credential marker, so "splunk rejected the credential" reached the operator as "[secret] the credential" (#1459).
 
 - **BREAKING CHANGE: default notification webhooks use a class-filtered envelope.** Receivers now get `synapse.notification.v1` with declared, scrubbed variables, lists and trusted console links instead of the raw event. Update receivers before upgrading notification workers. An administrator can explicitly enable `raw_event` on a `detail` webhook without a custom body; engagement disclosure limits still apply. Existing channels configured at `detail` also begin receiving finding titles in the `scan.completed` findings list. Review their recipients before rollout. Scan messages use immutable completion snapshots, bounded comparison keys and explicit unavailable deltas; built-in English and Vietnamese templates cover the routable events. Email includes escaped HTML alongside text. Follow the worker compatibility, capture-mode drain and rollback steps in [Notification content and capture rollout](docs/guide/notification-content.md).
+
+### Fixed
+
+- **Terraform IAM wildcard statements are assessed in context (#1655).** `Resource = "*"`
+  no longer reports when every action in the statement is an exact, case-insensitive match
+  for `ec2:DescribeInstances` or `ec2:DescribeImages`, which have no resource types in the
+  EC2 Service Authorization Reference and therefore require the wildcard. A pattern such as
+  `ec2:Describe*`, a service wildcard, an unknown action, or any non-exempt action beside an
+  exempt one still reports. An explicit `Deny` effect is now read even when a resource
+  reference stays unresolved or no resource consumes the policy document, so a `Deny` no
+  longer produces an exposure finding in those cases. A JSON `Statement` may now be a single
+  object as well as an array; a singleton whose effect is not `Deny` and which is either not
+  an `Allow` or carries `NotAction`, `NotResource` or `NotPrincipal` is left to literal
+  inspection. Finding counts drop accordingly: a pipeline that failed `--fail-on high` on one
+  of these statements now passes. Measured on a 52-case IAM corpus, false positives fall from
+  18 to 0 with recall unchanged at 100%.
+
+- **Distroless and usr-merged images are inventoried instead of read as clean (#1619).** An
+  image carrying per-package dpkg fragments under `/var/lib/dpkg/status.d/` rather than a single
+  `status` file previously returned zero OS packages with a confident, complete result, which is
+  a clean verdict on an input nothing assessed. Those fragments are now cataloged, as is
+  `/usr/lib/apk/db/installed` on a usr-merged Alpine or Wolfi image. Expect OS package counts and
+  OS advisory findings to rise on such images, from zero. Where a database or fragment cannot be
+  read, including a fragment that writes an unreadable `Status`, the scan reports a partial
+  inventory with an explicit warning rather than an empty one; a genuinely uninstalled package is
+  still excluded without comment.
+
+- Grype synthesizes missing CPEs when scanning an SBOM, restoring NVD advisories
+  outside distro fix feeds, including unfixed Alpine busybox and zlib CVEs (#1618).
+  Existing component CPEs are preserved in reconstructed SBOMs. Unfixed advisories
+  remain in the vulnerability inventory; `--ignore-unfixed` suppresses their
+  findings and counts them in `unfixed_suppressed`.
+
+- **The release images ship patched scanner binaries (#1642).** `golang.org/x/net` moves to v0.62.0 for CVE-2026-78661 and CVE-2026-97045. The container images no longer copy anchore's published grype and syft binaries, which carry `x/net` v0.61.0 and brotli v1.2.0; they rebuild grype v0.121.2 and syft v1.57.0 from a pinned upstream commit with `x/net` v0.62.0 and brotli v1.2.7. The recorded `tool_versions` therefore move from grype 0.115.0 and syft 1.45.1 to 0.121.2 and 1.57.0, which changes scan output: expect different finding counts against the same target, and rebaseline any stored comparison before reading a delta. `scripts/install-tools.{sh,ps1}` and the published composite action follow the same tags, but download anchore's own builds, so a CI runner using them keeps upstream's dependency versions. The frontend pins `zod` to >= 4.6.6 for CVE-2023-54404; zod is a development dependency only and never reached the shipped bundle.
+
+- **Terraform is evaluated, not pattern-matched (#1638).** Every `.tf` and `.tf.json` file is parsed with the HCL library Terraform is built on, and each attribute is evaluated against the module's variables, locals, automatically loaded variable files and parent module inputs before the rules run. The same `0.0.0.0/0` reported as high when written as a literal is now reported when it arrives through a list variable, a local, a conditional or a module input, while `slice(["0.0.0.0/0", "10.0.0.0/16"], 1, 2)` no longer reports, because the effective list is private. The contract is bounded and documented in [Infrastructure-as-code evaluation](docs/guide/iac-evaluation.md); anything outside it stays unknown, keeps its source text, and is named on the scan report rather than passing as clean. Two pure-Go dependencies are added: `github.com/hashicorp/hcl/v2` (MPL-2.0) and `github.com/zclconf/go-cty` (MIT).
+
+- **AWS policy documents are assessed as statements (#1638).** `Effect`, `Principal`, `Action`, `Resource` and `Condition` are read together, with the policy kind the carrying attribute establishes. An organization-constrained bucket policy is no longer reported as public, a VPC endpoint policy is no longer reported as an account-wide grant, and a scoped principal ARN such as `arn:aws:iam::123456789012:role/app-*` is no longer read as every principal. A condition whose value cannot be established is reported as unknown rather than as safe or as public, and a federated `AssumeRoleWithWebIdentity` or `AssumeRoleWithSAML` statement is assessed on its destination scope, because such a caller carries no `aws:PrincipalOrgID`. `Action = "*"`, `"Action": ["*"]` and `"Resource": ["*"]` are now recognised in every supported spelling.
+
+- **A deny rule is no longer reported as internet exposure (#1638).** `rule_action` on an AWS network ACL, `access` on an Azure network security rule, `action` on a GCP firewall policy and `google_compute_firewall`'s `deny` sub-block decide before a `0.0.0.0/0` literal is reported.
+
+- **`aws_s3_bucket_versioning` binds to the bucket it names (#1638).** An Enabled versioning resource used to suppress the no-versioning finding for every bucket in the file, so a genuinely unversioned bucket beside a versioned one disappeared. It now suppresses that bucket's finding only, by reference or by literal bucket name, across the files of one module.
+
+- **Kubernetes manifests authored as JSON are scanned (#1638).** A privileged Pod written as JSON produced no finding at all, because the sniff recognised only the YAML spelling of `apiVersion`.
+
+- **An input no capability evaluated is reported instead of returning clean (#1638).** A Helm chart left unrendered because rendering is disabled, its binary is absent, or the render failed, and a Kustomize overlay in the same position, now make the `iac` engine's coverage partial with the reason, so `--require-complete` rejects the run. The raw manifests behind them are still scanned, so this is a coverage gap and never a lost scan.
+
+- **Engine selection is separate from adapter availability (#1638).** A semantic taint engine the operator selected whose adapter could not be built reported `not_selected`, which is the outcome for an engine nobody asked for. `synapse-api` and `synapse-worker` now record the configured selection before any adapter is built, so such an engine reports required coverage with reason `unavailable`. The CLI records the same selection as unsupported: semantic taint mints gated judgments and runs in the API and worker, so its engines report `not_applicable` and the CLI names them once on stderr. See [CLI](docs/guide/cli.md#engines-the-cli-does-not-run).
+
+- **The installed-package catalog says what it missed (#1638).** Reaching the file cap or the component cap, or skipping an unreadable root-filesystem entry, returned the packages found so far with no signal. All three now clear the inventory's confidence, mark the `inventory` engine partial and warn with the bound that was reached; every cataloged component is kept.
+
+- **The SBOM cache is keyed by the selected producer (#1638).** Selecting Syft after an ownsbom scan returned the cached ownsbom inventory with `cache_hit=1` and complete coverage. The producer's identity and version are now established before the lookup, and a producer whose identity cannot be established is never served another producer's inventory.
+
+- **Passive DAST predicates read the evidence they claim (#1638).** Cookie attributes are parsed instead of substring-searched, so `Set-Cookie: sid=secure; HttpOnly; SameSite=Strict` is correctly reported as missing `Secure`. A public-artifact finding now requires a successful response with source-map content, so an ordinary 404 on a `.map` path no longer reports. A response with no captured headers is reported as unassessed rather than as a secure response, and proofs carry a version so existing ones stay verifiable.
+
+- **Three lexical rules read their context (#1638).** A Terraform provider checksum in a lockfile is no longer reported as a high-entropy secret, while a real credential elsewhere in the same file still is. The Python redundant-`u`-prefix rule counts the letter only where it opens a string literal, so `subprocess.run(["date", "-u"], check=True)` no longer reports. A secret-named key assigned a hostname is an endpoint mapping, in test and production scope alike.
 
 ### Added
 

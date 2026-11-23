@@ -89,8 +89,11 @@ func TestDocumentRestrictionPostgresClaimsAreBoundedFairAndFenced(t *testing.T) 
 	if err = store.SaveDocumentRestrictionCheck(ctx, "doc-a", first, "restriction_lost", at, at.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	if err = store.SaveDocumentRestrictionCheck(ctx, "doc-a", first, "destination_managed", at, at.Add(time.Hour)); err != nil {
+		t.Fatalf("persist managed destination observation: %v", err)
+	}
 	current, err := store.GetLink(ctx, "doc-a", first.ID)
-	if err != nil || current.RestrictionStatus != "restriction_lost" || current.Revision != first.Revision {
+	if err != nil || current.RestrictionStatus != "destination_managed" || current.Revision != first.Revision {
 		t.Fatalf("observation corrupted publication: %+v %v", current, err)
 	}
 	if err = WithTenant(ctx, pool, "doc-a", func(tx pgx.Tx) error {

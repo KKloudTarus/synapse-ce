@@ -94,14 +94,14 @@ func newExecutorHarness(t *testing.T) executorHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := responseuc.ExecRequest{
 		TenantID: "tenant-1", EngagementID: "engagement-1", ActionID: action.ID, AgentID: agent.ID,
 		Action: action, Argv: append([]string(nil), action.Argv...), Target: action.Target,
-		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: action.Target.String()},
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: action.Target.String()},
 		Fingerprint: responsesaga.TargetFingerprint{
 			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: action.Target,
 		},
@@ -160,6 +160,18 @@ func TestExecutorDispatchesSignedWorkAndReturnsDurableResult(t *testing.T) {
 	}
 	if outcome.ObservedRadius != h.req.Declared || outcome.AffectedCount != 1 || outcome.EnforcedHaltGeneration != h.req.HaltGeneration {
 		t.Fatalf("outcome=%+v", outcome)
+	}
+}
+
+func TestExecutorRejectsWrongAuthorizationKind(t *testing.T) {
+	for _, kind := range []engagement.TargetKind{engagement.TargetCloudAccount, engagement.TargetRepo} {
+		t.Run(string(kind), func(t *testing.T) {
+			h := newExecutorHarness(t)
+			h.req.AuthorizationTarget.Kind = kind
+			if _, err := h.executor.Execute(h.ctx, h.req); !errors.Is(err, shared.ErrForbidden) {
+				t.Fatalf("same process identity under %s must be rejected, got %v", kind, err)
+			}
+		})
 	}
 }
 

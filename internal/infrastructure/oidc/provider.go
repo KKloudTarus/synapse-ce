@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -32,11 +34,13 @@ var _ ports.OIDCAuthentication = (*Provider)(nil)
 // carried by callers that persist connection revisions; this adapter never
 // selects a provider or derives an issuer from untrusted request input.
 type Config struct {
-	Issuer             string
-	ClientID           string
-	ClientSecret       string
-	RedirectURL        string
-	ConnectionRevision int64
+	Issuer              string
+	ClientID            string
+	ClientSecret        string
+	RedirectURL         string
+	Auth0OrganizationID string
+	EntraDiscoveryMode  string
+	ConnectionRevision  int64
 }
 
 type providerState struct {
@@ -77,6 +81,12 @@ func New(_ context.Context, cfg Config) (*Provider, error) {
 	}
 	if _, err := httpsEndpoint(cfg.RedirectURL); err != nil {
 		return nil, fmt.Errorf("OIDC redirect URL: %w", err)
+	}
+	if err := ports.ValidateAuth0OrganizationID(cfg.Auth0OrganizationID); err != nil {
+		return nil, err
+	}
+	if err := ports.ValidateEntraSettings(issuer, cfg.EntraDiscoveryMode, cfg.Auth0OrganizationID); err != nil {
+		return nil, err
 	}
 	return newProvider(cfg, issuer, newSafeClient()), nil
 }
@@ -145,21 +155,30 @@ func (p *Provider) discoverAsync(done chan struct{}) {
 }
 
 func (p *Provider) discover(ctx context.Context) (*providerState, error) {
-	provider, err := coreoidc.NewProvider(ctx, p.issuer)
+	discoveryIssuer := p.issuer
+	if p.cfg.EntraDiscoveryMode != "" {
+		discoveryIssuer = "https://login.microsoftonline.com/" + p.cfg.EntraDiscoveryMode + "/v2.0"
+		ctx = coreoidc.InsecureIssuerURLContext(ctx, "https://login.microsoftonline.com/{tenantid}/v2.0")
+	}
+	provider, err := coreoidc.NewProvider(ctx, discoveryIssuer)
 	if err != nil {
 		return nil, fmt.Errorf("discover OIDC issuer: %w", err)
 	}
 	var metadata struct {
-		Issuer                        string   `json:"issuer"`
-		AuthorizationEndpoint         string   `json:"authorization_endpoint"`
-		TokenEndpoint                 string   `json:"token_endpoint"`
-		JWKSURI                       string   `json:"jwks_uri"`
-		CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
+		Issuer                        string          `json:"issuer"`
+		AuthorizationEndpoint         string          `json:"authorization_endpoint"`
+		TokenEndpoint                 string          `json:"token_endpoint"`
+		JWKSURI                       string          `json:"jwks_uri"`
+		CodeChallengeMethodsSupported json.RawMessage `json:"code_challenge_methods_supported"`
 	}
 	if err := provider.Claims(&metadata); err != nil {
 		return nil, fmt.Errorf("decode OIDC discovery: %w", err)
 	}
-	if metadata.Issuer != p.issuer {
+	expectedIssuer := p.issuer
+	if p.cfg.EntraDiscoveryMode != "" {
+		expectedIssuer = "https://login.microsoftonline.com/{tenantid}/v2.0"
+	}
+	if metadata.Issuer != expectedIssuer {
 		return nil, fmt.Errorf("OIDC discovery issuer mismatch")
 	}
 	if _, err := httpsEndpoint(metadata.AuthorizationEndpoint); err != nil {
@@ -171,11 +190,39 @@ func (p *Provider) discover(ctx context.Context) (*providerState, error) {
 	if _, err := httpsEndpoint(metadata.JWKSURI); err != nil {
 		return nil, fmt.Errorf("OIDC JWKS endpoint: %w", err)
 	}
-	if !supportsS256(metadata.CodeChallengeMethodsSupported) {
+	entraTenant, isEntra := ports.EntraDirectoryID(p.issuer)
+	metadataEntra := false
+	if isEntra {
+		endpointTenant := entraTenant
+		if p.cfg.EntraDiscoveryMode != "" {
+			endpointTenant = p.cfg.EntraDiscoveryMode
+		}
+		base := "https://login.microsoftonline.com/" + endpointTenant
+		metadataEntra = metadata.AuthorizationEndpoint == base+"/oauth2/v2.0/authorize" && metadata.TokenEndpoint == base+"/oauth2/v2.0/token" && metadata.JWKSURI == base+"/discovery/v2.0/keys"
+		if !metadataEntra {
+			return nil, fmt.Errorf("OIDC Entra endpoints mismatch")
+		}
+	}
+	var challengeMethods []string
+	if len(metadata.CodeChallengeMethodsSupported) > 0 {
+		if err := json.Unmarshal(metadata.CodeChallengeMethodsSupported, &challengeMethods); err != nil {
+			return nil, fmt.Errorf("decode OIDC PKCE methods: %w", err)
+		}
+	}
+	if !supportsS256(challengeMethods) && !(len(metadata.CodeChallengeMethodsSupported) == 0 && metadataEntra) {
 		return nil, fmt.Errorf("OIDC provider does not advertise PKCE S256 support")
 	}
 	keys := &boundedKeySet{client: p.client, url: metadata.JWKSURI, now: p.now, cooldown: unknownKeyRefreshCooldown}
-	return &providerState{verifier: coreoidc.NewVerifier(p.issuer, keys, &coreoidc.Config{ClientID: p.cfg.ClientID}), oauth: oauth2.Config{ClientID: p.cfg.ClientID, ClientSecret: p.cfg.ClientSecret, RedirectURL: p.cfg.RedirectURL, Endpoint: provider.Endpoint(), Scopes: []string{coreoidc.ScopeOpenID, "profile", "email"}}}, nil
+	endpoint := provider.Endpoint()
+	if isEntra {
+		keys.entraIssuer = p.issuer
+		if p.cfg.EntraDiscoveryMode != "" {
+			base := "https://login.microsoftonline.com/" + entraTenant
+			endpoint.AuthURL = base + "/oauth2/v2.0/authorize"
+			endpoint.TokenURL = base + "/oauth2/v2.0/token"
+		}
+	}
+	return &providerState{verifier: coreoidc.NewVerifier(p.issuer, keys, &coreoidc.Config{ClientID: p.cfg.ClientID}), oauth: oauth2.Config{ClientID: p.cfg.ClientID, ClientSecret: p.cfg.ClientSecret, RedirectURL: p.cfg.RedirectURL, Endpoint: endpoint, Scopes: []string{coreoidc.ScopeOpenID, "profile", "email"}}}, nil
 }
 
 // boundedKeySet coalesces metadata refreshes, never token verification results. Every
@@ -186,6 +233,7 @@ type boundedKeySet struct {
 	url                string
 	now                func() time.Time
 	cooldown           time.Duration
+	entraIssuer        string
 	mu                 sync.Mutex
 	nextUnknownRefresh time.Time
 	keys               []jose.JSONWebKey
@@ -225,17 +273,31 @@ func (k *boundedKeySet) VerifySignature(ctx context.Context, rawIDToken string) 
 		if err != nil || int64(len(body)) > maxOIDCResponseBytes {
 			return nil, fmt.Errorf("OIDC signing key response is unavailable or too large")
 		}
-		var set jose.JSONWebKeySet
+		var set struct {
+			Keys []json.RawMessage `json:"keys"`
+		}
 		if err := json.Unmarshal(body, &set); err != nil || len(set.Keys) == 0 || len(set.Keys) > 64 {
 			return nil, fmt.Errorf("OIDC signing key set is invalid or exceeds 64 keys")
 		}
-		for _, key := range set.Keys {
-			if !key.IsPublic() || !key.Valid() || len(key.KeyID) > 256 {
+		keys := make([]jose.JSONWebKey, 0, len(set.Keys))
+		for _, raw := range set.Keys {
+			if k.entraIssuer != "" {
+				var metadata struct {
+					Issuer json.RawMessage `json:"issuer"`
+				}
+				var issuer string
+				if json.Unmarshal(raw, &metadata) != nil || json.Unmarshal(metadata.Issuer, &issuer) != nil || (issuer != k.entraIssuer && issuer != "https://login.microsoftonline.com/{tenantid}/v2.0") {
+					continue
+				}
+			}
+			var key jose.JSONWebKey
+			if err := json.Unmarshal(raw, &key); err != nil || !key.IsPublic() || !key.Valid() || len(key.KeyID) > 256 {
 				return nil, fmt.Errorf("OIDC signing key set contains an invalid public key")
 			}
+			keys = append(keys, key)
 		}
 		k.mu.Lock()
-		k.keys = set.Keys
+		k.keys = keys
 		k.mu.Unlock()
 		return nil, nil
 	})
@@ -302,6 +364,9 @@ func (p *Provider) AuthorizationURLWithMaxAge(ctx context.Context, state, nonce,
 		return "", err
 	}
 	opts := []oauth2.AuthCodeOption{coreoidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)}
+	if p.cfg.Auth0OrganizationID != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("organization", p.cfg.Auth0OrganizationID))
+	}
 	if maxAge > 0 {
 		opts = append(opts, oauth2.SetAuthURLParam("max_age", strconv.FormatInt(int64(maxAge.Seconds()), 10)))
 	}
@@ -323,6 +388,9 @@ func (p *Provider) ExchangeAndVerifyWithMaxAge(ctx context.Context, code, verifi
 	ctx = coreoidc.ClientContext(ctx, p.client)
 	token, err := stateful.oauth.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
+		if tokenEndpointUnavailable(err) {
+			return ports.OIDCIdentity{}, fmt.Errorf("%w: exchange OIDC authorization code: %w", authz.ErrAuthenticationUnavailable, err)
+		}
 		return ports.OIDCIdentity{}, fmt.Errorf("exchange OIDC authorization code: %w", err)
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
@@ -334,13 +402,15 @@ func (p *Provider) ExchangeAndVerifyWithMaxAge(ctx context.Context, code, verifi
 		return ports.OIDCIdentity{}, fmt.Errorf("verify OIDC ID token: %w", err)
 	}
 	var claims struct {
-		Nonce           string          `json:"nonce"`
-		AtHash          string          `json:"at_hash"`
-		Email           string          `json:"email"`
-		EmailVerified   json.RawMessage `json:"email_verified"`
-		Name            string          `json:"name"`
-		AuthTime        json.RawMessage `json:"auth_time"`
-		AuthorizedParty string          `json:"azp"`
+		Nonce               string          `json:"nonce"`
+		AtHash              string          `json:"at_hash"`
+		Email               string          `json:"email"`
+		EmailVerified       json.RawMessage `json:"email_verified"`
+		Name                string          `json:"name"`
+		AuthTime            json.RawMessage `json:"auth_time"`
+		AuthorizedParty     string          `json:"azp"`
+		Auth0OrganizationID json.RawMessage `json:"org_id"`
+		TenantID            json.RawMessage `json:"tid"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		return ports.OIDCIdentity{}, fmt.Errorf("decode OIDC ID token claims: %w", err)
@@ -356,7 +426,16 @@ func (p *Provider) ExchangeAndVerifyWithMaxAge(ctx context.Context, code, verifi
 	if idToken.Issuer != p.issuer || strings.TrimSpace(idToken.Subject) == "" {
 		return ports.OIDCIdentity{}, fmt.Errorf("OIDC issuer or subject is invalid")
 	}
+	if expected, ok := ports.EntraDirectoryID(p.issuer); ok {
+		var actual string
+		if err := json.Unmarshal(claims.TenantID, &actual); err != nil || actual != expected {
+			return ports.OIDCIdentity{}, fmt.Errorf("OIDC Entra tid does not match the configured directory")
+		}
+	}
 	if err := verifyAuthorizedParty(idToken.Audience, claims.AuthorizedParty, p.cfg.ClientID); err != nil {
+		return ports.OIDCIdentity{}, err
+	}
+	if err := verifyAuth0OrganizationClaim(claims.Auth0OrganizationID, p.cfg.Auth0OrganizationID); err != nil {
 		return ports.OIDCIdentity{}, err
 	}
 	email, verifiedEmail, err := verifiedEmailClaim(claims.Email, claims.EmailVerified)
@@ -370,12 +449,42 @@ func (p *Provider) ExchangeAndVerifyWithMaxAge(ctx context.Context, code, verifi
 	return ports.OIDCIdentity{Issuer: idToken.Issuer, Subject: idToken.Subject, Email: email, EmailVerified: verifiedEmail, Name: boundedName(claims.Name), AuthenticatedAt: authenticatedAt}, nil
 }
 
+// tokenEndpointUnavailable recognizes a transient OAuth token-endpoint failure without
+// turning protocol denials (such as invalid_grant or invalid_client) into retryable errors.
+func tokenEndpointUnavailable(err error) bool {
+	var retrieve *oauth2.RetrieveError
+	return errors.As(err, &retrieve) && retrieve.Response != nil && retrieve.Response.StatusCode >= http.StatusInternalServerError && retrieve.Response.StatusCode < 600
+}
+
 func verifyAuthorizedParty(audience []string, authorizedParty, clientID string) error {
 	if len(audience) > 1 && authorizedParty != clientID {
 		return fmt.Errorf("OIDC azp must identify this client for a multi-audience token")
 	}
 	if authorizedParty != "" && authorizedParty != clientID {
 		return fmt.Errorf("OIDC azp does not identify this client")
+	}
+	return nil
+}
+
+func verifyAuth0OrganizationClaim(raw json.RawMessage, expected string) error {
+	if expected == "" {
+		if len(raw) == 0 {
+			return nil
+		}
+		return fmt.Errorf("OIDC token has an unsolicited org_id claim")
+	}
+	if len(raw) == 0 {
+		return fmt.Errorf("OIDC token is missing required org_id claim")
+	}
+	var actual string
+	if err := json.Unmarshal(raw, &actual); err != nil || actual == "" {
+		return fmt.Errorf("OIDC org_id claim must be a non-empty string")
+	}
+	if err := ports.ValidateAuth0OrganizationID(actual); err != nil {
+		return fmt.Errorf("OIDC org_id claim is malformed: %w", err)
+	}
+	if actual != expected {
+		return fmt.Errorf("OIDC org_id claim does not match the configured organization")
 	}
 	return nil
 }
@@ -428,7 +537,7 @@ func httpsIssuer(value string) (string, error) {
 	if err != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", fmt.Errorf("OIDC issuer must be an absolute HTTPS URL without query or fragment")
 	}
-	return strings.TrimRight(u.String(), "/"), nil
+	return u.String(), nil
 }
 func httpsEndpoint(value string) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(value))

@@ -22,6 +22,13 @@ type documentPublishing interface {
 	Intent(context.Context, shared.ID, shared.ID) (docpublish.Intent, error)
 }
 
+// documentSnapshotListing stays separate from the baseline publication surface so
+// older in-process implementations can still serve publication routes. The concrete
+// service provides it when snapshot history is available.
+type documentSnapshotListing interface {
+	Snapshots(context.Context, shared.ID, shared.ID) ([]docpublish.Intent, error)
+}
+
 func (rt *Router) SetDocumentPublishing(service documentPublishing) { rt.documentPublishing = service }
 
 type documentPublishRequest struct {
@@ -41,36 +48,40 @@ type documentResumeRequest struct {
 }
 
 type documentIntentView struct {
-	ID        shared.ID         `json:"id"`
-	LinkID    shared.ID         `json:"link_id,omitempty"`
-	Action    docpublish.Action `json:"action"`
-	State     string            `json:"state"`
-	Version   int               `json:"version"`
-	Attempts  int               `json:"attempts"`
-	ErrorCode string            `json:"error_code,omitempty"`
-	RemoteURL string            `json:"remote_url,omitempty"`
-	RemoteID  string            `json:"remote_id,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	ID            shared.ID         `json:"id"`
+	LinkID        shared.ID         `json:"link_id,omitempty"`
+	Action        docpublish.Action `json:"action"`
+	State         string            `json:"state"`
+	Version       int               `json:"version"`
+	Attempts      int               `json:"attempts"`
+	ErrorCode     string            `json:"error_code,omitempty"`
+	RemoteURL     string            `json:"remote_url,omitempty"`
+	RemoteID      string            `json:"remote_id,omitempty"`
+	ContentHash   string            `json:"content_hash,omitempty"`
+	AccessProfile string            `json:"access_profile,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 type documentLinkView struct {
-	ID                   shared.ID             `json:"id"`
-	IntegrationID        shared.ID             `json:"integration_id"`
-	SourceKind           docpublish.SourceKind `json:"source_kind"`
-	SourceRef            string                `json:"source_ref"`
-	Scope                docpublish.Scope      `json:"scope"`
-	ScopeID              shared.ID             `json:"scope_id"`
-	Container            string                `json:"container"`
-	RemoteURL            string                `json:"remote_url"`
-	RemoteVersion        int                   `json:"remote_version"`
-	RemoteRevisionKind   string                `json:"remote_revision_kind"`
-	ContentHash          string                `json:"content_hash"`
-	Revision             int                   `json:"revision"`
-	RestrictionStatus    string                `json:"restriction_status"`
-	RestrictionCheckedAt *time.Time            `json:"restriction_checked_at,omitempty"`
-	RetiredAt            *time.Time            `json:"retired_at,omitempty"`
-	UpdatedAt            time.Time             `json:"updated_at"`
+	ID                   shared.ID              `json:"id"`
+	IntegrationID        shared.ID              `json:"integration_id"`
+	SourceKind           docpublish.SourceKind  `json:"source_kind"`
+	SourceRef            string                 `json:"source_ref"`
+	Scope                docpublish.Scope       `json:"scope"`
+	ScopeID              shared.ID              `json:"scope_id"`
+	Container            string                 `json:"container"`
+	RemoteURL            string                 `json:"remote_url"`
+	RemoteVersion        int                    `json:"remote_version"`
+	RemoteRevisionKind   string                 `json:"remote_revision_kind"`
+	ContentHash          string                 `json:"content_hash"`
+	Revision             int                    `json:"revision"`
+	RestrictionStatus    string                 `json:"restriction_status"`
+	RestrictionCheckedAt *time.Time             `json:"restriction_checked_at,omitempty"`
+	RetiredAt            *time.Time             `json:"retired_at,omitempty"`
+	RemovalKind          docpublish.RemovalKind `json:"removal_kind,omitempty"`
+	AccessProfile        string                 `json:"access_profile,omitempty"`
+	UpdatedAt            time.Time              `json:"updated_at"`
 }
 
 func documentActor(r *http.Request) (ports.DocumentActor, bool) {
@@ -82,11 +93,11 @@ func documentActor(r *http.Request) (ports.DocumentActor, bool) {
 }
 
 func documentIntentResponse(value docpublish.Intent) documentIntentView {
-	return documentIntentView{ID: value.ID, LinkID: value.LinkID, Action: value.Action, State: string(value.State), Version: value.Version, Attempts: value.Attempts, ErrorCode: value.ErrorCode, RemoteURL: value.RemoteURL, RemoteID: value.RemoteID, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+	return documentIntentView{ID: value.ID, LinkID: value.LinkID, Action: value.Action, State: string(value.State), Version: value.Version, Attempts: value.Attempts, ErrorCode: value.ErrorCode, RemoteURL: value.RemoteURL, RemoteID: value.RemoteID, ContentHash: value.ContentHash, AccessProfile: value.AccessProfile, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 }
 
 func documentLinkResponse(value docpublish.Link) documentLinkView {
-	return documentLinkView{ID: value.ID, IntegrationID: value.IntegrationID, SourceKind: value.SourceKind, SourceRef: value.SourceRef, Scope: value.Scope, ScopeID: value.ScopeID, Container: value.Container, RemoteURL: value.RemoteURL, RemoteVersion: value.RemoteVersion, RemoteRevisionKind: documentRevisionKind(value.RemoteRevision), ContentHash: value.ContentHash, Revision: value.Revision, RestrictionStatus: value.RestrictionStatus, RestrictionCheckedAt: value.RestrictionCheckedAt, RetiredAt: value.RetiredAt, UpdatedAt: value.UpdatedAt}
+	return documentLinkView{ID: value.ID, IntegrationID: value.IntegrationID, SourceKind: value.SourceKind, SourceRef: value.SourceRef, Scope: value.Scope, ScopeID: value.ScopeID, Container: value.Container, RemoteURL: value.RemoteURL, RemoteVersion: value.RemoteVersion, RemoteRevisionKind: documentRevisionKind(value.RemoteRevision), ContentHash: value.ContentHash, Revision: value.Revision, RestrictionStatus: value.RestrictionStatus, RestrictionCheckedAt: value.RestrictionCheckedAt, RetiredAt: value.RetiredAt, RemovalKind: value.RemovalKind, AccessProfile: value.AccessProfile, UpdatedAt: value.UpdatedAt}
 }
 
 func documentReleaseResponse(value documentuc.ReleaseResult) any {
@@ -127,6 +138,25 @@ func (rt *Router) documentIntent(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, documentIntentResponse(item))
+}
+
+func (rt *Router) documentSnapshots(w http.ResponseWriter, r *http.Request) {
+	snapshots, ok := rt.documentPublishing.(documentSnapshotListing)
+	if !ok {
+		writeError(w, rt.log, shared.ErrNotFound)
+		return
+	}
+	items, err := snapshots.Snapshots(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	out := make([]documentIntentView, 0, len(items))
+	for _, item := range items {
+		out = append(out, documentIntentResponse(item))
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (rt *Router) resumePreparedDocumentPublication(w http.ResponseWriter, r *http.Request) {

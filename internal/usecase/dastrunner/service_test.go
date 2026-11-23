@@ -228,3 +228,15 @@ func TestCurlArgsUseConfiguredTimeoutAndPinnedResolve(t *testing.T) {
 		}
 	}
 }
+
+func TestExecuteUsesDurableRunForEgressIdentity(t *testing.T) {
+	runner := &fakeRunner{out: []byte("synapse-canary\nSYNAPSE_HTTP_STATUS:200\n")}
+	svc := newServiceForTest(t, runner, &fakeApplier{})
+	probe := Probe{JudgmentID: "j-1", RunID: "run-1", URL: "https://app.acme.test/search?q=synapse-canary", Method: "GET"}
+	if _, err := svc.Execute(context.Background(), admittedAction(t, agent.ModeManual, agent.RiskIntrusive), probe); err != nil {
+		t.Fatal(err)
+	}
+	if runner.spec.EgressExecutionID != "run-1" {
+		t.Fatalf("egress identity=%q", runner.spec.EgressExecutionID)
+	}
+}

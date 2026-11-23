@@ -1,0 +1,139 @@
+{
+  "recorded_at": "2026-10-29",
+  "source_commit": "e77c95e3ac7dd5d8167b3d789d04edda1ab0e92d",
+  "scope": "Representative functional follow-up; historical matrices retain their original revisions. No complete tracker closure claim.",
+  "deadletter": [
+    {
+      "source_kind": "scan_job",
+      "source_id": "323d070f5c671ee0cb674821d1291e35",
+      "event_type": "scan.failed",
+      "data": {
+        "title": "Scan failed",
+        "run_id": "323d070f5c671ee0cb674821d1291e35",
+        "outcome": "failed",
+        "scan_id": "323d070f5c671ee0cb674821d1291e35",
+        "summary": "A scan did not finish.",
+        "provider": "native",
+        "providers": [
+          "native"
+        ],
+        "scan_kind": "local",
+        "error_code": "dead-letter",
+        "engagement_id": "18febb89566209b0d5dcc610dff7de1c",
+        "counts_available": false,
+        "severity_counts_available": false
+      },
+      "processed_at": "2026-10-29T05:15:39.318771+00:00",
+      "event_id": "f96c7b2c5b397004b3361a64daa4a347",
+      "facts_identical": true,
+      "delivery_id": "11e6181ca8f7039a189f63a879090679",
+      "state": "delivered",
+      "attempts": 1
+    }
+  ],
+  "promotion": [
+    {
+      "source_kind": "finding_created",
+      "source_id": "5615742bb4f79887085c2ccd68a6df94",
+      "event_type": "finding.created",
+      "data": {
+        "title": "Finding created",
+        "status": "open",
+        "summary": "A finding was created.",
+        "finding_id": "5615742bb4f79887085c2ccd68a6df94",
+        "finding_kind": "sast",
+        "actor_user_id": "operator",
+        "engagement_id": "6cae159803b61fc98369d743e0d6f13e",
+        "finding_version": 1
+      },
+      "event_id": "a9853bf6f85f7360f96e82fa9bdb0f45",
+      "facts_identical": true,
+      "delivery_id": "ec9bb1077e476bc1d616f4bd2bc9b97e",
+      "state": "delivered",
+      "attempts": 1
+    }
+  ],
+  "promotion_restart": {
+    "at": "2026-10-29T05:31:24.539651+00:00",
+    "all_services_stopped_and_resumed": true,
+    "head_unchanged": true,
+    "chain_intact": true,
+    "verified_links": 3,
+    "artifact_download_http": 200,
+    "artifact_sha256": "b36e88b8862d75e26730c5db2c47cb7d8c16bde68067dba94d4bf3d0f29c51a7",
+    "finding_count": 1
+  },
+  "postgres_refresh": {
+    "status": "package_passed_with_explicit_optins",
+    "exit_code": 0,
+    "elapsed_seconds": 2079.495,
+    "event_counts": {
+      "pass": 1215,
+      "skip": 4
+    },
+    "source": {
+      "head": "cc6e25977340badb9ba194f585b4f42bb27ca828",
+      "files": {}
+    },
+    "source_unchanged": true,
+    "cleanup": {
+      "containers": 0,
+      "networks": 0
+    },
+    "skips": [
+      "TestPostgresAssessmentComparisonScale100K",
+      "TestAssessmentUIWorker",
+      "TestOwnershipRepresentativeScale",
+      "TestResponseHaltWriterRoleIsolation"
+    ],
+    "halt_role_followup": {
+      "pass": true,
+      "exit_code": 0,
+      "elapsed_seconds": 6.288,
+      "separate_runtime_and_halt_roles": true,
+      "cleanup": {
+        "containers": 0,
+        "networks": 0
+      }
+    },
+    "remaining_skips_note": "Two opt-in scale benchmarks and interactive assessment UI worker; not part of this provider functional path. Original no-skip wrapper report remains unchanged."
+  },
+  "images": {
+    "scan-deadletter-console.png": "b62ff2c02cc561dde5d2d23303b63924f2de4ce7aef061cca4b0171d1868ca6c",
+    "promoted-finding-console.png": "a67a992f623bc4584778f39513ff78262536e26b1199c89cf1126fbf1b260973"
+  },
+  "custody": {
+    "verified_at": "2026-10-28T16:53:56.702788+00:00",
+    "source": "real verifier failure, durable source poller and notifications worker",
+    "console_observation": "Exact engagement name and Evidence tampered badge",
+    "initial_intact": true,
+    "after_intact": false,
+    "report_status": 400,
+    "source_count": 1,
+    "delivery_count": 1,
+    "delivery_attempts": 1,
+    "slack_http_status": 200,
+    "retained_db_touched": false,
+    "files": {
+      "before.json": "793ab0a1b1cbc75c237d8e5da302f68ae49ecae9cbce3329b79cc4a1ec61f0aa",
+      "after.json": "31b240e20df22b65b8670168902ed38e64534a00061d2a1bd46568b7eb5bca56",
+      "report-denial.json": "cf69e497ae02b20cb7f7b88974d40a383998437f27c699e5daf68795d8d10b94",
+      "source.json": "8778608e7230b39569f053e23b9deb7f065a087e8e05e3d5b4fad95cd89c5aae",
+      "deliveries.json": "fcdb54ce4d1f8ce6621868c5095e1686e902f590205afb3965d0b44d2a7cf2eb",
+      "slack-custody-native.png": "f16f9825ff18b449e10c1b791460905794273b9204becb302d9ea3ebed6b3838",
+      "slack-target-console.png": "8bdb1375fecef9da96c9a8d83a37810d4c2a02056e94b3707dfb6fc04889a252",
+      "delivery-detail.json": "7b6d603cd4a58b97e6c338e8280698b1208b7fa76ba23bbc1b505aa08100c40a",
+      "attempts.json": "18ae4836f5faaa6bdb1c6c54ddf3b682f31a353b3715ad797cc8ce1d4edb1879"
+    },
+    "report_denial": {
+      "status": 400,
+      "body": {
+        "error": "validation error: evidence chain verification failed \u2013 report blocked",
+        "code": "validation_failed",
+        "request_id": "647452d6-fafb-477f-b4e8-b963924c8319",
+        "retryable": false
+      }
+    },
+    "scope": "Separate disposable database, 2026-10-28; source_commit above applies to dead-letter and promotion, not this earlier run."
+  }
+}

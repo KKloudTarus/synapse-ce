@@ -29,6 +29,9 @@ type DocumentArtifact struct {
 	SourceRevision string
 	GeneratedAt    time.Time
 	Images         []DocumentImage
+	// CycleID is the validated assessment-cycle identifier for a closure artifact.
+	CycleID    shared.ID `json:"cycle_id,omitempty"`
+	ProjectKey string    `json:"project_key,omitempty"`
 }
 
 // EngagementReportPublication is the stored, deterministic report projection
@@ -69,6 +72,7 @@ type DocumentArtifactPDFRenderer interface {
 type ProjectQualitySummary struct {
 	TenantID          shared.ID
 	ProjectID         shared.ID
+	ProjectKey        string `json:"project_key,omitempty"`
 	Title             string
 	Paragraphs        []string
 	Images            []DocumentImage

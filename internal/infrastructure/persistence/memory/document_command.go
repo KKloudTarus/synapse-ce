@@ -49,6 +49,11 @@ func cloneDocumentProgress(in ports.DocumentProgress) ports.DocumentProgress {
 		out.LeaseUntil = &at
 	}
 	out.UploadedReceipts = slices.Clone(in.UploadedReceipts)
+	if in.SnapshotReceipt != nil {
+		receipt := *in.SnapshotReceipt
+		receipt.BlockIDs = slices.Clone(in.SnapshotReceipt.BlockIDs)
+		out.SnapshotReceipt = &receipt
+	}
 	return out
 }
 
@@ -95,32 +100,47 @@ func validDocumentProgress(progress ports.DocumentProgress, current docpublish.I
 		}
 	}
 	for _, receipt := range progress.UploadedReceipts {
-		if strings.TrimSpace(receipt.Key) == "" || len(receipt.Key) > 512 || len(receipt.Digest) != 64 {
+		if strings.TrimSpace(receipt.Key) == "" || len(receipt.Key) > 512 || len(receipt.Digest) != 64 || (receipt.UploadID != "" && len(receipt.UploadID) > 512) {
 			return false
 		}
+	}
+	if progress.SnapshotReceipt != nil && !validMemorySnapshotReceipt(*progress.SnapshotReceipt) {
+		return false
 	}
 	return !now.IsZero()
 }
 
+func validMemorySnapshotReceipt(receipt ports.DocumentSnapshotReceipt) bool {
+	if len(receipt.BlockIDs) < 1 || len(receipt.BlockIDs) > 100 || len(receipt.Digest) != 64 || receipt.Remote.ID == "" || receipt.Remote.Version < 1 {
+		return false
+	}
+	for _, id := range receipt.BlockIDs {
+		if strings.TrimSpace(id) == "" || len(id) > 512 {
+			return false
+		}
+	}
+	return true
+}
+
 func sameDocumentCommand(left, right ports.DocumentCommand) bool {
-	if left.Intent.Action == docpublish.Purge && right.Intent.Action == docpublish.Purge {
+	if (left.Intent.Action == docpublish.Purge || left.Intent.Action == docpublish.Trash) && left.Intent.Action == right.Intent.Action {
 		return left.Intent.SameCommand(right.Intent) && left.Actor == right.Actor &&
-			left.ConnectionRevision == right.ConnectionRevision && left.CredentialRevision == right.CredentialRevision && left.ReadGroup == right.ReadGroup
+			left.ConnectionRevision == right.ConnectionRevision && left.CredentialRevision == right.CredentialRevision && left.ReadGroup == right.ReadGroup && left.AccessProfile == right.AccessProfile
 	}
 	leftDigest, leftErr := documentArtifactDigest(left.Artifact)
 	rightDigest, rightErr := documentArtifactDigest(right.Artifact)
 	return leftErr == nil && rightErr == nil && left.Intent.SameCommand(right.Intent) &&
 		left.Actor == right.Actor && left.ConnectionRevision == right.ConnectionRevision &&
-		left.CredentialRevision == right.CredentialRevision && left.ReadGroup == right.ReadGroup && leftDigest == rightDigest
+		left.CredentialRevision == right.CredentialRevision && left.ReadGroup == right.ReadGroup && left.AccessProfile == right.AccessProfile && leftDigest == rightDigest
 }
 
 func validDocumentCommand(command ports.DocumentCommand) bool {
 	if command.Intent.Validate() != nil || command.Intent.State != writeintent.Pending || command.Intent.Version != 1 ||
 		command.Intent.Attempts != 0 || command.Intent.LeaseUntil != nil || command.Actor.UserID.IsZero() ||
-		command.ConnectionRevision < 1 || command.CredentialRevision < 0 || strings.TrimSpace(command.ReadGroup) == "" || len(command.ReadGroup) > 255 {
+		command.ConnectionRevision < 1 || command.CredentialRevision < 0 || strings.TrimSpace(command.ReadGroup) == "" || len(command.ReadGroup) > 255 || command.AccessProfile != command.Intent.AccessProfile {
 		return false
 	}
-	if command.Intent.Action == docpublish.Purge {
+	if command.Intent.Action == docpublish.Purge || command.Intent.Action == docpublish.Trash {
 		return true
 	}
 	_, err := documentArtifactDigest(command.Artifact)
@@ -169,16 +189,27 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 		if linked {
 			return ports.DocumentCommand{}, false, shared.ErrConflict
 		}
-	case docpublish.Update, docpublish.Purge:
+		if command.AccessProfile == docpublish.DestinationManagedSnapshotProfile {
+			initial.Step = "snapshot_shell"
+		}
+	case docpublish.Update, docpublish.Purge, docpublish.Snapshot, docpublish.Trash:
 		if !linked || link.ID != command.Intent.LinkID {
 			return ports.DocumentCommand{}, false, shared.ErrNotFound
 		}
-		if link.RetiredAt != nil {
+		if link.RetiredAt != nil && command.Intent.Action != docpublish.Snapshot {
+			return ports.DocumentCommand{}, false, shared.ErrConflict
+		}
+		if command.Intent.ExpectedLinkRevision > 0 && link.Revision != command.Intent.ExpectedLinkRevision {
 			return ports.DocumentCommand{}, false, shared.ErrConflict
 		}
 		initial.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
 		if command.Intent.Action == docpublish.Update {
 			initial.Step = "restrictions"
+		} else if command.Intent.Action == docpublish.Snapshot {
+			initial.Step = "snapshot_shell"
+			initial.Remote = docpublish.RemotePage{}
+		} else if command.Intent.Action == docpublish.Trash {
+			initial.Step = "trash"
 		} else {
 			initial.Step = "purge"
 		}
@@ -254,7 +285,7 @@ func (s *DocumentStore) SaveDocumentProgress(ctx context.Context, tenant, intent
 }
 
 func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
-	if progress.Step != "restrictions" && progress.Step != "attachments" && progress.Step != "body" && progress.Step != "complete" && progress.Step != "purged" {
+	if progress.Step != "restrictions" && progress.Step != "attachments" && progress.Step != "body" && progress.Step != "complete" && progress.Step != "purged" && progress.Step != "snapshot_observe" && progress.Step != "snapshot_uploads" && progress.Step != "snapshot_upload_send" && progress.Step != "snapshot_append" && progress.Step != "snapshot_title" && progress.Step != "snapshot_verify" && progress.Step != "trash_confirm" {
 		return false
 	}
 	if strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "" {
@@ -268,13 +299,13 @@ func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpub
 
 // cleanDocumentRetryCheckpoint is deliberately no broader than a clean yield:
 // a provider throttle may release an in-flight lease only when no outbound
-// effect remains to reconcile. Purge is included because its pre-write identity
-// read has the same no-effect property.
+// effect remains to reconcile. Purge and Trash are included because their
+// pre-write identity reads have the same no-effect property.
 func cleanDocumentRetryCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
-	if !cleanDocumentYieldCheckpoint(progress, intent, at) && progress.Step != "purge" {
+	if !cleanDocumentYieldCheckpoint(progress, intent, at) && progress.Step != "purge" && progress.Step != "trash" {
 		return false
 	}
-	if progress.Step == "purge" && (strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "") {
+	if (progress.Step == "purge" || progress.Step == "trash") && (strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "") {
 		return false
 	}
 	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&

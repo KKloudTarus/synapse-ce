@@ -27,9 +27,9 @@ type mkdocsConfig struct {
 }
 
 // navExclusions lists Markdown files under the guide directory that are intentionally absent from the
-// navigation. It is empty on purpose: every current guide is reachable. An entry added here must carry a
-// reason, so "not in nav" stays a decision rather than an oversight.
+// navigation. Each entry carries a reason, so "not in nav" stays a decision rather than an oversight.
 var navExclusions = map[string]string{
+	"assets/ui/notion-publication/README.md": "internal functional evidence and screenshot provenance, not a user guide",
 	// An internal implementation/tracking plan for the vulnerability-intelligence work, not end-user guide
 	// content; it lives under docs/guide for co-location but is intentionally kept out of the published nav.
 	"vulnerability-intelligence-implementation-plan.md": "internal implementation plan, not a user guide",
@@ -141,11 +141,11 @@ func TestGuideInternalLinksResolve(t *testing.T) {
 // because mkdocs.yml publishes only docs_dir, so a repository-only document would otherwise never reach
 // the site.
 var publishedMirrors = map[string]string{
-	"docs/guide/repository/telemetry-store-adr.md": "docs/adr/0001-telemetry-store.md",
-	"docs/guide/repository/cspm-helper-adr.md":     "docs/adr/0004-cspm-helper-authorization.md",
+	"docs/guide/repository/telemetry-store-adr.md":                  "docs/adr/0001-telemetry-store.md",
+	"docs/guide/repository/cspm-helper-adr.md":                      "docs/adr/0004-cspm-helper-authorization.md",
 	"docs/guide/repository/interpretive-compliance-mappings-adr.md": "docs/adr/0009-interpretive-compliance-mappings.md",
-	"docs/guide/repository/promotion-rules.md":     "docs/architecture/promotion-rules.md",
-	"docs/guide/repository/offensive-policy.md":    "docs/redteam/offensive-policy.md",
+	"docs/guide/repository/promotion-rules.md":                      "docs/architecture/promotion-rules.md",
+	"docs/guide/repository/offensive-policy.md":                     "docs/redteam/offensive-policy.md",
 }
 
 // TestPublishedMirrorsMatchCanonicalSources fails when a mirror is missing its authority notice or when

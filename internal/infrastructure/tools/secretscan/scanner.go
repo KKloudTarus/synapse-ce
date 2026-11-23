@@ -1218,6 +1218,19 @@ var resourcePathIndicators = []string{
 // location AND carry a known non-credential extension. A credential assigned on a line that merely contains
 // the word "file" still fires, and a credential keyword on the line defers to the gating generic-secret rule
 // before this is consulted.
+// terraformProviderChecksumLine reports whether a line is a Terraform provider checksum entry from
+// a .terraform.lock.hcl hashes block: a quoted "h1:" value holding a base64 SHA-256, or a "zh:"
+// value holding a hex SHA-256. These are published integrity values, not credentials (#1638).
+//
+// The checksum SYNTAX is what is recognized, not the file: another line of the same lockfile that
+// assigns a real credential still reports, and a value that merely starts with those two letters
+// does not qualify.
+func terraformProviderChecksumLine(line string) bool {
+	return terraformLockChecksumRe.MatchString(strings.TrimSpace(line))
+}
+
+var terraformLockChecksumRe = regexp.MustCompile(`^"(?:h1:[A-Za-z0-9+/]{43}=|zh:[0-9a-f]{64})",?$`)
+
 func lineDeclaresResourcePath(line string) bool {
 	lower := strings.ToLower(line)
 	hasIndicator := false
@@ -1495,7 +1508,7 @@ func baseDefaultRules() []rule {
 			// so a keyword-context secret is never demoted to gate-exempt. Also skip benign high-entropy
 			// contexts (SRI/integrity, digests, checksums) that are public hashes, not credentials.
 			lineSkip: func(line string) bool {
-				return hasAnyKeyword(line, highEntropyDeferKeywords) || lineDeclaresResourcePath(line)
+				return hasAnyKeyword(line, highEntropyDeferKeywords) || lineDeclaresResourcePath(line) || terraformProviderChecksumLine(line)
 			},
 			skipValue:          func(v string) bool { return wordlikePathToken(v) || codecAlphabetToken(v) },
 			maskNotebookOutput: true,

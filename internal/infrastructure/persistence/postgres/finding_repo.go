@@ -24,7 +24,7 @@ const findingCols = `id, engagement_id, title, description, severity, cvss_vecto
 	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, ` +
 	`COALESCE(advisory_id, ''), COALESCE(occurrence_id, ''), COALESCE(component_fingerprint, ''), ` +
 	`COALESCE(fixed_version, ''), COALESCE(detection_state, ''), COALESCE(risk_assessment_id, ''), evaluated_at, data_flow, ` +
-	`COALESCE(direct_bumps, ''), COALESCE(public_exploit, false), COALESCE(epss_percentile, 0), assignee_user_id`
+	`COALESCE(direct_bumps, ''), COALESCE(public_exploit, false), COALESCE(epss_percentile, 0), assignee_user_id, pager_episode`
 
 // FindingRepository persists findings to PostgreSQL, deduped per engagement.
 type FindingRepository struct{ pool *pgxpool.Pool }
@@ -215,7 +215,7 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 // miss it distinguishes ErrConflict (exists, version moved) from ErrNotFound.
 func (r *FindingRepository) UpdateStatus(ctx context.Context, engagementID, findingID shared.ID, status finding.Status, expectedVersion int) (out finding.Finding, err error) {
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
-		out, err = scanFinding(tx.QueryRow(ctx, `UPDATE findings SET status=$1, version=version+1, updated_at=now() WHERE id=$2 AND engagement_id=$3 AND version=$4 RETURNING `+findingCols, string(status), findingID.String(), engagementID.String(), expectedVersion))
+		out, err = scanFinding(tx.QueryRow(ctx, `UPDATE findings SET pager_episode=pager_episode + CASE WHEN status IN ('remediated','false_positive') AND $1 NOT IN ('remediated','false_positive') THEN 1 ELSE 0 END, status=$1, version=version+1, updated_at=now() WHERE id=$2 AND engagement_id=$3 AND version=$4 RETURNING `+findingCols, string(status), findingID.String(), engagementID.String(), expectedVersion))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return classifyFindingUpdateMiss(ctx, tx, engagementID, findingID)
 		}
@@ -447,7 +447,7 @@ func scanFinding(row rowScanner) (finding.Finding, error) {
 		&status, &f.EvidenceScore, &dedup, &f.KEV, &f.RiskScore, &f.Audit.CreatedAt, &f.Audit.UpdatedAt,
 		&sources, &f.Confidence, &f.Class, &f.Scope, &f.Reachability, &f.Impact, &f.Priority, &kind,
 		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability, &f.RuleKey,
-		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt, &dataFlowJSON, &directBumps, &f.PublicExploit, &f.EPSSPercentile, &canonicalAssignee); err != nil {
+		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt, &dataFlowJSON, &directBumps, &f.PublicExploit, &f.EPSSPercentile, &canonicalAssignee, &f.PagerEpisode); err != nil {
 		return finding.Finding{}, err
 	}
 	if canonicalAssignee != nil {

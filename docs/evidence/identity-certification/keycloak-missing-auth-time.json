@@ -1,0 +1,57 @@
+{
+  "result": "pass",
+  "completed_at": "2026-10-25T14:17:35.782688+00:00",
+  "runtime": {
+    "api_image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+    "api_started_at": "2026-10-25T13:15:49.518142939Z",
+    "shared_source": "a2de17b9",
+    "keycloak_build": "26.8.1"
+  },
+  "flow": "Auth0 readonly source -> Keycloak destination callback with client-local auth_time mapper omitted -> denied/source reload works -> restore -> new callback same person secondary readonly",
+  "provider_control": {
+    "shared_basic_untouched": true,
+    "only_client_basic_assignment_replaced": true,
+    "temporary_scope_contains_only_original_sub_mapper": true,
+    "example_subject_issuer_audience_client_email_boolean_verification_unchanged": true,
+    "note": "Admin example has no user-session authentication time even at baseline. Missing auth_time is inferred from the real provider mapper omission and isolated callback denial; raw callback JWT was not retained."
+  },
+  "denial": {
+    "message": "The identity you selected is not approved for this action. Your existing sign-in is still active.",
+    "source_tenant": "default",
+    "source_role": "readonly",
+    "source_authentication_time": "2026-10-25T14:05:07+00:00",
+    "source_dashboard_reload": true,
+    "new_destination_session": false
+  },
+  "recovery": {
+    "tenant": "sandbox-secondary",
+    "role": "readonly",
+    "same_existing_person": true,
+    "authentication_time": "2026-10-25T14:07:24+00:00",
+    "session_created_at": "2026-10-25T14:16:47.600786+00:00",
+    "exact_default_optional_scopes_restored": true,
+    "temporary_scope_deleted": true,
+    "guard_inactive": true
+  },
+  "authority": {
+    "persons": 5,
+    "memberships": 7,
+    "authenticators": 8,
+    "roles_policies_connections_revisions_unchanged": true
+  },
+  "api_restarted": false,
+  "billing_added": false,
+  "limitations": [
+    "Stale signed auth_time was not tested in this drill.",
+    "Raw callback JWT claims were not retained; mapper omission is the controlled provider condition.",
+    "Provider reused recent SSO; this drill does not claim a fresh password prompt."
+  ],
+  "observations_sha256": {
+    "keycloak-missing-auth-time-drill.json": "a2cdab229402ce4e08e05613780d946778740d6cb98b639e5dd614029cf1bdf0",
+    "native-connection-revision-keycloak-missing-time-before.json": "1cd2d00cf0c7fe99f92a4a1601e3257120ecfef56fa11fe5d7fa62d4282b38bb",
+    "native-connection-revision-keycloak-missing-time-denied.json": "0fcd27dab067947c4c54bec3b1b647322577acad6ae7eea799467df6de768db2",
+    "native-connection-revision-keycloak-missing-time-restored.json": "b7987cba87aea982fbb4fe50507d132c7af1cc62800bab4b744fc972f6982370",
+    "keycloak-missing-time-denied.png": "1f3cde5f937b6e445cb8cd6bae4ee80c441b96f1f492f461a94983a007df3a1b",
+    "keycloak-missing-time-restored.png": "66d1e041e5a0540cf8ac96cb382a824fa52d5e987ad7ab4b70d09baf2ee42203"
+  }
+}

@@ -3,11 +3,11 @@
 The identity foundation adds persons, tenant memberships, approved authenticators, connections and
 exact-digest credential routing next to the existing `users` table. Until a tenant declares cutover,
 `users` stays the only writer of record: bearer keys, browser sessions and roles keep coming from it, and
-the new tables are a projection that can be dropped and rebuilt. Enterprise identity stays disabled, and
-nothing in this release reads the new tables to authenticate a request.
+the new tables are a projection that can be dropped and rebuilt. A declared tenant may use its native
+identity authority for enterprise browser sessions; that authority remains tenant-scoped.
 
-This guide covers the order of operations, the backfill and shadow parity commands, how to read their
-results, and how to back out.
+This guide covers the order of operations, the backfill and shadow parity commands, guarded initial
+organization provisioning, public organization sign-in, how to read results, and how to back out.
 
 ## What changes for operators now
 
@@ -40,12 +40,110 @@ work either.
 
 What this means in practice:
 
-- A hosted provider (Entra ID, Okta, Auth0, Google) works as it is.
+- A hosted provider must expose public HTTPS discovery and signing keys, and satisfy the protocol
+  checks below. Reachability alone does not certify a connection.
 - A self-hosted provider has to be published on a public name with a certificate the API trusts.
   Keycloak, Authentik or Zitadel on an internal network cannot be reached from the API, and the
   failure appears at the connection test rather than at startup.
 - A connection draft is accepted before any discovery runs, so a draft that stores cleanly says
   nothing about reachability. The test is what proves it.
+
+## Exact issuer URLs
+
+Keep the issuer exactly as the provider advertises it, including any trailing slash. For example,
+`https://issuer.example` and `https://issuer.example/` are separate trust identifiers. Synapse checks
+discovery metadata, signed token claims and approved subject links against that exact value.
+
+Previously, configuration and new connection drafts removed trailing slashes. A configuration that
+relied on that behavior must be corrected to match the provider. Existing stored connections and
+approved links are not rewritten: correcting a connection issuer requires a new tested connection,
+and fixed-provider subjects require explicit approval under the correct issuer.
+
+## Microsoft Entra ID discovery
+
+Use the canonical public-cloud tenant issuer:
+`https://login.microsoftonline.com/<lowercase-directory-guid>/v2.0`. Keep the app's Web redirect URI
+exactly equal to the callback shown by Synapse. The connection uses `openid`, `profile`, and `email`;
+provider groups, display names, email addresses, and UPNs do not grant membership or identify a person.
+
+The optional `entra_discovery_mode` selects metadata discovery: an empty string uses the tenant URL,
+while `common` and `organizations` use the corresponding Microsoft metadata endpoint. These aliases
+still authorize and exchange tokens at the configured directory's tenant endpoint. The signed issuer
+and `tid` must match that directory, and each eligible signing key must carry the matching issuer or
+Microsoft's tenant issuer template. Selecting an alias never allows a second directory to sign in.
+
+Synapse continues to send PKCE S256. Microsoft's recognized discovery documents may omit the PKCE
+capability field; an explicit unsupported or malformed value is rejected. The omission exception
+requires the exact public-cloud Entra metadata and endpoint combination.
+
+For an existing connection, changing metadata mode creates a draft. Save does not change the active
+revision. Complete a fresh provider Test and Activate the tested draft; the page shows active and
+pending modes separately. Activation fences old authorization transactions without revoking existing
+sessions for the same authority. Disable still revokes the connection's sessions. Issuer, client ID,
+callback, and organization restriction remain fixed for the connection.
+
+During initial organization provisioning, the first draft fixes the metadata mode. A credential
+correction must resend that same mode; a conflicting retry is rejected. Legacy adoption uses only the
+tenant-specific mode. During a mixed-version rollout, keep configuration writes on
+updated replicas; older settings codecs do not preserve the new mode when saving a
+revision. Application rollback does not require reversing memberships or restoring
+an older database backup.
+
+## Initial organization provisioning
+
+Initial provisioning creates the first identity connection and first administrator for one fresh,
+configured tenant. It is entered locally at `/settings/authentication?operator=1`. That entrance accepts
+only the deployment's bootstrap administrator credential; it does not grant the operator a membership in
+the target tenant. A normal organization token cannot use it.
+
+The bootstrap administrator runs the scoped sequence for the target tenant:
+
+1. `POST /api/v1/identity/provisioning/begin` with `tenant_id` and the first administrator's `recipient`.
+   It reserves the target, connection, and pinned administrator invitation, returning a safe
+   `provisioning` view plus a short-lived capability when the reservation is still open.
+2. `POST /api/v1/identity/provisioning/draft` with that capability and the connection fields
+   (`display_name`, `issuer`, `client_id`, `client_secret`, optional
+   `auth0_organization_id`, `entra_discovery_mode`, and `version`). The connection ID and tenant come from the reservation,
+   not from the request. Use version `0` for the first save. Before activation, a secret correction
+   uses the current connection version, creates a new revision, and requires a fresh provider Test.
+   Issuer, client ID, callback, and organization restriction remain fixed.
+3. `POST /api/v1/identity/provisioning/test` to obtain `authorization_url` and complete a real provider
+   login. Its callback returns only to `/settings/authentication?provisioning_tenant=<target>`; it does
+   not expose a capability, client secret, or invitation code in the URL.
+4. `POST /api/v1/identity/provisioning/activate` with the capability, tested `revision`, and current
+   `version`.
+5. `POST /api/v1/identity/provisioning/invitation` with the capability. It returns the safe
+   `provisioning` view and the one-time first-administrator `code`; keep both that code and the
+   capability out of persistent client storage.
+6. The invited person completes ordinary invitation enrollment, receives the target tenant membership,
+   and then signs in through the active connection as that administrator.
+
+`status` reads the same safe reservation view for a capability. The safe view contains the reservation
+ID, tenant ID, recipient, state, version, and non-secret connection and invitation metadata. It never
+returns the capability, sealed client secret, or invitation code. Every route is platform-bootstrap
+administrator only. Begin and status may report a closed reservation; Begin omits its capability.
+Mutations refuse a closed or conflicting reservation, an expired capability, a stale version, or an
+untested revision. Provider cancellation returns to setup after validation of its sealed context.
+The pinned first-administrator invitation expires after seven days and is not renewed automatically;
+an expired invitation fails closed. Accepted invitations no longer participate in ordinary sign-in.
+
+## Public organization sign-in
+
+An ordinary sign-in can be bookmarked as `?tenant_id=<target>`. The client reads
+`GET /api/auth/enterprise/context?tenant_id=<target>` and sends the same `tenant_id` only with
+`POST /api/auth/enterprise/begin` where `purpose` is `login`. Omission keeps the legacy deployment
+default behavior.
+
+An explicit target must be a non-empty, bounded identifier without controls, occur only once in the
+query, and name a tenant that is declared for identity and enabled for both reads and mutations in this
+process. An unknown, undeclared, or unavailable target fails closed; it never falls back to the default
+tenant or another connection. `test`, invitation, link, and step-up flows derive their target from their
+server-held proof, code, or session and reject a caller-provided selector.
+
+The callback uses the tenant sealed into its authorization nonce, not a callback query parameter. Its
+ordinary login and invitation redirects may carry a non-secret `tenant_id` hint so the frontend can
+retain the selected organization for a retry or logout recovery. That hint cannot override the sealed
+target or create a session in another tenant.
 
 ## Order of operations
 
@@ -174,5 +272,6 @@ migration before running Down; a newer binary fails every user write once the ta
   are created before their first membership.
 - Suspending or reactivating a person, and revoking a person's sessions across tenants, require the
   migration (owner) connection. The runtime role can only create persons.
-- No organization switching, invitations, provider connections or enterprise sign-in. Those land with the
-  shared authentication and cutover work, behind their own activation gates.
+- Initial provisioning creates only one fresh tenant's first connection and first administrator. Routine
+  connection, invitation, membership, and recovery operations remain scoped to their authenticated
+  tenant authority.

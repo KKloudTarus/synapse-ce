@@ -50,7 +50,7 @@ func (s *DocumentStore) SaveDocumentRestrictionCheck(ctx context.Context, tenant
 	if bound, ok := shared.TenantFrom(ctx); ok && bound != tenant {
 		return shared.ErrForbidden
 	}
-	if tenant.IsZero() || link.TenantID != tenant || link.ID.IsZero() || link.Revision < 1 || link.RestrictionCheckVersion < 1 || at.IsZero() || !next.After(at) || (status != "verified" && status != "restriction_lost" && status != "unverifiable") {
+	if tenant.IsZero() || link.TenantID != tenant || link.ID.IsZero() || link.Revision < 1 || link.RestrictionCheckVersion < 1 || at.IsZero() || !next.After(at) || (status != "verified" && status != "restriction_lost" && status != "unverifiable" && status != "destination_managed") {
 		return shared.ErrValidation
 	}
 	s.mu.Lock()

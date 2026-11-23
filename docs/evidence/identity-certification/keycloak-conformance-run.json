@@ -1,0 +1,80 @@
+{
+  "result": "pass",
+  "started_at": "2026-10-25T15:23:44.581673+00:00",
+  "finished_at": "2026-10-25T15:25:20.521101+00:00",
+  "base_head": "6196963bfb70c2c41616fe6d4ac180b06b22233a",
+  "source": "git archive of base HEAD plus the intended test, runner, workflow, Makefile and worksheet files; inherited unstaged issuer patch excluded",
+  "source_sha256": {
+    "internal/infrastructure/oidc/keycloak_fixture_test.go": "dee466f6ec31c4a756cffcbdbe67d094f736b35eca7dd8e16f919cfb047a4e17",
+    "internal/infrastructure/oidc/keycloak_integration_test.go": "34f388ef8caee29dff61d8b0275566b9cdab6de36f689dc0d25fe9919abf3b94",
+    "scripts/run_keycloak_integration.py": "228d3e81c407cae605cb8e063a187fbade4c215f5bdbd689c338d26d2542104e",
+    "Makefile": "4138c9de6b2375daadf06a78f27534e8f5ae0a5b9611d34bb81d5ded6f4db4ba",
+    ".github/workflows/ci.yml": "134a2fe3fbddf989aa9814c9b5de8e192a47045f2ff5a0995087d4c1c7886a17",
+    ".github/workflows/release.yml": "40bef2d6e91f97ef526a1672cd889a5f7ff05f87d0e6ddcaa4c6019f5fb99f95",
+    ".github/workflows/keycloak-conformance.yml": "ecb59cd0c1a5f8f4f3afa5efa0ee120e0efd165a87eda5ec729c30cf1ba13db1"
+  },
+  "command": "python3 scripts/run_keycloak_integration.py --go /home/vihn/.local/share/mise/installs/go/1.27.0/bin/go",
+  "exit_code": 0,
+  "test_pass_events": [
+    {
+      "Test": "TestKeycloakEnterpriseConformance/baseRoot",
+      "Elapsed": 33.73
+    },
+    {
+      "Test": "TestKeycloakEnterpriseConformance/baseAuth",
+      "Elapsed": 44.99
+    },
+    {
+      "Test": "TestKeycloakEnterpriseConformance",
+      "Elapsed": 78.72
+    }
+  ],
+  "full_local_log_sha256": "93d0821698e35fcff1c4ef08ef39612e1bb37dbe19f2423d039ff1772735f73f",
+  "keycloak_image": "quay.io/keycloak/keycloak@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b",
+  "postgres_image": "postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3",
+  "coverage": [
+    "Real discovery, S256 authorization-code login, signed ID-token validation and fresh authentication time for root and /auth Keycloak paths",
+    "PostgreSQL migrations and non-superuser/NOBYPASSRLS runtime role; production connection test, activation, explicit invitation enrollment and ordinary login/session authentication",
+    "Valid unknown provider identity denied without person, membership, authenticator or session increase",
+    "Valid independent realm B control; ordinary A verification rejects B signature without authority increase",
+    "Separate controlled B public-JWKS substitution reaches explicit issuer mismatch check in a fresh A verifier"
+  ],
+  "runner_fault_checks": [
+    {
+      "at": "2026-10-25T14:43:17.087055+00:00",
+      "result": "pass",
+      "fault": "test executable exits1 after actual pinned PostgreSQL readiness and host-side TCP check",
+      "runner_exit_code": 1,
+      "exact_run_label_containers_remaining": 0,
+      "exact_run_label_networks_remaining": 0,
+      "retained_provider_stack_touched": false,
+      "credential_in_output": false
+    },
+    {
+      "at": "2026-10-25T14:45:12.321035+00:00",
+      "result": "pass",
+      "checks": [
+        {
+          "fault": "child exits0 but no required Go test pass event",
+          "runner_exit": 1,
+          "cleanup": true
+        },
+        {
+          "fault": "SIGTERM while child active",
+          "runner_exit": 130,
+          "cleanup": true
+        }
+      ],
+      "retained_stack_untouched": true
+    }
+  ],
+  "remaining_conformance_containers": 0,
+  "remaining_conformance_networks": 0,
+  "retained_provider_credentials_or_stack_used": false,
+  "limitations": [
+    "Local trusted TLS fixture uses the existing private same-package test seam; production safe-client transport is unchanged and public DNS/SSRF behavior is covered separately",
+    "Issuer-control JWKS routing is an explicit test fixture; no provider private key is exported",
+    "Does not establish the remaining browser worksheet cells or claim complete issue acceptance",
+    "Hosted CI has not yet run for this uncommitted source"
+  ]
+}

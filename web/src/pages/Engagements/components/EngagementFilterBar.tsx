@@ -30,6 +30,7 @@ const SCOPE_OPTIONS: { id: string; label: string }[] = [
   { id: 'url', label: 'URL' },
   { id: 'image', label: 'Container Image' },
   { id: 'cidr', label: 'CIDR / IP' },
+  { id: 'process', label: 'Process' },
 ]
 
 export const EngagementFilterBar: FC<EngagementFilterBarProps> = ({

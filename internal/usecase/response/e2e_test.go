@@ -81,7 +81,11 @@ type e2eAgentActuator struct {
 
 func (a *e2eAgentActuator) ExecuteResponse(_ context.Context, command fleetagent.ResponseCommand) (responseexecute.ActuatorOutcome, error) {
 	a.commands = append(a.commands, command)
-	return responseexecute.ActuatorOutcome{ObservedRadius: offensivepolicy.RadiusStateChanging, AffectedCount: 1}, nil
+	outcome := responseexecute.ActuatorOutcome{ObservedRadius: offensivepolicy.RadiusStateChanging, AffectedCount: 1}
+	if command.Reversal {
+		outcome.ReplacementProcessEntityID = "pe_22222222222222222222222222222222"
+	}
+	return outcome, nil
 }
 
 type e2eAgentExecutor struct {
@@ -122,6 +126,9 @@ func (*e2eAgentExecutor) Identity() string        { return "agent:response-execu
 func (*e2eAgentExecutor) Supports(rdom.Kind) bool { return true }
 func (*e2eAgentExecutor) ResolveAgent(context.Context, shared.ID, responsesaga.TargetFingerprint) (shared.ID, error) {
 	return "response-executor", nil
+}
+func (*e2eAgentExecutor) ResolveReplacement(context.Context, ports.ResponseVerificationRequest) (shared.ID, error) {
+	return "pe_22222222222222222222222222222222", nil
 }
 func (e *e2eAgentExecutor) count() int          { return len(e.actuator.commands) }
 func (e *e2eAgentExecutor) reversal(i int) bool { return e.actuator.commands[i].Reversal }
@@ -211,7 +218,7 @@ func newE2EVerificationSource(req VerificationRequest, outcome Verification) (Ve
 	}
 	replacementID := shared.ID("")
 	if req.Reversal {
-		replacementID = req.Target.ProcessEntityID + "-replacement"
+		replacementID = req.ReplacementProcessEntityID
 	}
 	receipt := fleetagent.ResponseTargetEvidenceReceipt{
 		Version: fleetagent.ResponseTargetEvidenceReceiptVersion, ReceiptID: shared.ID("receipt:" + req.AttemptKey), TenantID: req.TenantID,
@@ -265,7 +272,7 @@ func newE2EVerificationSource(req VerificationRequest, outcome Verification) (Ve
 		source.Coverage = []sensorstate.CoverageWindow{window}
 		entityID, kind := req.Target.ProcessEntityID, endpoint.TimelineProcessExit
 		if req.Reversal && outcome == VerificationSucceeded {
-			entityID, kind = replacementID, endpoint.TimelineProcessStart
+			entityID, kind = replacementID, endpoint.TimelineProcessExec
 		} else if outcome == VerificationFailed {
 			kind = endpoint.TimelineProcessExec
 		}
@@ -275,11 +282,16 @@ func newE2EVerificationSource(req VerificationRequest, outcome Verification) (Ve
 			EntityKind: endpoint.EntityProcess, EntityID: entityID, Kind: kind, EventID: shared.ID("event:" + req.AttemptKey),
 		}}
 		if req.Reversal && outcome == VerificationSucceeded {
-			source.Timeline = append([]endpoint.TimelineEntry{{
-				OccurredAt: observedAt.Add(-time.Nanosecond), TenantID: req.TenantID, AssetID: req.Target.ProcessAssetID,
-				SourceAgentID: report.AgentID, SourceAgentSessionID: shared.ID(report.AgentSessionID),
-				EntityKind: endpoint.EntityProcess, EntityID: req.Target.ProcessEntityID, Kind: endpoint.TimelineProcessExit, EventID: shared.ID("exit:" + req.AttemptKey),
-			}}, source.Timeline...)
+			originalWindow := window
+			originalWindow.Since = req.OriginalAttemptedAt.UTC().Truncate(time.Microsecond)
+			originalWindow.Until = originalWindow.Since.Add(time.Microsecond)
+			originalWindow.Revision = sensorstate.RevisionFor(originalWindow)
+			receipt.OriginalEvidence = &fleetagent.ResponseOriginalProcessEvidence{
+				AttemptKey: req.OriginalAttemptKey, AttemptedAt: originalWindow.Since,
+				Exit:     endpoint.TimelineEntry{OccurredAt: originalWindow.Since, TenantID: req.TenantID, AssetID: req.Target.ProcessAssetID, SourceAgentID: report.AgentID, SourceAgentSessionID: shared.ID(report.AgentSessionID), EntityKind: endpoint.EntityProcess, EntityID: req.Target.ProcessEntityID, Kind: endpoint.TimelineProcessExit, EventID: "fixture-original-exit"},
+				Coverage: []sensorstate.CoverageWindow{originalWindow},
+			}
+			receipt.ReplacementProcessEntityID = replacementID
 		}
 	}
 	receipt.Timeline = append([]endpoint.TimelineEntry(nil), source.Timeline...)
@@ -296,7 +308,7 @@ func e2eEngagement(now time.Time) *engagement.Engagement {
 	e, _ := engagement.New(shared.ID("eng-1"), shared.ID("t1"), "Acme", "Acme", now)
 	from, to := now.Add(-time.Hour), now.Add(time.Hour)
 	_ = e.SetAuthorizationWindow(&from, &to, "UTC", now)
-	e.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetDomain, Value: "app.acme.io"}}}
+	e.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetProcess, Value: "pe_11111111111111111111111111111111"}}}
 	return e
 }
 
@@ -364,12 +376,12 @@ func TestGovernedResponseEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	action, err := rdom.NewAction("resp-1", rdom.KindStopProcess, "app.acme.io")
+	action, err := rdom.NewAction("resp-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatalf("build action: %v", err)
 	}
-	target := engagement.Target{Kind: engagement.TargetDomain, Value: "app.acme.io"}
-	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "app.acme.io"}
+	target := engagement.Target{Kind: engagement.TargetProcess, Value: "pe_11111111111111111111111111111111"}
+	fingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"}
 
 	// 1) Even ModeAuto suspends an intrusive response action until a human decides it.
 	if _, err := coordinator.Apply(ctx, "inc-1", action, target, fingerprint, "alice"); !errors.Is(err, safety.ErrPendingApproval) {
@@ -442,6 +454,10 @@ func TestGovernedResponseEndToEnd(t *testing.T) {
 	if rec.State != StateReverted || exec.count() != 2 || !exec.reversal(1) {
 		t.Fatalf("verified reversal must not re-execute: state=%s executions=%d", rec.State, exec.count())
 	}
+	replayed, err := svc.Revert(ctx, action.ID, target, fingerprint, "alice")
+	if err != nil || replayed.State != StateReverted || exec.count() != 2 {
+		t.Fatalf("revalidate reversal evidence without replaying process: state=%s executions=%d err=%v", replayed.State, exec.count(), err)
+	}
 	if rec.Verification != VerificationSucceeded {
 		t.Fatalf("reversal must retain the independently verified apply result, got %q", rec.Verification)
 	}
@@ -456,9 +472,9 @@ func TestGovernedResponseEndToEnd(t *testing.T) {
 	}
 
 	// 6) Out-of-scope target is refused by the gate FIRST — no approval can widen scope.
-	oos, _ := rdom.NewAction("resp-2", rdom.KindStopProcess, "evil.example.com")
-	oosFingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "evil.example.com"}
-	if _, err := svc.Apply(ctx, "eng-1", oos, engagement.Target{Kind: engagement.TargetDomain, Value: "evil.example.com"}, oosFingerprint, "alice"); !errors.Is(err, shared.ErrForbidden) {
+	oos, _ := rdom.NewAction("resp-2", rdom.KindStopProcess, "pe_22222222222222222222222222222222")
+	oosFingerprint := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_22222222222222222222222222222222"}
+	if _, err := svc.Apply(ctx, "eng-1", oos, engagement.Target{Kind: engagement.TargetProcess, Value: "pe_22222222222222222222222222222222"}, oosFingerprint, "alice"); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("out-of-scope response must be forbidden, got %v", err)
 	}
 }
@@ -482,13 +498,13 @@ func (v staticVerificationVault) LookupAttestedByID(_ context.Context, engagemen
 }
 
 func TestEvidenceReceiptValidatorRejectsUnboundAndUntrustedClaims(t *testing.T) {
-	action, err := rdom.NewAction("a1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("a1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := VerificationRequest{
 		TenantID: "t1", EngagementID: "eng-1", Action: action,
-		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		ExecutorID: "agent:response-executor", ExecutorAgentID: "response-executor", AttemptKey: "attempt-1",
 		VerificationChallenge: strings.Repeat("c", 64), AttemptedAt: time.Unix(999, 0).UTC(), DeadlineAt: time.Unix(1099, 0).UTC(),
 	}

@@ -93,6 +93,7 @@ const (
 	EventIncidentUpdated          EventType = "incident.updated"
 	EventResponseFinished         EventType = "response.finished"
 	EventEvidenceChainBroken      EventType = "evidence.chain_broken"
+	EventReportGenerated          EventType = "report.generated"
 )
 
 // Valid reports whether the event type is declared in the catalog.
@@ -370,9 +371,10 @@ type Event struct {
 	// SubjectKind and SubjectID name the entity the event is about (EPIC D8), and Context is the
 	// template context snapshot its builder took at projection (D5). They are not part of the
 	// webhook body, which is the raw event and a public contract (D4).
-	SubjectKind string          `json:"-"`
-	SubjectID   string          `json:"-"`
-	Context     json.RawMessage `json:"-"`
+	SubjectKind    string          `json:"-"`
+	SubjectID      string          `json:"-"`
+	Context        json.RawMessage `json:"-"`
+	PagerLifecycle PagerLifecycle  `json:"-"`
 }
 
 // schemaVersionKnown accepts any envelope version from 1 up to the one the catalog declares for the
@@ -394,6 +396,9 @@ func (e Event) Validate() error {
 	}
 	if (e.SubjectKind != "" && !sourceKindShape.MatchString(e.SubjectKind)) || len(e.SubjectID) > maxSubjectIDLength {
 		return fmt.Errorf("%w: invalid notification event subject", shared.ErrValidation)
+	}
+	if err := e.PagerLifecycle.validate(e.Type, e.SubjectKind, e.SubjectID); err != nil {
+		return err
 	}
 	if len(e.Context) != 0 && !isJSONObject(e.Context, maxContextBytes) {
 		return fmt.Errorf("%w: notification event context must be an object", shared.ErrValidation)

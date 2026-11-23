@@ -15,12 +15,13 @@ import type { AupStatus, CurrentUser } from '../lib/types'
 // The development/automation bearer token is kept in sessionStorage so it dies with the
 // browser tab instead of persisting across restarts for later XSS to read.
 const TOKEN_KEY = 'synapse.token'
-type Phase = 'connecting' | 'unauthenticated' | 'need-aup' | 'ready'
+type Phase = 'connecting' | 'mailbox' | 'unauthenticated' | 'need-aup' | 'ready'
 type AuthMethod = 'session' | 'token'
 
 const INVALID_TOKEN = 'Invalid API token.'
 const SESSION_EXPIRED = 'Your sign-in session expired. Sign in again.'
 const ACCESS_DENIED = 'This sign-in is not approved for Synapse. Ask an administrator to link your identity.'
+const ENTERPRISE_UNAVAILABLE = 'Your organization sign-in is temporarily unavailable. Try the approved sign-in connection again.'
 const SIGN_IN_FAILED = 'Organization sign-in could not be completed. Try again, or use an API token.'
 
 interface AuthState {
@@ -36,7 +37,7 @@ interface AuthState {
   retrying: boolean
   connecting: boolean
   oidcAvailable: boolean
-  connect: (token: string) => Promise<void>
+  connect: (token: string, requiredCredential?: 'bootstrap') => Promise<void>
   acceptAup: () => Promise<void>
   logout: () => Promise<void>
   retry: () => Promise<void>
@@ -45,6 +46,7 @@ interface AuthState {
    * visible identity, and restores the authenticated state for the destination tenant.
    */
   completeOrganizationSwitch: (csrfToken: string) => Promise<void>
+  completeMailboxContinuation: () => Promise<void>
 }
 
 const Ctx = createContext<AuthState | null>(null)
@@ -88,6 +90,24 @@ function readAuthErrorParam(): string | null {
   return new URLSearchParams(window.location.search).get('auth_error')
 }
 
+function callbackFailureFor(reason: string): Failure {
+  const message = reason === 'access_denied'
+    ? ACCESS_DENIED
+    : reason === 'unavailable'
+      ? ENTERPRISE_UNAVAILABLE
+      : SIGN_IN_FAILED
+  // Retrying only restores the local credential. It does not repeat the provider sign-in that
+  // produced this callback, so the user must use the connection already shown by the sign-in UI.
+  return { message, requestId: null, canRetry: false }
+}
+
+function preserveOrganizationLogin(user: CurrentUser | null) {
+  if (user?.credentialKind !== 'browser_session' || !user.tenantId) return
+  // This is a public routing hint. The server still validates the selected tenant and provider.
+  const query = new URLSearchParams({ tenant_id: user.tenantId })
+  window.history.replaceState(window.history.state, '', `/?${query}`)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('connecting')
   const [aup, setAup] = useState<AupStatus | null>(null)
@@ -95,8 +115,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [failure, setFailure] = useState<Failure | null>(() => {
     const reason = readAuthErrorParam()
     if (!reason || reason === 'mailbox_verification_required') return null
-    return { message: reason === 'access_denied' ? ACCESS_DENIED : SIGN_IN_FAILED, requestId: null, canRetry: false }
+    return callbackFailureFor(reason)
   })
+  const callbackFailure = useRef(failure)
+  const mailboxContinuation = useRef(readAuthErrorParam() === 'mailbox_verification_required')
   const [connecting, setConnecting] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [oidcAvailable, setOidcAvailable] = useState(true)
@@ -115,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [phase, authMethod])
 
   const setError = useCallback((message: string | null) => {
+    callbackFailure.current = null
     setFailure(message ? { message, requestId: null, canRetry: false } : null)
   }, [])
 
@@ -137,23 +160,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // still applies. Once the AUP is accepted, /me is part of authentication restoration: any failure
   // remains a failure instead of presenting a ready state with an unknown user.
   const loadAuthenticated = useCallback(async () => {
-    const status = await api.aup()
+    let status: AupStatus
+    try {
+      status = await api.aup()
+    } catch (cause) {
+      // Break-glass sessions intentionally cannot accept the ordinary AUP. The identity returned
+      // by the same authenticated client is the only authority for entering its isolated console.
+      if (!(cause instanceof ApiError) || cause.status !== 403 || cause.code !== 'permission_denied') throw cause
+      let me: CurrentUser
+      try {
+        me = await api.me()
+      } catch (identityError) {
+        // A failed identity read never grants recovery access. Preserve failures that restoration
+        // already knows how to recover from or explain; only mask definitive non-recovery denials.
+        if (isUnauthenticated(identityError) || !(identityError instanceof ApiError) || identityError.retryable) throw identityError
+        throw cause
+      }
+      if (me.credentialKind !== 'break_glass') throw cause
+      return { status: null, me }
+    }
     const me = status.accepted && typeof api.me === 'function' ? await api.me() : null
     return { status, me }
   }, [])
 
-  const applyAuthenticated = useCallback((result: { status: AupStatus; me: CurrentUser | null }) => {
+  const applyAuthenticated = useCallback((result: { status: AupStatus | null; me: CurrentUser | null }) => {
+    if (result.status === null && result.me?.credentialKind !== 'break_glass') {
+      throw new Error('Recovery authentication requires a verified break-glass credential.')
+    }
     setAup(result.status)
     setCurrentUser(result.me)
-    const nextPhase = result.status.accepted ? 'ready' : 'need-aup'
+    const nextPhase = result.status === null || result.status.accepted ? 'ready' : 'need-aup'
     phaseRef.current = nextPhase
     setPhase(nextPhase)
   }, [])
+
+  const completeRestoration = useCallback((result: { status: AupStatus | null; me: CurrentUser | null }) => {
+    const refused = callbackFailure.current
+    callbackFailure.current = null
+    setFailure(refused ? {
+      ...refused,
+      message: refused.message === ACCESS_DENIED
+        ? 'The identity you selected is not approved for this action. Your existing sign-in is still active.'
+        : refused.message === ENTERPRISE_UNAVAILABLE
+          ? 'Your organization sign-in is temporarily unavailable. Your existing sign-in is still active. Use Review sign-in to retry an approved connection.'
+        : 'The additional sign-in attempt could not be completed. Your existing sign-in is still active.',
+    } : null)
+    applyAuthenticated(result)
+  }, [applyAuthenticated])
 
   // Restoration: try the BFF cookie session, then a saved bearer token. Only a rejected credential
   // is discarded; a dependency failure keeps it and offers Retry.
   const restore = useCallback(async () => {
     const gen = ++generation.current
+    // Discovery rotates the cookie that an invitation proof binds exactly. Hold
+    // restoration until mailbox completion or cancellation, including generic retries.
+    if (mailboxContinuation.current) { setPhase('mailbox'); return }
     const current = () => gen === generation.current
     setApiToken('')
     setCSRFToken('')
@@ -172,8 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const result = await loadAuthenticated()
         if (!current()) return
-        setFailure(null)
-        applyAuthenticated(result)
+        completeRestoration(result)
       } catch (e) {
         if (!current()) return
         setPhase('unauthenticated')
@@ -214,8 +274,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const result = await loadAuthenticated()
       if (!current()) return
-      setFailure(null)
-      applyAuthenticated(result)
+      completeRestoration(result)
     } catch (e) {
       if (!current()) return
       setPhase('unauthenticated')
@@ -227,7 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setFailure(keptFailure(e, 'Could not restore your sign-in session'))
       }
     }
-  }, [applyAuthenticated, clearAuthentication, loadAuthenticated, resetLocalAuthentication, setError])
+  }, [completeRestoration, clearAuthentication, loadAuthenticated, resetLocalAuthentication, setError])
 
   const retry = useCallback(async () => {
     if (retryInFlight.current) return
@@ -241,7 +300,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [restore])
 
+  const completeMailboxContinuation = useCallback(async () => {
+    mailboxContinuation.current = false
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('auth_error') === 'mailbox_verification_required') {
+      url.searchParams.delete('auth_error')
+      window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash)
+    }
+    setPhase('connecting')
+    await retry()
+  }, [retry])
+
   const completeOrganizationSwitch = useCallback(async (csrfToken: string) => {
+    callbackFailure.current = null
     // A switch replaces the browser session. Clear tenant-derived UI before restoring so an
     // in-flight request or cached component cannot present the previous organization's data as
     // belonging to the destination.
@@ -277,10 +348,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     if (gen !== generation.current) return
+    preserveOrganizationLogin(currentUser)
     clearAuthentication()
     setError(null)
     setPhase('unauthenticated')
-  }, [authMethod, clearAuthentication, setError])
+  }, [authMethod, clearAuthentication, currentUser, setError])
 
   // Requests made after sign-in report authentication outcomes here. Restoration and connect handle
   // their own responses, so the handler acts only on an established session.
@@ -292,14 +364,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!invalid && !isUnauthenticated(e)) return
       generation.current++
       const message = authMethodRef.current === 'token' ? INVALID_TOKEN : SESSION_EXPIRED
+      if (authMethodRef.current === 'session') preserveOrganizationLogin(currentUser)
       if (invalid) clearAuthentication()
       else resetLocalAuthentication()
       setPhase('unauthenticated')
       setError(message)
     })
-  }, [clearAuthentication, resetLocalAuthentication, setError])
+  }, [clearAuthentication, currentUser, resetLocalAuthentication, setError])
 
-  const connect = useCallback(async (raw: string) => {
+  const connect = useCallback(async (raw: string, requiredCredential?: 'bootstrap') => {
     const t = raw.trim()
     if (!t) return
     const gen = ++generation.current
@@ -309,6 +382,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCSRFToken('')
     setAuthMethod('token')
     try {
+      if (requiredCredential === 'bootstrap') {
+        // /me is available before AUP acceptance. Reject an ordinary API credential before
+        // it can be stored or enter either authenticated phase through the operator entrance.
+        const operator = await api.me()
+        if (gen !== generation.current) return
+        if (operator.credentialKind !== 'bootstrap' || operator.role !== 'admin') {
+          throw new Error('Use the deployment operator credential for this sign-in. Organization members must use organization sign-in.')
+        }
+      }
       const result = await loadAuthenticated()
       if (gen !== generation.current) return
       sessionStorage.setItem(TOKEN_KEY, t)
@@ -378,8 +460,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const canRetry = failure?.canRetry ?? false
 
   const value = useMemo(
-    () => ({ phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch }),
-    [phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch],
+    () => ({ phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch, completeMailboxContinuation }),
+    [phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch, completeMailboxContinuation],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

@@ -1,0 +1,69 @@
+{
+  "result": "pass",
+  "completed_at": "2026-10-25T14:10:05.420284+00:00",
+  "runtime": {
+    "api_image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+    "api_started_at": "2026-10-25T13:15:49.518142939Z",
+    "shared_source": "a2de17b9",
+    "keycloak_build": "26.8.1"
+  },
+  "flow": "Auth0 readonly default source -> Keycloak same synthetic account with remapped pairwise subject -> denied, source usable -> restore original scope -> new callback to secondary readonly same person",
+  "subject_preview": {
+    "original_sha256": "a5112f542354b28f75355027fb0782196e54a6052979939de742b88b99498853",
+    "pairwise_sha256": "89405f505c6ac5216b556119bb3dc1d658bea5d793bb4e3cc2ddda0f38be7b48",
+    "issuer_audience_client_email_verified_unchanged": true,
+    "email_verified_boolean_true": true,
+    "note": "Admin-generated unsigned example only; browser callback is the actual federation proof. No raw ID token retained."
+  },
+  "mapper": {
+    "type": "oidc-sha256-pairwise-sub-mapper",
+    "auth_time_original_fields_preserved": true,
+    "auth_time_keycloak_added_default": {
+      "userinfo.token.claim": "true"
+    },
+    "shared_basic_scope_untouched": true,
+    "single_loopback_redirect_host": true,
+    "scope_role_mappings_empty": true
+  },
+  "denial": {
+    "ui_message": "The identity you selected is not approved for this action. Your existing sign-in is still active.",
+    "source_tenant": "default",
+    "source_role": "readonly",
+    "source_authentication_time": "2026-10-25T14:05:07+00:00",
+    "source_reload_worked": true,
+    "destination_session_created": false,
+    "person_membership_authenticator_unchanged": true
+  },
+  "recovery": {
+    "tenant": "sandbox-secondary",
+    "role": "readonly",
+    "same_existing_person": true,
+    "authentication_time": "2026-10-25T14:07:24+00:00",
+    "session_created_at": "2026-10-25T14:08:58.620423+00:00",
+    "exact_default_optional_scope_sets_restored": true,
+    "temporary_scope_deleted": true,
+    "guard_inactive": true
+  },
+  "authority": {
+    "persons": 5,
+    "memberships": 7,
+    "authenticators": 8,
+    "policies_roles_connections_revisions_unchanged": true
+  },
+  "api_restarted": false,
+  "billing_added": false,
+  "limitations": [
+    "No approved pairwise enrollment or additive linking tested.",
+    "Preview claims are unsigned; raw callback JWT claims were not retained.",
+    "No cross-realm/custom-base-path or client-secret rotation claim."
+  ],
+  "observations_sha256": {
+    "keycloak-pairwise-drill.json": "bdd0429bb6d3e27986adecd07b8d440ae3993c61843c2cfdb179e40890e44ef1",
+    "keycloak-pairwise-preflight-rollback.json": "7aefb69bb71e22c12a936852bfec13aea6428907468b818f211061bc041c5d95",
+    "native-connection-revision-keycloak-pairwise-before.json": "9608da59ed8c2ce086b5fd873a55ae5235a242eb791c7b86b170419541988003",
+    "native-connection-revision-keycloak-pairwise-denial-complete.json": "2097bf9621025ca0a12f809df2837a47cfe0582563d88cb95a233769b1e58a58",
+    "native-connection-revision-keycloak-pairwise-restored.json": "f610993d7332029c192bd8e894c6e49f8e32c29471054b54e5b0b8aff995e235",
+    "keycloak-pairwise-denied.png": "a58124d479fc83c7c1142c76a1d4e707f40e948e155877e0c5fd2ab759bafd1f",
+    "keycloak-pairwise-restored.png": "0baae117e24922ff8265abb17646fc8e30ba1897fc754df478b37a3a7c0b4a94"
+  }
+}

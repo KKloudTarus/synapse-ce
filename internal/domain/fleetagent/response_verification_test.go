@@ -28,7 +28,7 @@ func responseReportFixture(t *testing.T) (ResponseVerificationReport, AgentSigni
 		AgentSessionID: CanonicalSessionID("observer-1"), AssetID: "asset-1", EngagementID: "eng-1", ActionID: "action-1",
 		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1",
 		ReceiptID: "receipt", ReceiptDigest: "0000000000000000000000000000000000000000000000000000000000000000", VerificationChallenge: strings.Repeat("b", 64),
-		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"},
+		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		ObservedAt: now, KeyID: key.KeyID,
 	}
 	report.Signature = SignResponseVerification(private, report)
@@ -66,14 +66,14 @@ func TestResponseVerificationReportCannotClaimVerdictAndBindsReversalCandidate(t
 
 	reversal := report
 	reversal.Reversal = true
-	reversal.ReplacementProcessEntityID = "process-2"
+	reversal.ReplacementProcessEntityID = "pe_22222222222222222222222222222222"
 	reversal.Signature = SignResponseVerification(private, reversal)
 	if err := reversal.Validate(); err != nil {
 		t.Fatalf("replacement candidate must be valid: %v", err)
 	}
 
 	revived := reversal
-	revived.ReplacementProcessEntityID = "process-1"
+	revived.ReplacementProcessEntityID = "pe_11111111111111111111111111111111"
 	revived.Signature = SignResponseVerification(private, revived)
 	if err := revived.Validate(); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("reversal must not nominate the exited entity, got %v", err)

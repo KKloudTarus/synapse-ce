@@ -1,0 +1,85 @@
+{
+  "body": {
+    "attachments": [
+      {
+        "content": {
+          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+          "body": [
+            {
+              "inlines": [
+                {
+                  "size": "Medium",
+                  "text": "🟠 Report generated",
+                  "type": "TextRun",
+                  "weight": "Bolder"
+                }
+              ],
+              "type": "RichTextBlock"
+            },
+            {
+              "inlines": [
+                {
+                  "text": "Severity: high",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Report type: engagement_report",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Findings: 7",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Generated: 2026-10-23T09:00:00Z",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Engagement: Live acceptance",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Title: Security assessment report: Live acceptance",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "\n",
+                  "type": "TextRun"
+                },
+                {
+                  "text": "Content hash: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5",
+                  "type": "TextRun"
+                }
+              ],
+              "type": "RichTextBlock"
+            }
+          ],
+          "type": "AdaptiveCard",
+          "version": "1.4"
+        },
+        "contentType": "application/vnd.microsoft.card.adaptive"
+      }
+    ],
+    "type": "message"
+  }
+}

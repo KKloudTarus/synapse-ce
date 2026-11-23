@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -11,15 +10,8 @@ import (
 )
 
 func TestMigration0142RollbackAndReapply(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
-	}
+	dsn := isolatedMigrationAt(t, 142)
 	ctx := context.Background()
-	if err := MigrateLocked(ctx, dsn); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = MigrateLocked(context.Background(), dsn) })
 	db := openLockedGooseDB(t, dsn)
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)

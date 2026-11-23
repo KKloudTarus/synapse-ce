@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../components/synapse/Toast'
 import { api } from '../../lib/api'
@@ -67,5 +67,43 @@ describe('DASTTab', () => {
     renderTab()
     expect(await screen.findByText('Runtime verification')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Propose probe/ })).toBeInTheDocument()
+  })
+
+  async function launchQueuedProbe() {
+    vi.mocked(api.me).mockResolvedValue({ id: 'u1', name: 'Ana', role: 'admin' } as never)
+    vi.mocked(api.judgments).mockResolvedValue([{ id: 'jud-fixture', capability: 'reachability', version: 1 }] as never)
+    vi.mocked(api.proposeRuntimeVerification).mockResolvedValue(PROPOSAL_PENDING as never)
+    vi.mocked(api.decideDastApproval).mockResolvedValue({ state: 'approved', decidedBy: 'Ana' } as never)
+    vi.mocked(api.runRuntimeVerification).mockResolvedValue({ durable: true, run: { id: 'run-fixture', status: 'queued' } } as never)
+    const view = renderTab()
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Judgment to verify' }))
+    fireEvent.click(screen.getByRole('option', { name: 'reachability · jud-fixt' }))
+    fireEvent.change(screen.getByLabelText('Probe URL'), { target: { value: 'https://example.test/fixture' } })
+    fireEvent.click(screen.getByRole('button', { name: /Propose probe/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Run probe/ }))
+    return view
+  }
+
+  it('shows the terminal durable verdict and evidence after enqueue', async () => {
+    vi.mocked(api.getDastRun).mockResolvedValue({ id: 'run-fixture', status: 'succeeded', verdict: 'runtime_confirmed', httpStatus: 200, evidenceId: 'sealed-fixture' } as never)
+    await launchQueuedProbe()
+    expect(await screen.findByText('succeeded')).toBeInTheDocument()
+    expect(screen.getByText('verdict runtime_confirmed')).toBeInTheDocument()
+    expect(screen.getByText('HTTP 200')).toBeInTheDocument()
+    expect(screen.getByText('evidence sealed-fixture')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Run probe/ })).toBeDisabled()
+  })
+
+  it('discards an old probe response when navigating to another engagement', async () => {
+    let complete!: (value: never) => void
+    vi.mocked(api.getDastRun).mockImplementation(() => new Promise((resolve) => { complete = resolve }))
+    const view = await launchQueuedProbe()
+    await waitFor(() => expect(complete).toBeTypeOf('function'))
+    vi.mocked(api.judgments).mockResolvedValue([])
+    view.rerender(<ToastProvider><DASTTab engagementId="eng-other" /></ToastProvider>)
+    await act(async () => { complete({ id: 'run-fixture', status: 'succeeded', verdict: 'runtime_confirmed', httpStatus: 200 } as never) })
+    expect(screen.queryByText('verdict runtime_confirmed')).not.toBeInTheDocument()
+    expect(screen.queryByText('run run-fixture')).not.toBeInTheDocument()
   })
 })

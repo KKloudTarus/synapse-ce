@@ -1,7 +1,7 @@
 // detect.bpf.h — shared definitions for the agent-side detection sensors (issue #422).
 //
-// Following the connlog seed's philosophy: UAPI-stable fields only, NO CO-RE, so the compiled objects
-// load on any kernel with the syscall tracepoints without a per-host vmlinux.h. Each event class is a
+// Shared syscall layouts use UAPI-stable fields. Individual classes may use CO-RE where kernel identity
+// requires it; no per-host vmlinux.h is required. Each event class is a
 // SEPARATE program with its OWN ring buffer map, so a class can be loaded, attached and disabled
 // independently (issue #422 requirement 1). Every program only OBSERVES and emits to its ring buffer; no
 // program writes state, spawns anything, or blocks a syscall (requirement 8).
