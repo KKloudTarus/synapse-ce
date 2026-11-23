@@ -14,8 +14,8 @@ import (
 func TestPlaintextListenerSkipsLoopback(t *testing.T) {
 	dir := t.TempDir()
 	flagged := map[string]string{
-		"public.go":   "func main() { http.ListenAndServe(\":8080\", nil) }\n",
-		"fromvar.go":  "func main() { http.ListenAndServe(\":\"+cfg.HTTP.Port, nil) }\n",
+		"public.go":    "func main() { http.ListenAndServe(\":8080\", nil) }\n",
+		"fromvar.go":   "func main() { http.ListenAndServe(\":\"+cfg.HTTP.Port, nil) }\n",
 		"allifaces.go": "func main() { http.ListenAndServe(\"0.0.0.0:9090\", mux) }\n",
 	}
 	quiet := map[string]string{
