@@ -1254,6 +1254,16 @@ func TestHostileHarness(t *testing.T) {
 				if code >= 500 {
 					t.Errorf("%s returned %d for a cross-tenant read; a guard must reject, not crash: %s", route, code, body)
 				}
+				// A tenant-bound route is probed with the caller's own tenant in the context, which is
+				// what production does, so a store that partitions by that context answers a foreign
+				// caller an empty page rather than tenantA's rows. The marker check above then finds
+				// nothing and passes whether or not the ROUTE still has a guard. Requiring the reject
+				// status keeps that partitioning from standing in for the guard: the route must turn
+				// the caller away before the store is asked, exactly as the (guard only) check above
+				// requires of an unwired route.
+				if bind && code != http.StatusForbidden && code != http.StatusNotFound {
+					t.Errorf("%s is tenant-bound and answered a tenantB caller with %d, want 403 or 404; the store's own partitioning is not the route's guard: %s", route, code, body)
+				}
 			})
 		}
 		if probed < 40 {
