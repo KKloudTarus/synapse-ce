@@ -35,7 +35,7 @@ differs by one path segment fails at callback time, not at save time.
 | Fresh authentication | A sensitive action forces a real re-authentication and returns `auth_time` inside 15 minutes. Record the provider's prompt behaviour. |  |  |
 | Stale or missing auth_time | A proof older than 15 minutes, or an ID token without `auth_time`, leaves access unchanged and offers a retry. |  |  |
 | Destination proof | Switching to a required-SSO organization uses that organization's approved enabled connection and the same person. |  |  |
-| Issuer and key boundary | A token from another authorization server, realm, tenant or environment of this provider is denied. Rotate the signing key and show discovery picking it up. |  |  |
+| Issuer and key boundary | Google serves one issuer, so only the key half is provable here: rotate the signing key and show discovery picking it up. The cross-issuer half of this cell does not apply to this profile. |  |  |
 | Subject remap | A changed or remapped subject is denied rather than reused on the existing link. |  |  |
 | Provider outage | With the provider unreachable, new federation fails usefully, locally valid sessions keep working, and retry recovers. |  |  |
 | Local logout | Logout revokes the Synapse session. Record whether the provider session survived. |  |  |
@@ -44,7 +44,7 @@ differs by one path segment fails at callback time, not at save time.
 
 ## Open questions for this provider
 
-- One issuer serves every Google tenant, so the organization boundary rests entirely on the approved `(issuer, subject)` link and the hosted-domain restriction. Prove an account from another Workspace domain is denied.
+- One issuer serves every Google tenant and Synapse applies no hosted-domain check: the `hd` claim is not read (`internal/infrastructure/oidc/provider.go` parses `nonce`, `at_hash`, `email`, `email_verified`, `name`, `auth_time`, `azp`, `org_id`, `tid` only) and `IdentityOIDCSettings` has no field to configure a permitted domain. The organization boundary therefore rests entirely on the approved `(issuer, subject)` link. Prove that an account from another Workspace domain, and a personal Google account, are each denied for want of an approved link.
 - Confirm what `max_age=900` triggers: Google may satisfy it from an existing session rather than re-prompting, and `auth_time` must still be present and recent.
 - Record whether `email_verified` is `true` for every account in the domain.
 
