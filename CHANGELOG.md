@@ -72,6 +72,22 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **A `gradle.lockfile` is now read, and a lockfile that was never read no longer makes a scan
+  complete.** The scan counted `gradle.lockfile` as a resolving lockfile but no parser claimed it, so
+  a directory holding only that file reported zero components with `completeness.confident` true,
+  every engine complete and `--require-complete` exiting 0, while `synapse-cli doctor` said no
+  supported manifest was found. Beside a `build.gradle` it reported only the direct dependencies and
+  stayed confident, which is where the "generate a lockfile" advice led. The owned producer now reads
+  each locked module as a `pkg:maven` component, merged with the build script's own coordinates, and
+  gives a module development scope, the scope an npm `devDependency` gets, only when every
+  configuration it was resolved in is a test classpath (`testRuntimeClasspath`,
+  `debugUnitTestRuntimeClasspath`, ...; a name that merely contains the letters "test", such as
+  `latestRuntimeClasspath`, is production, and so are the `testFixtures` classpaths). A file in which no line is a
+  lock entry or the `empty=` line is an unreadable manifest and fails the inventory, so a garbled
+  `gradle.lockfile` now makes the scan incomplete (and `--require-complete` fail) instead of passing;
+  a lockfile holding only `empty=` is still a valid, complete, empty lockfile. `doctor` now lists the
+  lockfile and stops asking for a JDK or Gradle when it sits beside the build script. The owned
+  producer version is `ownsbom/0.9.0`, so inventories cached under the previous version are not reused.
 - **The runtime database role no longer holds direct DML on two global lookup tables.**
   `scan_run_engagement_tenants` (the engagement-to-tenant map, migration 0144) and
   `identity_recovery_activation_routes` (every recovery secret digest with its tenant and expiry,

@@ -25,7 +25,9 @@ import (
 const (
 	// ownsbomVersion identifies this producer in SBOM provenance. Bump when parser behavior changes.
 	// 0.8.0: Composer/Mix/Julia/renv/Dart now emit dependency edges (EPIC #1034, #1036).
-	ownsbomVersion = "ownsbom/0.8.0"
+	// 0.9.0: gradle.lockfile is parsed. The bump matters beyond provenance: an SBOM cached under 0.8.0 for a tree
+	// holding a gradle.lockfile has no components from it, and the cache key includes this version.
+	ownsbomVersion = "ownsbom/0.9.0"
 	// maxManifestBytes caps a single manifest read so a hostile/corrupt repo cannot OOM the scan with an
 	// absurd file. Real manifests are KB–low-MB; exceeding this is malicious or wrong, so it fails loud.
 	maxManifestBytes = 64 << 20
@@ -140,7 +142,7 @@ func (r *Registry) SBOMWarnings() []string {
 // DefaultRegistryWith assembles the owned parsers with the granted capabilities.
 func DefaultRegistryWith(opts RegistryOptions) (*Registry, error) {
 	reg, err := New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, Bun{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{},
-		Maven{Fetcher: opts.MavenPOMFetcher}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{},
+		Maven{Fetcher: opts.MavenPOMFetcher}, Gradle{}, GradleLockfile{}, BuildGradle{}, Gem{}, Composer{}, NuGet{},
 		NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
 	if err != nil {
 		return nil, err
