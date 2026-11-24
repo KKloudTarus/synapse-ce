@@ -41,6 +41,7 @@ export function AITriageObservability() {
           feature="AI triage"
           envVar="SYNAPSE_FP_TRIAGE_ENABLED"
           hint="Provider requests, disagreement and gate-exemption rates are recorded once triage runs."
+          titleAs="h2"
         />
       ) : error ? (
         <ErrorState message={error} />

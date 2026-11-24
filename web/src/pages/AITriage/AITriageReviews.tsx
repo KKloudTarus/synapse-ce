@@ -176,6 +176,7 @@ export function AITriageReviews() {
           feature="AI triage"
           envVar="SYNAPSE_FP_TRIAGE_ENABLED"
           hint="Review-required findings from AI-triaged scans queue here for a human decision."
+          titleAs="h2"
         />
       ) : errorMessage ? (
         <div className="space-y-3">

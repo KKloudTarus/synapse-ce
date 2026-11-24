@@ -71,6 +71,7 @@ function LegalHoldCard({ engagementId, canReview }: { engagementId: string; canR
           envVar="SYNAPSE_FLEET_DETECTION_INGEST_ENABLED"
           hint="It preserves an engagement's detection data against retention expiry and on-demand deletion."
           icon={Lock01}
+          titleAs="h3"
         />
       ) : loading && !data ? (
         <p className="text-sm text-tertiary">Loading…</p>

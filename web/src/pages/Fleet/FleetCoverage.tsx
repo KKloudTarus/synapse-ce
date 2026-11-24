@@ -159,6 +159,7 @@ export function AgentsSection() {
           feature="Agent administration"
           envVar="SYNAPSE_FLEET_ENABLED"
           hint="It lists enrolled agents, their health and their recent work."
+          titleAs="h3"
         />
       </Card>
     )
@@ -377,6 +378,7 @@ export function FleetCoverage() {
           feature="Fleet"
           envVar="SYNAPSE_FLEET_ENABLED"
           hint="It reports per-asset agent coverage, agent health and capability gaps."
+          titleAs="h2"
         />
       ) : error ? (
         <div className="space-y-3">

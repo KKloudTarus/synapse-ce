@@ -324,11 +324,19 @@ export function EmptyState({
   title,
   hint,
   action,
+  titleAs: Title = 'p',
 }: {
   icon: ComponentType<{ className?: string }>
   title: string
   hint?: string
   action?: ReactNode
+  /**
+   * Element for the title. A state that fills a whole route is the only thing on that screen, so
+   * its title has to be the page heading: a <p> there leaves the document with no heading at all,
+   * and a screen reader lands on a page it cannot name. Inside a card or a tab the surrounding
+   * heading already names the surface, so the default stays a paragraph.
+   */
+  titleAs?: 'p' | 'h1' | 'h2' | 'h3'
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-secondary px-6 py-12 text-center">
@@ -336,7 +344,7 @@ export function EmptyState({
         <Icon className="size-5" />
       </div>
       <div>
-        <p className="text-sm font-medium text-primary">{title}</p>
+        <Title className="text-sm font-medium text-primary">{title}</Title>
         {hint && <p className="mt-1 text-sm text-tertiary">{hint}</p>}
       </div>
       {action}

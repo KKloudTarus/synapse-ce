@@ -22,6 +22,7 @@ export function FeatureDisabledState({
   envVar,
   hint,
   icon = Power01,
+  titleAs = 'h1',
 }: {
   /** Human name of the feature, e.g. "Fleet". */
   feature: string
@@ -30,6 +31,12 @@ export function FeatureDisabledState({
   /** One sentence on what the feature gives you once enabled. */
   hint?: ReactNode
   icon?: ComponentType<{ className?: string }>
+  /**
+   * Heading level for the title. This state usually replaces a whole route, and then it carries
+   * the only heading on the screen, so the default is `h1`. Pass `h2` inside a page that already
+   * has one, and `h3` inside a Card, whose own title is an `h2`.
+   */
+  titleAs?: 'h1' | 'h2' | 'h3'
 }) {
   const instruction = envVar
     ? `Set ${envVar}=true on the API and restart it.`
@@ -39,6 +46,7 @@ export function FeatureDisabledState({
       icon={icon}
       title={`${feature} is not enabled`}
       hint={hint ? `${instruction} ${hint}` : instruction}
+      titleAs={titleAs}
     />
   )
 }
