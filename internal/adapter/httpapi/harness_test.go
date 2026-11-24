@@ -1202,11 +1202,15 @@ func TestHostileHarness(t *testing.T) {
 		expected := harnessExpectedRoutes()
 		tenantBound := harnessTenantBoundRoutes()
 		queries := harnessRouteQueries()
+		foreignDenied := harnessForeignDeniedRoutes()
 		var probed, unwired, servingTenantA int
-		var servingRoutes, unwiredRoutes, vacuousRoutes []string
+		var servingRoutes, unwiredRoutes, vacuousRoutes, unaddressable []string
 		for _, route := range tenantScopedGETRoutes(t) {
 			path := concreteHarnessPath(route)
 			if path == "" {
+				// A parameter without a value: the route cannot be addressed, and it is checked
+				// against harnessKnownUnaddressable below so that it cannot drop out unseen.
+				unaddressable = append(unaddressable, route)
 				continue
 			}
 			path += queries[route]
@@ -1264,17 +1268,34 @@ func TestHostileHarness(t *testing.T) {
 				if bind && code != http.StatusForbidden && code != http.StatusNotFound {
 					t.Errorf("%s is tenant-bound and answered a tenantB caller with %d, want 403 or 404; the store's own partitioning is not the route's guard: %s", route, code, body)
 				}
+				// A route whose body names no tenant cannot be checked with a marker, so its seed
+				// declares it and the guard is proven by the refusal instead.
+				if foreignDenied[route] && code != http.StatusForbidden && code != http.StatusNotFound {
+					t.Errorf("%s is declared as refused for a foreign caller and answered tenantB with %d, want 403 or 404: %s", route, code, body)
+				}
 			})
 		}
 		if probed < 40 {
 			t.Errorf("the sweep probed %d routes; the route table is no longer being read", probed)
 		}
-		// Five routes in this fixture are seeded with tenantA data, so for those the tenantB probe
-		// proves a real absence. For the rest the sweep proves the weaker but still useful property
-		// that a cross-tenant read neither crashes nor echoes a tenantA identifier. Raise this floor
-		// when you seed more fixture data; never lower it.
-		if servingTenantA < 5 {
-			t.Errorf("only %d of %d probed routes served tenantA its own seeded data (%v); the sweep is passing vacuously", servingTenantA, probed, servingRoutes)
+		// How many routes serve tenantA data is not asserted as a number: each seed declares its own
+		// routes below, which fails by name, and the fixture's own five routes are declared by the
+		// "baseline" seed.
+		// A route the sweep could not address must be listed with a reason, and a listed route the
+		// sweep can address now must leave the list. Otherwise a route whose parameter has no value
+		// drops out of the sweep without anyone seeing it.
+		sort.Strings(unaddressable)
+		reached := map[string]bool{}
+		for _, route := range unaddressable {
+			reached[route] = true
+			if _, listed := harnessKnownUnaddressable[route]; !listed {
+				t.Errorf("%s cannot be addressed: a path parameter has no value. Plant the record in a seed and declare its id in PathValues, or list the route in harnessKnownUnaddressable with the reason", route)
+			}
+		}
+		for route, reason := range harnessKnownUnaddressable {
+			if !reached[route] {
+				t.Errorf("%s is listed in harnessKnownUnaddressable (%s) but the sweep can address it now; delete the entry", route, reason)
+			}
 		}
 		// A seed names the routes it makes serve tenantA's data. One that no longer does, for example
 		// because two seeds built the same service and the later one replaced the earlier, fails by
@@ -1297,6 +1318,7 @@ func TestHostileHarness(t *testing.T) {
 		t.Logf("routes that serve tenantA real data (%d):\n  %s", len(servingRoutes), strings.Join(servingRoutes, "\n  "))
 		t.Logf("routes skipped as unwired (%d):\n  %s", len(unwiredRoutes), strings.Join(unwiredRoutes, "\n  "))
 		t.Logf("routes probed but answering tenantA no seeded data (%d):\n  %s", len(vacuousRoutes), strings.Join(vacuousRoutes, "\n  "))
+		t.Logf("routes the sweep cannot address (%d):\n  %s", len(unaddressable), strings.Join(unaddressable, "\n  "))
 	})
 }
 
@@ -1342,12 +1364,32 @@ func concreteHarnessPath(route string) string {
 			return ""
 		}
 		param := path[open : open+closeAt+1]
-		value, ok := harnessPathValues[param]
+		value, ok := harnessPathValue(param)
 		if !ok {
 			return ""
 		}
 		path = path[:open] + value + path[open+closeAt+1:]
 	}
+}
+
+// harnessKnownUnaddressable lists the tenant-scoped GET routes the sweep cannot address because a
+// path parameter has no value, each with the reason. A route is not allowed to drop out of the sweep
+// unseen: the sweep fails for a route that is missing here, and for an entry it can address now.
+// The routes are grouped by the seed that will plant the record, so removing them touches separate
+// parts of the list.
+var harnessKnownUnaddressable = map[string]string{
+	// Planted by the engagement-analysis seeds.
+	"GET /api/v1/engagements/{id}/detections/{did}/provenance":                  "no detection id is declared for {did}",
+	"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/events":       "no occurrence id is declared for {oid}",
+	"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk":         "no occurrence id is declared for {oid}",
+	"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk/history": "no occurrence id is declared for {oid}",
+	"GET /api/v1/engagements/{assessmentId}/lifecycle":                          "no assessment id is declared for {assessmentId}",
+	"GET /api/v1/notifications/engagements/{nid}/settings":                      "no engagement id is declared for {nid}",
+
+	// Planted by the engagement-data seeds.
+	"GET /api/v1/engagements/{id}/evidence/{sha}":                          "no evidence digest is declared for {sha}",
+	"GET /api/v1/projects/{key}/analyses/{analysisID}/behavioral-hotspots": "no analysis id is declared for {analysisID}",
+	"GET /api/v1/projects/{key}/source-scans/{jobID}":                      "no scan job id is declared for {jobID}",
 }
 
 // The real root Router keeps tenant resolution entirely on the endpoint ID.
