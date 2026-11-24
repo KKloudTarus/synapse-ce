@@ -19,6 +19,17 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// scanBudgetForDeadlineTests is the scan budget the tests below give a service whose first engine blocks
+// until the budget is gone. The budget starts before acquisition (service.go, the context.WithTimeout on
+// s.timeout), so it has to outlast scan setup: a budget that setup eats makes Scan return
+// context.DeadlineExceeded instead of a result, and the test fails on a machine that was busy rather than
+// on the behaviour it asserts. TestExpiredSecretScanBudgetSkipsSelectedHistoryWithLegacyWarning failed that
+// way under a full `go test ./...`, and the same failure reproduces on an unchanged tree under CPU
+// saturation. Measured worst case from Scan entry to engine entry over 25 runs with every core saturated:
+// 4ms. 250ms keeps a 60x margin, and it is what each of these tests costs in wall time, because the
+// blocking engine waits the budget out either way.
+const scanBudgetForDeadlineTests = 250 * time.Millisecond
+
 type unavailableProvenanceSource struct{ fakeVuln }
 
 func (unavailableProvenanceSource) Provenance() (string, string) { return "", "" }
@@ -105,7 +116,7 @@ func TestOwnedScanDeadlineStillSealsPartialSourceCoverage(t *testing.T) {
 	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, clock, &fakeAcquirer{dir: t.TempDir()}, audit, &fakeDetector{})
 	svc.evidence = vault
 	svc.SetSASTAnalyzer(&deadlineSAST{})
-	svc.timeout = 10 * time.Millisecond
+	svc.timeout = scanBudgetForDeadlineTests
 	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"})
 	if err != nil || result == nil || result.EngineCoverage.Complete() || len(store.items) != 1 {
 		t.Fatalf("partial publication result=%+v links=%d err=%v", result, len(store.items), err)
@@ -460,7 +471,7 @@ func TestExpiredSourceBudgetDoesNotInvokeLaterEngines(t *testing.T) {
 	svc.SetSASTAnalyzer(sast)
 	svc.SetSecretScanner(secrets)
 	svc.SetMisconfigScanner(iac)
-	svc.timeout = 10 * time.Millisecond
+	svc.timeout = scanBudgetForDeadlineTests
 	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"})
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +543,7 @@ func TestExpiredSourceBudgetSkipsSelectedSecretHistoryWithSecrets(t *testing.T) 
 	svc.SetSASTAnalyzer(sast)
 	svc.SetSecretScanner(secrets)
 	svc.SetSecretHistoryEnabled(true)
-	svc.timeout = 10 * time.Millisecond
+	svc.timeout = scanBudgetForDeadlineTests
 	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"})
 	if err != nil {
 		t.Fatal(err)
@@ -558,7 +569,7 @@ func TestExpiredSourceBudgetPreservesIneligibleSecretHistoryPlan(t *testing.T) {
 		svc.SetSASTAnalyzer(&deadlineSAST{})
 		svc.SetSecretScanner(scanner)
 		svc.SetSecretHistoryEnabled(historyEnabled)
-		svc.timeout = 10 * time.Millisecond
+		svc.timeout = scanBudgetForDeadlineTests
 		result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"})
 		if err != nil {
 			t.Fatal(err)
@@ -612,7 +623,7 @@ func TestExpiredSecretScanBudgetSkipsSelectedHistoryWithLegacyWarning(t *testing
 	secrets := &deadlineHistorySecretScanner{}
 	svc.SetSecretScanner(secrets)
 	svc.SetSecretHistoryEnabled(true)
-	svc.timeout = 10 * time.Millisecond
+	svc.timeout = scanBudgetForDeadlineTests
 	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"})
 	if err != nil {
 		t.Fatal(err)
@@ -649,7 +660,7 @@ func TestExpiredSecretScanBudgetPreservesUnavailableHistory(t *testing.T) {
 	secrets := &deadlineUnsupportedHistorySecretScanner{}
 	svc.SetSecretScanner(secrets)
 	svc.SetSecretHistoryEnabled(true)
-	svc.timeout = 10 * time.Millisecond
+	svc.timeout = scanBudgetForDeadlineTests
 	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"})
 	if err != nil {
 		t.Fatal(err)
@@ -672,7 +683,7 @@ func TestExpiredSecretScanBudgetPreservesDisabledHistory(t *testing.T) {
 	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: t.TempDir()}, &fakeAudit{}, &fakeDetector{})
 	secrets := &deadlineHistorySecretScanner{}
 	svc.SetSecretScanner(secrets)
-	svc.timeout = 10 * time.Millisecond
+	svc.timeout = scanBudgetForDeadlineTests
 	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"})
 	if err != nil {
 		t.Fatal(err)
