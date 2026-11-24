@@ -1379,12 +1379,6 @@ func concreteHarnessPath(route string) string {
 // parts of the list.
 var harnessKnownUnaddressable = map[string]string{
 	// Planted by the engagement-analysis seeds.
-	"GET /api/v1/engagements/{id}/detections/{did}/provenance":                  "no detection id is declared for {did}",
-	"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/events":       "no occurrence id is declared for {oid}",
-	"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk":         "no occurrence id is declared for {oid}",
-	"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk/history": "no occurrence id is declared for {oid}",
-	"GET /api/v1/engagements/{assessmentId}/lifecycle":                          "no assessment id is declared for {assessmentId}",
-	"GET /api/v1/notifications/engagements/{nid}/settings":                      "no engagement id is declared for {nid}",
 
 	// Planted by the engagement-data seeds.
 	"GET /api/v1/engagements/{id}/evidence/{sha}":                          "no evidence digest is declared for {sha}",

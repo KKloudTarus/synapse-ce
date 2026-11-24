@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityoccurrence"
 )
 
 // slaSeedMarker appears in the body of an SLA or vulnerability route only when tenantA's own row was
@@ -19,9 +20,15 @@ var slaSeedNow = time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
 // The sweep fills each path parameter with a fixed value (harnessPathValues), so the planted rows
 // must carry exactly them.
 const (
-	slaSeedEngagement = shared.ID("engA")
-	slaSeedFinding    = shared.ID("f1")
+	slaSeedEngagement  = shared.ID("engA")
+	slaSeedFinding     = shared.ID("f1")
+	slaSeedFingerprint = "sla-seed-fingerprint"
 )
+
+// slaSeedOccurrenceID is the id of the one occurrence this seed plants. The store derives an
+// occurrence id from tenant, engagement, advisory and component fingerprint, so the seed can name it
+// before the row exists; it is what the {oid} routes are addressed with, and what their bodies echo.
+var slaSeedOccurrenceID = vulnerabilityoccurrence.DeterministicID("tenantA", slaSeedEngagement, slaSeedAdvisory, slaSeedFingerprint)
 
 func init() {
 	routes := []string{
@@ -31,6 +38,9 @@ func init() {
 		"GET /api/v1/engagements/{id}/slas/{fid}/events",
 		"GET /api/v1/engagements/{id}/vulnerability/actions",
 		"GET /api/v1/engagements/{id}/vulnerability/occurrences",
+		"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/events",
+		"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk",
+		"GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk/history",
 	}
 	registerHarnessSeed(harnessSeed{
 		Name:   "sla",
@@ -38,6 +48,7 @@ func init() {
 		// Every use case behind these routes reads the tenant from the request context and refuses a
 		// request whose path tenant disagrees with it, as the production auth middleware sets it.
 		TenantBound: routes,
+		PathValues:  map[string]string{"{oid}": slaSeedOccurrenceID.String()},
 		Run:         seedSLA,
 	})
 }
@@ -49,7 +60,9 @@ func seedSLA(w *harnessWorld) []string {
 	w.t.Helper()
 	seedSLAGovernance(w)
 	seedSLAVulnerability(w)
-	return []string{slaSeedMarker}
+	// An occurrence event is only an id, a state and a time, and none of them carries the marker, so
+	// the occurrence id the event names is a marker of its own: it is derived from tenantA's row.
+	return []string{slaSeedMarker, slaSeedOccurrenceID.String()}
 }
 
 // slaSeedTenantCtx is the context a store write needs: the memory stores read the tenant from it.

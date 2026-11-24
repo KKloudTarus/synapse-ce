@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
@@ -10,11 +12,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/businessassetuc"
 	desireduc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/desired"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/endpointstate"
+	hostvulnuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostvuln"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/legalholduc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacyexport"
@@ -68,26 +73,40 @@ func (s assetsTaggedPosture) Posture(ctx context.Context, tenantID, id shared.ID
 	return posture, err
 }
 
-// assetsNoBindings and assetsNoAgents stand in for the two desired-state inputs that only the gap
-// report reads. The routes this seed targets read the stored desired state, never a binding or an agent,
-// and a stand-in that is always empty cannot answer for a tenant by accident.
-type assetsNoBindings struct{}
+// assetsBindings is the desired-state service's binding reader. No in-memory implementation of it
+// exists, and only the gap report reads it: the routes this seed targets read the stored desired state
+// alone. It answers tenantA's one binding to EVERY caller and never looks at the tenant, so a foreign
+// caller with desired state of its own gets the service's tenant check on the binding (a validation
+// error) instead of an empty report that would hide a missing guard.
+type assetsBindings struct{}
 
-func (assetsNoBindings) ListCurrentBindings(context.Context, shared.ID) ([]desireduc.CurrentBinding, error) {
-	return nil, nil
+func (assetsBindings) ListCurrentBindings(context.Context, shared.ID) ([]desireduc.CurrentBinding, error) {
+	return []desireduc.CurrentBinding{{TenantID: "tenantA", AssetID: "engA", AgentID: assetsAgentID}}, nil
 }
 
-type assetsNoAgents struct{}
+// assetsAgentID is the fleet agent bound to the host "engA", planted in the real in-memory agent store.
+const assetsAgentID = shared.ID(assetsMarker + "-agent")
 
-func (assetsNoAgents) ListAgents(context.Context, shared.ID) ([]*fleetagent.Agent, error) {
-	return nil, nil
+// assetsHostPackages answers the host package route from a real host-vulnerability service over the
+// stores this seed plants, and every other read from the service the fixture wired. The fixture's
+// service keeps its imported-SBOM store to itself, so a package row cannot be planted through it. The
+// package read makes no tenant decision here: the real service resolves the asset in the caller's
+// tenant and is what refuses a foreign one.
+type assetsHostPackages struct {
+	hostVulnerabilityService
+	packages *hostvulnuc.Service
+}
+
+func (s assetsHostPackages) Packages(ctx context.Context, tenantID, assetID shared.ID) (*hostvulnuc.HostPackages, error) {
+	return s.packages.Packages(ctx, tenantID, assetID)
 }
 
 // seedAssets wires the business-asset (appsec) service, the fleet process, timeline, desired-capability
-// and privacy-export services, and plants tenantA data for them. The path values the generated sweep
-// substitutes are fixed by harnessPathValues: {assetID} is "asset-A" and {id} is "engA", and the fleet
-// routes read {id} as an ASSET id. So tenantA gets a business asset and a host asset both named
-// "asset-A", and a host asset named "engA", so that each route can find the record its path names.
+// and privacy-export services and the host package read, and plants tenantA data for them. The path
+// values the generated sweep substitutes are fixed by harnessPathValues: {assetID} is "asset-A" and
+// {id} is "engA", and the fleet routes read {id} as an ASSET id. So tenantA gets a business asset and
+// a host asset both named "asset-A", and a host asset named "engA", so that each route can find the
+// record its path names.
 func seedAssets(w *harnessWorld) []string {
 	t := w.t
 	t.Helper()
@@ -107,6 +126,7 @@ func seedAssets(w *harnessWorld) []string {
 
 	seedBusinessAsset(ctx, w, at)
 	seedFleetAssets(ctx, w, at)
+	seedHostPackages(ctx, w, at)
 	return []string{assetsMarker, "bizeng-A", "bizfind-A"}
 }
 
@@ -167,6 +187,52 @@ func seedBusinessAsset(ctx context.Context, w *harnessWorld, at time.Time) {
 	w.rt.SetBusinessAssets(assetsTaggedPosture{svc})
 }
 
+// seedHostPackages plants one package of the host "asset-A" and wires the host package read to it.
+// The package inventory of a host lives in the host's hidden engagement context, as an imported SBOM,
+// so the seed stores both: the context engagement (tenantA, bound to the host by HostAssetID) and the
+// active SBOM that names the package. The marker is in the package name, because a package row
+// otherwise carries only a name, a version and a purl.
+func seedHostPackages(ctx context.Context, w *harnessWorld, at time.Time) {
+	t := w.t
+	t.Helper()
+	host, err := w.assets.GetAssetByID(ctx, "tenantA", "asset-A")
+	if err != nil {
+		t.Fatalf("load host asset: %v", err)
+	}
+	components := []sbom.Component{{Name: assetsMarker + "-openssl", Version: "3.0.2", PURL: "pkg:deb/debian/openssl@3.0.2"}}
+	data, err := hostvulnuc.Document(host, components)
+	if err != nil {
+		t.Fatalf("render host package sbom: %v", err)
+	}
+	if err := w.engagements.Create(ctx, &engagement.Engagement{
+		ID: "hostctx-assets-A", TenantID: "tenantA", HostAssetID: host.ID, Name: assetsMarker + " host packages", Status: engagement.StatusDraft,
+	}); err != nil {
+		t.Fatalf("seed host package context: %v", err)
+	}
+	imported := memory.NewImportedSBOMStore()
+	digest := sha256.Sum256(data)
+	if err := imported.SaveActive(ctx, importedsbom.Record{
+		ID: "sbom-assets-A", TenantID: "tenantA", EngagementID: "hostctx-assets-A", Filename: hostvulnuc.Filename,
+		Format: importedsbom.FormatCycloneDX, SpecVersion: "1.6", TargetRef: hostvulnuc.TargetRef(host),
+		ComponentCount: len(components), SHA256: hex.EncodeToString(digest[:]), RawJSON: data, CreatedBy: "seed", CreatedAt: at,
+	}); err != nil {
+		t.Fatalf("seed host package sbom: %v", err)
+	}
+	packages, err := hostvulnuc.NewService(w.engagements, w.assets, harnessFindingLister{repo: memory.NewFindingRepository()},
+		harnessSBOMScanner{}, imported, memory.NewScanJobStore(), engIDs{}, fixedClock{t: at}, &fakeAudit{})
+	if err != nil {
+		t.Fatalf("host package service: %v", err)
+	}
+	// The fixture wires the service that answers the host list and the host vulnerabilities, and its
+	// tests read them; keep it for those and route only the package read to the service above. A
+	// fixture that wired none leaves the new service to answer all three.
+	var base hostVulnerabilityService = packages
+	if w.rt.hostVulns != nil {
+		base = w.rt.hostVulns
+	}
+	w.rt.SetHostVulnerabilities(assetsHostPackages{hostVulnerabilityService: base, packages: packages})
+}
+
 // seedFleetAssets wires the fleet read services that live behind the incident block of the route table,
 // and plants tenantA data for the host "engA" and the engagement "engA". The incident reader is wired
 // over an empty event store only because the block registers nothing without it; no incident is planted.
@@ -201,7 +267,16 @@ func seedFleetAssets(ctx context.Context, w *harnessWorld, at time.Time) {
 	}
 	w.rt.SetEndpointTimeline(timeline)
 
-	desired, err := desireduc.NewService(memory.NewFleetDesiredStore(), w.assets, assetsNoBindings{}, assetsNoAgents{}, &fakeAudit{}, fixedClock{t: at}, engIDs{}, 24*time.Hour)
+	// The agent store is the real in-memory one, partitioned by tenant. The gap report would read the
+	// binding and the agent together, so tenantA's agent is planted for the binding the reader names.
+	agents := memory.NewFleetAgentStore()
+	if err := agents.CreateAgent(ctx, &fleetagent.Agent{
+		ID: assetsAgentID, TenantID: "tenantA", Name: assetsMarker + " agent", State: fleetagent.StateActive,
+		Capabilities: []string{"process-telemetry", "file-telemetry"}, LastSeenAt: at,
+	}); err != nil {
+		t.Fatalf("seed fleet agent: %v", err)
+	}
+	desired, err := desireduc.NewService(memory.NewFleetDesiredStore(), w.assets, assetsBindings{}, agents, &fakeAudit{}, fixedClock{t: at}, engIDs{}, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("desired capability service: %v", err)
 	}
