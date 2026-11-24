@@ -78,6 +78,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- **An allowed egress domain can no longer open a kernel rule to a cloud metadata address.**
+  `ResolveEgressPolicy` resolves the sandbox's allow-domains separately from every earlier check,
+  and wrote whatever that lookup returned straight into the namespace as an ALLOW rule, so a host
+  whose DNS the other side controls could answer public for an earlier check and a link-local or
+  carrier-grade-NAT metadata endpoint for this one. Allowed addresses and pre-resolved pins are
+  now judged against the same range table every outbound client uses. Private-use and loopback
+  addresses stay admitted, the second because these rules apply inside the sandbox's own network
+  namespace. DENY rules are untouched, since filtering one could only widen what gets through.
+- Deleting an engagement that owns sealed evidence answers `409` with the reason instead of a
+  `500` marked retryable. The custody chain is append-only by design and its trigger raises
+  `P0001`, which carries no constraint name, so the refusal reached the client unclassified and
+  the console offered a Retry that could never succeed.
+
 - **Maven POM fetches enforce their address policy at dial time (SSRF).** A scanned `pom.xml` can
   name any repository URL, and the policy was applied to a DNS answer taken separately from the one
   `net/http` used to connect, so a host the pom author controls could answer public for the check
