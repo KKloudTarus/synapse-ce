@@ -49,8 +49,18 @@ func init() {
 			"GET /api/v1/engagements/{id}/sbom",
 			"GET /api/v1/engagements/{id}/scan",
 			"GET /api/v1/engagements/{id}/scan-runs",
+			"GET /api/v1/engagements/{id}/scan-runs/compare",
 			"GET /api/v1/engagements/{id}/scan-status",
 			"GET /api/v1/engagements/{id}/source",
+		},
+		// The legacy run store reads the tenant from the request context, as the production
+		// authentication middleware sets it, so the sweep must bind it for the comparison.
+		TenantBound: []string{"GET /api/v1/engagements/{id}/scan-runs/compare"},
+		// The comparison needs two stored runs of the engagement. This seed plants one, and comparing a
+		// run with itself is a valid, empty drift that still carries the run, so a second run is not
+		// needed.
+		Queries: map[string]string{
+			"GET /api/v1/engagements/{id}/scan-runs/compare": "?a=" + reportsScanRunID + "&b=" + reportsScanRunID,
 		},
 		Run: seedReports,
 	})
@@ -59,6 +69,10 @@ func init() {
 // reportsMarker is planted in every tenantA record the report, export, scan and recon routes serve.
 // It appears verbatim in a response body only when tenantA's data was served.
 const reportsMarker = "tenantA-reports-marker"
+
+// reportsScanRunID is the scan run this seed plants for engA, and the one the comparison route is
+// asked to compare.
+const reportsScanRunID = reportsMarker + "-run"
 
 // reportsRunID is the id the generated sweep substitutes for {rid}, so the recon run planted under it
 // is the one the run-detail and run-log routes are asked for.
@@ -118,7 +132,7 @@ func seedReportsScan(w *harnessWorld, ctxA context.Context, findings ports.Findi
 	w.t.Helper()
 	runs := memory.NewScanRunStore()
 	if err := runs.Save(ctxA, ports.ScanRun{
-		ID: reportsMarker + "-run", EngagementID: "engA", CreatedAt: time.Unix(1, 0).UTC(),
+		ID: reportsScanRunID, EngagementID: "engA", CreatedAt: time.Unix(1, 0).UTC(),
 		Manifest:    ports.ScanManifest{ToolVersions: map[string]string{"synapse": "harness"}},
 		FindingKeys: []string{reportsMarker},
 	}); err != nil {
@@ -133,8 +147,9 @@ func seedReportsScan(w *harnessWorld, ctxA context.Context, findings ports.Findi
 	if w.rt.sca == nil {
 		results := memory.NewScanResultStore()
 		jobs := memory.NewScanJobStore()
-		// The vault the "core" seed sealed its ledger entry into, so the evidence route keeps serving
-		// it from this one service. It is nil when that seed is absent.
+		// The vault the "core" seed left in the shared state (harness_seed_evidence_vault_test.go), so the
+		// evidence ledger route keeps serving its entries from this one service. It is nil when that
+		// seed is absent.
 		w.rt.sca = scauc.NewService(w.engagements, findings, nil, results, jobs, reportsScanRuns{ScanRunStore: runs}, harnessEvidenceVault(w), engIDs{}, ports.Provenance{}, clock, w.audit,
 			shared.SeverityInfo, 0, nil, nil, nil, nil, nil, nil, nil)
 

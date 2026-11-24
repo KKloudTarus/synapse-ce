@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -17,30 +18,26 @@ import (
 )
 
 // The projx group finishes the project routes the "projects" seed leaves empty: the code viewer
-// (file and diff), the analysis status, the dependency graph and its CycloneDX export. All of them
-// read what the "projects" seed already planted for project-a, so this seed adds to that analysis
-// instead of planting a second one: the code routes address it by the sweep's {id}, and the
-// dependency routes read the project's latest analysis, which is that same record.
-//
-// It also serves the scan-run comparison. That route needs two stored runs of the engagement; the
-// "reports" seed plants one, and comparing a run with itself is a valid, empty drift that still
-// carries the run, so no second run and no edit to that seed is needed.
+// (file and diff), the analysis status, the source-scan job, the dependency graph and its CycloneDX
+// export. The code and dependency routes read the analysis the "projects" seed saved for project-a,
+// which the store keeps append-only, so this seed does not plant a second one: it extends that
+// analysis on the way out of the store, with a source file, a base to compare against and an SBOM of
+// its own. It names nothing the "projects" seed defines except that the analysis exists, which it
+// checks, and the sweep's {id} the analysis is saved under.
 func init() {
 	registerHarnessSeed(harnessSeed{
 		Name: "projx",
 		Routes: []string{
-			"GET /api/v1/engagements/{id}/scan-runs/compare",
 			"GET /api/v1/projects/{key}/analyses/{id}/code/diff",
 			"GET /api/v1/projects/{key}/analyses/{id}/code/file",
 			"GET /api/v1/projects/{key}/analysis-status",
 			"GET /api/v1/projects/{key}/dependency-graph",
 			"GET /api/v1/projects/{key}/dependency-graph/export",
+			"GET /api/v1/projects/{key}/source-scans/{jobID}",
 		},
-		// The legacy run store reads the tenant from the request context, as the production
-		// authentication middleware sets it, so the sweep must bind it for the comparison.
-		TenantBound: []string{"GET /api/v1/engagements/{id}/scan-runs/compare"},
+		// The source-scan route names the planted job with its own parameter.
+		PathValues: map[string]string{"{jobID}": projxSourceScanJobID},
 		Queries: map[string]string{
-			"GET /api/v1/engagements/{id}/scan-runs/compare":     "?a=" + projxCompareRun + "&b=" + projxCompareRun,
 			"GET /api/v1/projects/{key}/analyses/{id}/code/diff": "?path=" + projxCodePath,
 			"GET /api/v1/projects/{key}/analyses/{id}/code/file": "?path=" + projxCodePath,
 		},
@@ -54,18 +51,20 @@ const (
 
 	projxTenant = shared.ID("tenantA")
 
-	// projxCodePath is the file node the "projects" seed already puts in the analysis snapshot. The
-	// code routes serve a file only when the snapshot lists it, so the retained source goes there.
-	projxCodePath = projectsMarker + "/main.go"
-
-	// projxCompareRun is the scan run the "reports" seed plants for engA.
-	projxCompareRun = reportsMarker + "-run"
+	// projxCodePath is the file this seed adds to the analysis snapshot and retains the source of.
+	// The code routes serve a file only when the snapshot lists it, so it is listed under a directory
+	// named for the marker, as the snapshot's other directories are.
+	projxCodePath = projxMarker + "/main.go"
 
 	projxCommit    = "0123456789abcdef0123456789abcdef01234567"
 	projxBaseSHA   = "89abcdef0123456789abcdef0123456789abcdef"
 	projxJobID     = "projx-job-A"
 	projxHeadLines = "package main\n\n// " + projxMarker + ": retained source for the cross-tenant sweep\nfunc main() {}\n"
 	projxBaseLines = "package main\n\nfunc main() {}\n"
+
+	// projxSourceScanJobID is the project's source-scan job. It is admitted with the source-scan
+	// purpose, so the analysis-status route, which skips those jobs, keeps reading projxJobID.
+	projxSourceScanJobID = "projx-source-scan-A"
 )
 
 func seedProjx(w *harnessWorld) []string {
@@ -114,7 +113,7 @@ func seedProjx(w *harnessWorld) []string {
 		sbom:                 dependencies,
 	})
 
-	seedProjxStatus(w, key)
+	seedProjxJobs(w, key)
 	return []string{projxMarker}
 }
 
@@ -143,9 +142,12 @@ func projxRetainSource(w *harnessWorld, store *sourceartifact.Store, projectID, 
 	return capture.Manifest, base
 }
 
-// seedProjxStatus records the project's latest analysis job under the hidden engagement the project
-// service resolves for the key. The status route reads that job and nothing else.
-func seedProjxStatus(w *harnessWorld, key string) {
+// seedProjxJobs records two finished jobs under the hidden engagement the project service resolves
+// for the key: the project's latest analysis job, which the status route reads, and a source-scan job,
+// which the source-scan route reads. The store skips source-scan jobs when it answers the status, and
+// the route answers a source-scan job only for the purpose it was admitted with, so each route reads
+// its own job. The service takes the store through one setter, so both jobs go into one store.
+func seedProjxJobs(w *harnessWorld, key string) {
 	w.t.Helper()
 	ctx := shared.WithTenant(context.Background(), projxTenant)
 	source, err := w.projects.SourceContext(ctx, projxTenant, key)
@@ -154,15 +156,24 @@ func seedProjxStatus(w *harnessWorld, key string) {
 	}
 	jobs := memory.NewScanJobStore()
 	started, finished := time.Unix(1_700_000_000, 0).UTC(), time.Unix(1_700_000_060, 0).UTC()
-	job := ports.ScanJob{
-		ID: projxJobID, EngagementID: source.Context.ID.String(), Target: projxMarker, Kind: ports.TargetLocal,
-		Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished,
-	}
-	if err := jobs.CreateRunning(ctx, job); err != nil {
-		w.t.Fatalf("projx seed: admit analysis job: %v", err)
-	}
-	if err := jobs.Save(ctx, job); err != nil {
-		w.t.Fatalf("projx seed: finish analysis job: %v", err)
+	for _, job := range []ports.ScanJob{
+		{
+			ID: projxJobID, EngagementID: source.Context.ID.String(), Target: projxMarker, Kind: ports.TargetLocal,
+			Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished,
+		},
+		{
+			ID: projxSourceScanJobID, EngagementID: source.Context.ID.String(), Target: projxMarker + "/source-scan", Kind: ports.TargetLocal,
+			Purpose: ports.ScanPurposeProjectSource,
+			Status:  ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished,
+		},
+	} {
+		// A running job holds the engagement's scan slot, so each is finished before the next is admitted.
+		if err := jobs.CreateRunning(ctx, job); err != nil {
+			w.t.Fatalf("projx seed: admit job %s: %v", job.ID, err)
+		}
+		if err := jobs.Save(ctx, job); err != nil {
+			w.t.Fatalf("projx seed: finish job %s: %v", job.ID, err)
+		}
 	}
 	w.projects.SetScanJobs(jobs)
 }
@@ -203,11 +214,19 @@ func (s projxAnalyses) LatestWithResult(ctx context.Context, tenantID, projectID
 }
 
 // withSource adds the retained source, the comparison base and one persisted file change to the
-// planted analysis, and leaves any other analysis untouched.
+// planted analysis, and leaves any other analysis untouched. The retained file is listed in the
+// snapshot too, because the code routes serve only the files the snapshot lists. The nodes go into a
+// new slice: the one the store returned may be shared with the stored analysis.
 func (s projxAnalyses) withSource(analysis projectanalysis.Analysis) projectanalysis.Analysis {
 	if analysis.ID != s.id {
 		return analysis
 	}
+	nodes := append([]measure.Node(nil), analysis.Snapshot.Nodes...)
+	nodes = append(nodes,
+		measure.Node{Path: projxMarker, Name: projxMarker, Kind: measure.NodeDirectory},
+		measure.Node{Path: projxCodePath, Name: "main.go", Kind: measure.NodeFile, Parent: projxMarker, Language: "go"},
+	)
+	analysis.Snapshot.Nodes = nodes
 	available := projectanalysis.Capability{Available: true}
 	analysis.Capabilities = projectanalysis.SourceCapabilities{
 		Source: available, Comparison: available, UnifiedDiff: available, SplitDiff: available, Highlighting: available,
@@ -215,7 +234,7 @@ func (s projxAnalyses) withSource(analysis projectanalysis.Analysis) projectanal
 	analysis.SourceRevision = projectanalysis.SourceRevision{Kind: projectanalysis.ScanKindGit, Head: projxCommit, Base: projxBaseSHA, MergeBase: projxBaseSHA}
 	analysis.SourceManifest = s.head
 	analysis.Comparison = projectanalysis.Comparison{
-		Available: true, BaseRef: projectsMarker, BaseCommit: projxBaseSHA, MergeBase: projxBaseSHA, BaseManifest: s.base,
+		Available: true, BaseRef: projxMarker, BaseCommit: projxBaseSHA, MergeBase: projxBaseSHA, BaseManifest: s.base,
 	}
 	analysis.FileChanges = []projectanalysis.FileChange{{
 		Status: projectanalysis.FileStatusModified, OldPath: projxCodePath, NewPath: projxCodePath,

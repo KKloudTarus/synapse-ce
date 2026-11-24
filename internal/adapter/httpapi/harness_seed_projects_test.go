@@ -14,22 +14,23 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
-	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 )
 
-// The projects group: the project analysis history, its issue and hotspot projections, its measures
-// and overview, and the source findings recorded under the project's analysis context. Everything is
-// planted for project-a (tenantA) through the real project service and the real in-memory analysis
-// store, so a tenantB read of any of these routes is proven to find nothing rather than assumed to.
+// The projects group: the project analysis history, its behavioral hotspots, its issue and hotspot
+// projections, its measures and overview. Everything is planted for project-a (tenantA) through the
+// real project service and the real in-memory analysis store, so a tenantB read of any of these
+// routes is proven to find nothing rather than assumed to.
 //
-// The code, status and dependency-graph routes of the same project need a stored source file, a scan
-// job and an SBOM that this seed does not plant; the "projx" seed seeds them.
+// The code, status, source-scan and dependency-graph routes of the same project need a stored source
+// file, a scan job and an SBOM that this seed does not plant; the "projx" seed seeds them. The
+// project's source findings are served by the router's findings service, which the "core" seed wires,
+// so that seed plants them and declares their routes.
 func init() {
 	registerHarnessSeed(harnessSeed{
 		Name: "projects",
 		Routes: []string{
 			"GET /api/v1/projects/{key}/analyses",
+			"GET /api/v1/projects/{key}/analyses/{analysisID}/behavioral-hotspots",
 			"GET /api/v1/projects/{key}/analyses/{id}",
 			"GET /api/v1/projects/{key}/analyses/{id}/code/files",
 			"GET /api/v1/projects/{key}/analysis",
@@ -42,10 +43,11 @@ func init() {
 			"GET /api/v1/projects/{key}/issues/{id}/history",
 			"GET /api/v1/projects/{key}/measures",
 			"GET /api/v1/projects/{key}/overview",
-			"GET /api/v1/projects/{key}/source-findings",
-			"GET /api/v1/projects/{key}/source-findings/{fid}",
 		},
-		Run: seedProjects,
+		// The behavioral-hotspots route names the analysis with its own parameter. It is the analysis
+		// this seed saves, which the other analysis routes address as {id}.
+		PathValues: map[string]string{"{analysisID}": harnessPathValues["{id}"]},
+		Run:        seedProjects,
 	})
 }
 
@@ -53,7 +55,14 @@ const (
 	// projectsMarker appears in every response that serves the planted project data.
 	projectsMarker = "tenantA-projects-marker"
 
+	// projectsBehaviorMarker names the one file the planted behavioral-hotspots report ranks, so it
+	// appears in a response only when that report was served, not merely the analysis around it.
+	projectsBehaviorMarker = "tenantA-projects-behavior-marker"
+
 	projectsTenant = shared.ID("tenantA")
+
+	// projectsCommit is the head commit of the planted analysis and of its behavioral history.
+	projectsCommit = "0123456789abcdef0123456789abcdef01234567"
 )
 
 func seedProjects(w *harnessWorld) []string {
@@ -81,11 +90,25 @@ func seedProjects(w *harnessWorld) []string {
 		Severity: shared.SeverityHigh, Kind: finding.KindReliability, Language: "go",
 		File: projectsMarker + "/main.go", Location: projectsMarker + "/main.go:1",
 	}
+	// One commit that touched one file, so the behavioral ranking has an item to serve. An analysis
+	// without the report answers "legacy_analysis" and an empty list, which proves nothing about the
+	// route. The report is checked here so a malformed fixture fails the seed, not the sweep.
+	behaviorFile := projectsBehaviorMarker + "/hot.go"
+	behavior := measure.BehavioralHotspotsReport{
+		Version: measure.BehavioralHotspotsSchemaVersion, Availability: measure.BehavioralComplete,
+		HeadCommit: projectsCommit, RequestedCommits: 1, EvaluatedCommits: 1, ReachedRoot: true,
+		Commits:       []measure.BehavioralCommitEvidence{{CommitID: projectsCommit, TouchedPaths: []string{behaviorFile}}},
+		Files:         []measure.BehavioralFile{{Path: behaviorFile, Language: "go", Cyclomatic: 4, ChangeCount: 1, Score: 4}},
+		TotalEligible: 1, TotalMeasured: 1,
+	}
+	if err := behavior.Validate(); err != nil {
+		w.t.Fatalf("projects seed: behavioral hotspots report: %v", err)
+	}
 	analysis := projectanalysis.Analysis{
 		ID: analysisID, TenantID: projectsTenant.String(), ProjectID: p.ID.String(), ProjectKey: p.Key,
 		CreatedAt: now, Origin: projectanalysis.OriginServer,
 		// The ref doubles as the branch name, so /branches and /analyses carry the marker too.
-		SourceRef: projectsMarker, SourceCommit: "0123456789abcdef0123456789abcdef01234567",
+		SourceRef: projectsMarker, SourceCommit: projectsCommit, BehavioralHotspots: &behavior,
 		Measures: qualitygate.Snapshot{"new_issues": 1},
 		Gate:     qualitygate.Result{Passed: true},
 		GateInfo: projectanalysis.GateInfo{Name: "Quality gate", Source: "default"},
@@ -98,11 +121,14 @@ func seedProjects(w *harnessWorld) []string {
 			BySeverity: map[string]int{string(shared.SeverityHigh): 1}, ByStatus: map[string]int{"open": 1},
 		}},
 		Rating: rating.Report{Security: rating.GradeA, Reliability: rating.GradeB, Maintainability: rating.GradeA},
-		// A directory named for the marker puts it in the children the measures route lists.
+		// A directory named for the marker puts it in the children the measures route lists. The
+		// behavioral report ranks a file of its own, so the snapshot lists it as well.
 		Snapshot: measure.Snapshot{Nodes: []measure.Node{
 			{Path: "", Name: p.Key, Kind: measure.NodeProject},
 			{Path: projectsMarker, Name: projectsMarker, Kind: measure.NodeDirectory},
 			{Path: projectsMarker + "/main.go", Name: "main.go", Kind: measure.NodeFile, Parent: projectsMarker, Language: "go"},
+			{Path: projectsBehaviorMarker, Name: projectsBehaviorMarker, Kind: measure.NodeDirectory},
+			{Path: behaviorFile, Name: "hot.go", Kind: measure.NodeFile, Parent: projectsBehaviorMarker, Language: "go"},
 		}},
 	}
 	// The stored result has no SBOM on purpose: the dependency routes must keep answering 404.
@@ -134,48 +160,5 @@ func seedProjects(w *harnessWorld) []string {
 		w.t.Fatalf("projects seed: triage issue: %v", err)
 	}
 
-	seedProjectSourceFindings(w, key)
-	return []string{projectsMarker}
+	return []string{projectsMarker, projectsBehaviorMarker}
 }
-
-// seedProjectSourceFindings records one source finding under the project's analysis context. The
-// source-finding routes read through the router's findings service, which has no setter: it is
-// created here only when no other seed has wired one, and an existing one is reused as it stands.
-func seedProjectSourceFindings(w *harnessWorld, key string) {
-	w.t.Helper()
-	fid := harnessPathValues["{fid}"]
-	// Create only when no seed has wired the service: another seed owns it otherwise, and replacing
-	// it would turn that seed's routes vacuous. The service answers with the id its generator
-	// yields, so a service built here hands out the sweep's {fid}.
-	owned := w.rt.findings == nil
-	if owned {
-		w.rt.findings = findingsuc.NewService(memory.NewFindingRepository(), nil, nil, w.audit,
-			fixedClock{t: time.Unix(1, 0)}, projectsFixedID(fid))
-	}
-
-	// The finding goes in through the service's own Create, into whatever repository it holds, under
-	// the hidden engagement the project service resolves for the key.
-	ctx := shared.WithTenant(context.Background(), projectsTenant)
-	source, err := w.projects.SourceContext(ctx, projectsTenant, key)
-	if err != nil {
-		w.t.Fatalf("projects seed: resolve source context: %v", err)
-	}
-	created, err := w.rt.findings.Create(ctx, projectsMarker, source.Context.ID,
-		finding.ManualInput{Title: projectsMarker + " source finding", Severity: shared.SeverityHigh})
-	if err != nil {
-		if owned {
-			w.t.Fatalf("projects seed: plant source finding: %v", err)
-		}
-		w.t.Logf("projects seed: the shared findings service refused the source finding, so the source-finding routes stay empty: %v", err)
-		return
-	}
-	if created.ID.String() != fid {
-		w.t.Logf("projects seed: the shared findings service named the source finding %q, not the sweep's %q, so only the list route can serve it", created.ID, fid)
-	}
-}
-
-// projectsFixedID is an id generator that always yields one value. The seed creates a single
-// finding with it, so the finding lands on the id the generated sweep asks for.
-type projectsFixedID string
-
-func (id projectsFixedID) NewID() shared.ID { return shared.ID(id) }
