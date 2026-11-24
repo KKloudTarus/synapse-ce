@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -125,4 +126,40 @@ func lastAddrOf(pfx netip.Prefix) netip.Addr {
 	value := uint32(addr[0])<<24 | uint32(addr[1])<<16 | uint32(addr[2])<<8 | uint32(addr[3])
 	value |= mask
 	return netip.AddrFrom4([4]byte{byte(value >> 24), byte(value >> 16), byte(value >> 8), byte(value)})
+}
+
+// The scope layer refuses the same ranges this layer drops, and it has to keep its own copy:
+// internal/domain/engagement is a domain package, which architecture_test.go limits to the domain
+// and the standard library, so it cannot import this one. Two tables that must agree and cannot
+// share code are kept in step here, where both are visible.
+//
+// They are two different answers to the same fact. The scope table decides what an operator may
+// name; this one decides what a packet may reach. If they drift, a scope accepts a target the
+// kernel will drop, which is the misleading state the scope floor exists to remove.
+func TestScopeFloorMatchesTheKernelFloor(t *testing.T) {
+	scope := engagement.UnreachableRanges()
+	if len(scope) != len(kernelForbiddenDestinations) {
+		t.Fatalf("the scope floor has %d ranges and the kernel floor %d; they must be the same set", len(scope), len(kernelForbiddenDestinations))
+	}
+	inKernel := map[netip.Prefix]bool{}
+	for _, pfx := range kernelForbiddenDestinations {
+		inKernel[pfx] = true
+	}
+	for _, r := range scope {
+		if !inKernel[r.Prefix] {
+			t.Errorf("%s is refused at scope entry but not dropped in the kernel; a scope that somehow carried it would reach it", r.Prefix)
+		}
+		if strings.TrimSpace(r.Why) == "" {
+			t.Errorf("%s is refused with no reason for the operator", r.Prefix)
+		}
+	}
+	inScope := map[netip.Prefix]bool{}
+	for _, r := range scope {
+		inScope[r.Prefix] = true
+	}
+	for _, pfx := range kernelForbiddenDestinations {
+		if !inScope[pfx] {
+			t.Errorf("%s is dropped in the kernel but accepted at scope entry; the scope would claim an authorization the run cannot exercise", pfx)
+		}
+	}
 }

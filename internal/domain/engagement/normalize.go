@@ -197,17 +197,31 @@ func NormalizeTarget(t Target, scopeEntry bool) (Target, error) {
 		if err != nil {
 			return Target{}, validationError("invalid IP address %q", t.Value)
 		}
+		if reserved, ok := unreachableRange(addr); ok {
+			return Target{}, validationError("%s is in %s (%s) and is dropped by the sandbox before any tool runs, so it can never be a target", addr, reserved.Prefix, reserved.Why)
+		}
 		out.Value = addr.String()
 	case TargetCIDR:
 		pfx, err := netip.ParsePrefix(v)
 		if err != nil {
 			return Target{}, validationError("invalid CIDR %q", t.Value)
 		}
-		out.Value = pfx.Masked().String()
+		pfx = pfx.Masked()
+		if reserved, ok := unreachablePrefix(pfx); ok {
+			return Target{}, validationError("%s lies entirely within %s (%s), which the sandbox drops before any tool runs, so it can never be a target", pfx, reserved.Prefix, reserved.Why)
+		}
+		out.Value = pfx.String()
 	case TargetURL:
 		identity, err := NormalizeURL(v)
 		if err != nil {
 			return Target{}, err
+		}
+		// Only a literal address can be judged here. A hostname would need DNS, which the domain
+		// does not do and must not: the sandbox's own resolution is what the kernel floor covers.
+		if addr, addrErr := netip.ParseAddr(identity.Host); addrErr == nil {
+			if reserved, ok := unreachableRange(addr); ok {
+				return Target{}, validationError("%s is in %s (%s) and is dropped by the sandbox before any tool runs, so it can never be a target", addr, reserved.Prefix, reserved.Why)
+			}
 		}
 		out.Value = identity.URL
 	case TargetProcess:
