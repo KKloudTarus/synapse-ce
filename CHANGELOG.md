@@ -87,6 +87,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- **An out-of-scope entry written as an IPv4-mapped IPv6 address excluded nothing.**
+  `::ffff:203.0.113.5` and `203.0.113.5` are the same host, and `netip` compares them as different:
+  neither `Contains` nor `Overlaps` crosses the mapping. A scope exclusion in the mapped form
+  matched no request, so the host an operator had explicitly excluded was authorized and scanned
+  with no warning. The same split let `::ffff:169.254.169.254/128` past the unreachable floor that
+  refuses the dotted form. `NormalizeTarget` now canonicalizes, and every reader of a scope value
+  goes through it.
+- The snapshot backfill, the comparison backfill and the cycle integrity verifier bind the tenant
+  before they audit, as the cycle backfill already does. Without it each one either stops at its
+  first audit write under RLS or files the row under the empty tenant.
 - **`synapse-assessment-backfill` can run against a database that enforces RLS.** It did not bind
   the tenant to the context it audits under, so the Postgres append path took the legacy statement
   whose `hash_version` defaults to 1, and the `audit_log` policy

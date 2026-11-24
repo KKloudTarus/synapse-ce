@@ -56,6 +56,11 @@ func unreachableRange(addr netip.Addr) (UnreachableRange, bool) {
 // unreachable parts out of it. Only a prefix every address of which is unreachable is a mistake
 // worth refusing, because nothing in it can ever answer.
 func unreachablePrefix(pfx netip.Prefix) (UnreachableRange, bool) {
+	// Belt: NormalizeTarget canonicalizes before calling, but a future caller might not, and a
+	// 4-in-6 prefix silently matches no IPv4 range rather than erroring.
+	if pfx.Addr().Is4In6() {
+		pfx = netip.PrefixFrom(pfx.Addr().Unmap(), pfx.Bits()-96)
+	}
 	for _, r := range unreachableRanges {
 		if r.Prefix.Overlaps(pfx) && r.Prefix.Bits() <= pfx.Bits() && r.Prefix.Contains(pfx.Addr()) {
 			return r, true
