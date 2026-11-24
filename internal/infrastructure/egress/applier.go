@@ -342,6 +342,16 @@ func (a *Applier) setup(ctx context.Context, name string, idx int, p ports.Egres
 	hosts := pinnedHosts(p.PinnedHosts)
 	ns.AllowedRules = allowRules // expose the resolved allow-set for the connection-observer verdict
 
+	// Before any policy rule: the destinations no engagement scope may open, whatever it declares.
+	// Scope normalization accepts any parseable address, so a tenant admin can put 169.254.169.254
+	// in an engagement and Compile turns it into an ACCEPT rule. iptables matches in order, so
+	// emitting these first means no later ACCEPT can reach them, however broad its prefix.
+	for _, pfx := range kernelForbiddenDestinations {
+		if err := a.outputRule(ctx, name, "DROP", ports.EgressRule{Net: pfx}); err != nil {
+			_ = ns.Teardown(context.Background())
+			return nil, err
+		}
+	}
 	// Deny first (out-of-scope wins), then allow, then default DROP.
 	for _, r := range denyRules {
 		if err := a.outputRule(ctx, name, "DROP", r); err != nil {
@@ -430,6 +440,32 @@ func filterRules(rules []ports.EgressRule, allow bool) []ports.EgressRule {
 		}
 	}
 	return out
+}
+
+// kernelForbiddenDestinations are the IPv4 ranges this layer drops before it reads the policy at
+// all. They are the addresses a tool inside the namespace must never reach no matter what an
+// engagement's scope declares: link-local, which is where the cloud instance-metadata service
+// lives, the carrier-grade NAT block that holds the Alibaba and OpenStack metadata service at
+// 100.100.100.200, and the other special-purpose ranges that have no business being a scan target.
+//
+// Loopback is deliberately absent. These rules apply inside the run's own network namespace, where
+// 127.0.0.1 is the tool's own loopback and not the host's, so dropping it would break ordinary
+// tools while isolating nothing.
+//
+// Private-use space is deliberately absent too: scanning an internal network is what this product
+// is for, and an operator who puts 10.0.0.0/8 in scope means it.
+//
+// The documentation ranges are absent because they route nowhere; refusing them would only break a
+// lab that uses TEST-NET as a target. TestKernelFloorIsASubsetOfTheOutboundPolicy keeps this list
+// from drifting away from the one every outbound client uses.
+var kernelForbiddenDestinations = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),      // "this network"
+	netip.MustParsePrefix("169.254.0.0/16"), // link local, including 169.254.169.254
+	netip.MustParsePrefix("100.64.0.0/10"),  // carrier-grade NAT, including 100.100.100.200
+	netip.MustParsePrefix("192.0.0.0/24"),   // IETF protocol assignments
+	netip.MustParsePrefix("198.18.0.0/15"),  // benchmarking
+	netip.MustParsePrefix("224.0.0.0/4"),    // multicast
+	netip.MustParsePrefix("240.0.0.0/4"),    // reserved, including 255.255.255.255
 }
 
 // outputRule appends an OUTPUT rule for one policy rule (per-port when set, else all

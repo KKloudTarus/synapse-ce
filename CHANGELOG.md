@@ -78,6 +78,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- **A sandbox namespace drops the cloud metadata ranges before it reads the engagement's scope.**
+  Scope normalization accepts any address that parses, so a tenant admin could put
+  `169.254.169.254` in an engagement and `egress.Compile` turned it into an ACCEPT rule. The
+  applier now emits DROP rules for link-local, carrier-grade NAT (holding `100.100.100.200`),
+  multicast, reserved and the other special-purpose ranges before any policy rule, and iptables
+  matches in order, so no later ACCEPT reaches them however broad its prefix. Loopback and
+  private-use space stay reachable: the first is the tool's own inside the namespace, the second is
+  what an internal-network engagement is for.
 - **An allowed egress domain can no longer open a kernel rule to a cloud metadata address.**
   `ResolveEgressPolicy` resolves the sandbox's allow-domains separately from every earlier check,
   and wrote whatever that lookup returned straight into the namespace as an ALLOW rule, so a host
