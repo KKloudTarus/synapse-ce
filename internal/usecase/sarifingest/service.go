@@ -12,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/importreceipt"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -39,6 +40,12 @@ type IngestResult struct {
 	// than a count because a silent refusal is indistinguishable from a clean ingest.
 	Refused  []importedfinding.RefusalReason
 	Coverage []importedfinding.CoverageIssue
+	// RunID identifies the durable receipt this ingest was recorded under, and is empty when the run
+	// ledger is not wired. It is additive: the legacy response body does not carry it.
+	RunID shared.ID
+	// Outcome is the receipt's terminal outcome for this run. A replay reports the outcome the ORIGINAL
+	// run recorded, because that is the one describing the stored rows.
+	Outcome importreceipt.Outcome
 }
 
 // Disagreement records that a first-party finding and an external result describe the same issue but
@@ -76,6 +83,9 @@ type Service struct {
 	ids         ports.IDGenerator
 	limits      Limits
 	attributor  ports.FindingAttributor
+	// receipts and tx are the run ledger, wired together by SetRunLedger or not at all.
+	receipts ports.ImportReceiptStore
+	tx       ports.TenantTransactionRunner
 }
 
 // NewService validates and returns the ingest service.
@@ -136,6 +146,14 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		return IngestResult{}, err
 	}
 
+	return s.ingestRun(ctx, tenantID, req, parsedDoc)
+}
+
+// ingestDocument persists one parsed document. It is the body of Ingest from the point the document is
+// known to be readable, split out so the run ledger can wrap exactly this much in one transaction and
+// nothing more: the engagement read and the parse decide whether there is a run at all, so they stay
+// outside it.
+func (s *Service) ingestDocument(ctx context.Context, tenantID shared.ID, req IngestRequest, parsedDoc parsed) (IngestResult, error) {
 	result := IngestResult{Refused: parsedDoc.refusals, Coverage: parsedDoc.coverage}
 	if req.AssetID.IsZero() {
 		result.Coverage = append(result.Coverage, importedfinding.CoverageIssue{Detail: "asset attribution was not supplied: imported findings cannot enter attack paths"})

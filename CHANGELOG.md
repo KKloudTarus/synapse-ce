@@ -9,6 +9,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **A SARIF import now leaves a durable receipt, and the run id comes back in the response (#1183).**
+  Importing a third-party report wrote findings, an audit entry and attribution bindings with no record
+  tying them to one run, so a request that failed after the rows landed left no way to tell what had been
+  done. Each import now opens a receipt keyed on tenant, engagement, source and document digest, and the
+  rows, their audit entry, their attribution effects and the receipt's outcome commit in one PostgreSQL
+  transaction. The outcome is `complete` when nothing was refused, `partial` when some results were
+  refused and some landed, `failed` when every result was refused, and `pending` while a run is
+  unfinished: a pending receipt is the repair obligation, and re-posting the same document adopts it
+  instead of opening a second run. `POST /api/v1/engagements/{id}/sarif` returns the run in the additive
+  `X-Synapse-Import-Run-Id` header; the 200 body is unchanged. A replay keeps the original run's counters
+  rather than overwriting them with a view in which nothing was accepted. A deployment with no database
+  leaves the ledger unwired, because the in-memory stores cannot roll back alongside the receipt.
+
 - `notion` destination-managed snapshot publication, enabled only by the explicit
   `destination_managed_snapshot_v1` integration profile. Each manual publish creates a new page
   with the stored report PDF and summary; unpublish moves only the current page to recoverable

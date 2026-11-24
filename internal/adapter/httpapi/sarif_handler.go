@@ -16,6 +16,11 @@ import (
 // at the edge rather than buffered whole.
 const sarifBodyCap = sarifingest.DefaultMaxDocumentBytes
 
+// importRunIDHeader carries the durable import receipt this request was recorded under. It is additive:
+// the 200 body is unchanged, so a client written before the run ledger keeps working and a client that
+// wants to follow the run up reads the header. It is absent when the ledger is not wired.
+const importRunIDHeader = "X-Synapse-Import-Run-Id"
+
 // sarifIngester is the narrow view of the ingest usecase the HTTP layer needs.
 type sarifIngester interface {
 	Ingest(ctx context.Context, req sarifingest.IngestRequest) (sarifingest.IngestResult, error)
@@ -101,6 +106,9 @@ func (rt *Router) importSARIF(w http.ResponseWriter, r *http.Request) {
 			RunIndex: refusal.RunIndex, ResultIndex: refusal.ResultIndex,
 			Code: string(refusal.Code), Detail: refusal.Detail,
 		})
+	}
+	if !result.RunID.IsZero() {
+		w.Header().Set(importRunIDHeader, result.RunID.String())
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
