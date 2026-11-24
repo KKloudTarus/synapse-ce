@@ -24,6 +24,9 @@ const (
 	engmiscRun        = shared.ID("r1")
 	engmiscFinding    = shared.ID("f1")
 	engmiscAsset      = shared.ID("asset-A")
+	// engmiscDetection is the detection whose provenance the seed plants. Its id carries the marker,
+	// so the transitions route, which echoes it on every row, answers a body only tenantA's row can fill.
+	engmiscDetection = shared.ID("detection-" + engmiscMarker)
 )
 
 func init() {
@@ -39,6 +42,7 @@ func init() {
 			"GET /api/v1/engagements/{id}/cspm/runs/{rid}",
 			"GET /api/v1/engagements/{id}/dast/runs/{rid}",
 			"GET /api/v1/engagements/{id}/detection-provenance",
+			"GET /api/v1/engagements/{id}/detections/{did}/provenance",
 			"GET /api/v1/engagements/{id}/documents",
 			"GET /api/v1/engagements/{id}/findings/{fid}/ticket-observations",
 			"GET /api/v1/engagements/{id}/findings/{fid}/tickets",
@@ -52,7 +56,8 @@ func init() {
 			"GET /api/v1/projects/{key}/source-findings/{fid}/ticket-observations",
 			"GET /api/v1/projects/{key}/source-findings/{fid}/tickets",
 		},
-		Run: seedEngmisc,
+		PathValues: map[string]string{"{did}": engmiscDetection.String()},
+		Run:        seedEngmisc,
 	})
 }
 

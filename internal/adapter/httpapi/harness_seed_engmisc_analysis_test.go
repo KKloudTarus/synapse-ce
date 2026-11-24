@@ -96,7 +96,7 @@ func (p engmiscProvenance) DetectionProvenanceTransitions(ctx context.Context, e
 // seedEngmiscDetectionProvenance admits one pending provenance row of tenantA into the real store.
 func seedEngmiscDetectionProvenance(w *harnessWorld) {
 	store := memory.NewDetectionProvenanceStore()
-	detection := shared.ID("detection-" + engmiscMarker)
+	detection := engmiscDetection
 	current := detectionprovenance.Current{
 		TenantID: "tenantA", EngagementID: engmiscEngagement, DetectionID: detection,
 		Status: detectionprovenance.StatusPending, PendingInput: []byte("input"), UpdatedAt: engmiscNow,
