@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Cube01, Dataflow03, SearchLg, Server01 } from '@untitledui/icons'
 import { Card, EmptyState, ErrorState, InfoNote, Pill, Spinner, cn } from '../../components/ui'
+import { FeatureDisabledState, isFeatureDisabledMessage } from '../../components/synapse/FeatureDisabledState'
 import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
 import type { Workload } from '../../lib/api'
@@ -91,8 +92,19 @@ export function Workloads() {
     return [...groups.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))
   }, [visible])
 
-  if (loading) return <Spinner label="Loading workloads…" />
-  if (error) return <ErrorState message={error} />
+  // The route is registered only when the fleet asset model is wired, so a 404 here is a
+  // deployment switch rather than a failure. Showing the raw status left the screen with an HTTP
+  // code, a Retry that would 404 again, and no heading at all.
+  if (isFeatureDisabledMessage(error)) {
+    return (
+      <FeatureDisabledState
+        feature="Kubernetes workloads"
+        envVar="SYNAPSE_FLEET_ASSETS_ENABLED"
+        hint="The workload-to-image map needs the fleet asset model and an enrolled cluster agent."
+        icon={Cube01}
+      />
+    )
+  }
 
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6 pb-12">
@@ -111,7 +123,11 @@ export function Workloads() {
         )}
       </header>
 
-      {workloads.length === 0 ? (
+      {loading && workloads.length === 0 ? (
+        <Spinner label="Loading workloads…" />
+      ) : error && workloads.length === 0 ? (
+        <ErrorState message={error} />
+      ) : workloads.length === 0 ? (
         <EmptyState
           icon={Dataflow03}
           title="No cluster inventory yet"

@@ -63,6 +63,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- A console screen whose whole content is the "feature is not enabled" state now carries a
+  page heading. The title rendered as a paragraph, so `/fleet/hosts`, `/fleet/workloads`,
+  `/fleet/agents`, `/fleet/asset-graph` and the AI-triage screens reached a screen reader with
+  no heading at all when their subsystem was switched off.
+- Kubernetes Workloads names the switch instead of showing `HTTP 404` when the fleet asset model
+  is off, and keeps its heading when the fetch fails for any other reason.
+
 - SAST keeps browser HTTP wrappers out of Go SSRF findings while preserving dynamic
   Node.js and Dart destinations. Server context follows supported TypeScript and
   JavaScript path aliases; unresolved context retains SSRF candidates.

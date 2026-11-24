@@ -21,6 +21,21 @@ describe('FeatureDisabledState', () => {
     render(<FeatureDisabledState feature="Attack paths" />)
     expect(screen.getByText(/does not expose the feature/)).toBeInTheDocument()
   })
+
+  // This state usually replaces a whole route. A title rendered as a paragraph left those screens
+  // with no heading at all, so a screen reader landed on a page it could not name and the heading
+  // sweep in web/scripts/ui-audit.mjs reported /fleet/hosts and /fleet/workloads as headless.
+  it('carries the page heading by default', () => {
+    render(<FeatureDisabledState feature="Fleet host inventory" envVar="SYNAPSE_FLEET_HOST_INGEST_ENABLED" />)
+    expect(screen.getByRole('heading', { level: 1, name: 'Fleet host inventory is not enabled' })).toBeInTheDocument()
+  })
+
+  it('steps down to the level the surrounding surface leaves free', () => {
+    const { rerender } = render(<FeatureDisabledState feature="AI triage" titleAs="h2" />)
+    expect(screen.getByRole('heading', { level: 2, name: 'AI triage is not enabled' })).toBeInTheDocument()
+    rerender(<FeatureDisabledState feature="Legal hold" titleAs="h3" />)
+    expect(screen.getByRole('heading', { level: 3, name: 'Legal hold is not enabled' })).toBeInTheDocument()
+  })
 })
 
 describe('isFeatureDisabled', () => {

@@ -46,6 +46,7 @@ export function AgentTab({ engagementId }: { engagementId: string }) {
         envVar="SYNAPSE_AGENT_ENABLED"
         hint="It proposes recon, triage and attack-path workflows under scope, window and approval checks."
         icon={CpuChip01}
+        titleAs="h2"
       />
     )
   if (error) return <ErrorState message={error} />
