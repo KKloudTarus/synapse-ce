@@ -515,6 +515,16 @@ func (run *ExternalRun) Normalize() error {
 	if run.ID.IsZero() || run.TenantID.IsZero() || run.IntegrationID.IsZero() || run.ProviderKey == "" || len(run.ProviderKey) > 1024 || len(run.Number) > 128 || len(run.URL) > 2048 || len(run.Revision) > 128 || len(run.Branch) > 512 {
 		return fmt.Errorf("%w: external run identity is invalid", shared.ErrValidation)
 	}
+	// The console renders this straight into an href. Only the length was checked, so the one thing
+	// standing between a provider's response and a javascript: URL in the operator's browser was
+	// every adapter remembering to build the URL itself rather than pass through what it was given.
+	// Plain http stays admitted: a self-hosted Jenkins on an internal network is a real deployment.
+	if run.URL != "" {
+		parsed, err := url.Parse(run.URL)
+		if err != nil || !parsed.IsAbs() || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("%w: external run url must be an absolute http(s) URL", shared.ErrValidation)
+		}
+	}
 	switch run.Lifecycle {
 	case RunQueued, RunRunning, RunCompleted:
 	default:
