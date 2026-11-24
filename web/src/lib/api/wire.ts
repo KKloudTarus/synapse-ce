@@ -89,6 +89,11 @@ export interface ProjectWire {
   latest_analysis?: unknown
   /** List-only enrichment; see `latest_analysis`. */
   latest_job?: unknown
+  /**
+   * Why DELETE would refuse, omitted when it would not and on the list endpoint, which does not
+   * pay for the read. Absent on an older server; all three cases read as "nothing known to block".
+   */
+  deletion_blocked?: string
 }
 
 /** Every key `engagementView` serializes, in json-tag form. Ordered as the Go struct declares. */

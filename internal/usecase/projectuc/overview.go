@@ -197,6 +197,25 @@ func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key, branch 
 	return analyzedOverview(p, analysis)
 }
 
+// DeletionBlockedReason reports why Delete would refuse, or "" when it would not. It asks the same
+// thing the refusal does: the project's analysis-context engagement, and whether its evidence chain
+// has a head. A read failure returns "": the overview must not claim a project is permanent on a
+// transient error, and the delete path still refuses correctly if it is.
+func (s *Service) DeletionBlockedReason(ctx context.Context, tenantID, projectID shared.ID) string {
+	if s.evidence == nil || s.engagements == nil {
+		return ""
+	}
+	e, err := s.engagements.GetByProjectID(ctx, tenantID, projectID)
+	if err != nil || e == nil {
+		return ""
+	}
+	head, err := s.evidence.Head(ctx, e.ID)
+	if err != nil || head == "" {
+		return ""
+	}
+	return "This project's analyses sealed evidence, and the custody chain is append-only, so it cannot be deleted."
+}
+
 // overviewLatestAnalysis resolves the analysis the overview should reflect. With no branch it uses
 // the cross-project latest-overall read (the project list shares that query); with a branch it reads
 // that branch's newest completed analysis, and a project with no analysis on that branch reads as

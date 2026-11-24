@@ -1671,6 +1671,12 @@ export interface Project {
   createdAt: string | null
   latestAnalysis: ProjectAnalysis | null
   latestJob: ScanJob | null
+  /**
+   * Why deleting this project would be refused, empty when it would not and on the list endpoint.
+   * A project whose analyses sealed evidence is permanent, because the custody chain is
+   * append-only; the Delete control states that rather than producing it from a 409 after a click.
+   */
+  deletionBlocked?: string
 }
 
 export interface CreateProjectInput {

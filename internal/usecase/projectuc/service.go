@@ -48,6 +48,7 @@ type Service struct {
 	issues                           ports.ProjectIssueStore
 	ruleCatalog                      ports.RuleCatalog
 	findings                         ports.FindingRepository
+	evidence                         ports.EvidenceStore
 	gates                            *qualitygatesuc.Service
 	gateMutator                      ports.QualityGateMutator
 	profiles                         *qualityprofilesuc.Service
@@ -77,6 +78,11 @@ func (s *Service) SetSourceArtifactStore(store ports.ProjectSourceArtifactStore)
 	s.sourceArtifacts = store
 }
 func (s *Service) SetAnalysisStore(store ports.ProjectAnalysisStore) { s.analyses = store }
+
+// SetEvidenceStore supplies the read the overview uses to tell an operator, before they click
+// Delete, that this project cannot be deleted. Optional: without it the overview reports nothing
+// and the delete still refuses with the same reason, just later.
+func (s *Service) SetEvidenceStore(store ports.EvidenceStore) { s.evidence = store }
 func (s *Service) SetProjectAnalysisCompletionTimeout(timeout time.Duration) {
 	if timeout > 0 {
 		s.projectAnalysisCompletionTimeout = timeout

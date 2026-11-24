@@ -156,9 +156,15 @@ type projectView struct {
 	DecoratePullRequests bool                  `json:"decorate_pull_requests"`
 	CreatedAt            time.Time             `json:"created_at"`
 	UpdatedAt            time.Time             `json:"updated_at"`
+	// DeletionBlocked is why DELETE on this project would refuse, empty when it would not and on
+	// the list endpoint, which does not pay for the read. The console states the reason on the
+	// Delete control rather than letting the operator discover it from a 409 after clicking.
+	DeletionBlocked string `json:"deletion_blocked,omitempty"`
 }
 
-func toProjectView(p *project.Project) projectView {
+// toProjectView renders a project. deletionBlocked is the reason DELETE would refuse; the list
+// endpoint passes "" because answering it per row would cost one evidence read per project.
+func toProjectView(p *project.Project, deletionBlocked string) projectView {
 	if p == nil {
 		return projectView{}
 	}
@@ -173,5 +179,6 @@ func toProjectView(p *project.Project) projectView {
 		DecoratePullRequests: p.DecoratePullRequests,
 		CreatedAt:            p.Audit.CreatedAt,
 		UpdatedAt:            p.Audit.UpdatedAt,
+		DeletionBlocked:      deletionBlocked,
 	}
 }

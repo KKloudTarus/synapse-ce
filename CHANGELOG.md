@@ -87,6 +87,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- The project Delete control states why it is unavailable instead of producing a `409` when
+  clicked. A project whose analyses sealed evidence cannot be deleted, because the custody chain is
+  append-only; the single project read now carries the reason, and the control is disabled with it
+  as the accessible name. The list endpoint does not carry it, because answering per row would cost
+  one evidence read per project.
+- **An engagement scope refuses a target the sandbox would drop, and says why.** The kernel floor
+  below made the scope misleading: a target such as `169.254.169.254` was accepted, so the scope
+  claimed an authorization the run could never exercise, and the operator saw an empty result with
+  nothing explaining it. `NormalizeTarget` now refuses an IP, a wholly-unreachable CIDR or a URL
+  whose host is such a literal, naming the range and the reason. A prefix that merely overlaps one
+  is still accepted, so `0.0.0.0/0` keeps working and the kernel carves the unreachable parts out
+  of it. Private-use space and loopback are unaffected.
 - **A sandbox namespace drops the cloud metadata ranges before it reads the engagement's scope.**
   Scope normalization accepts any address that parses, so a tenant admin could put
   `169.254.169.254` in an engagement and `egress.Compile` turned it into an ACCEPT rule. The
