@@ -69,6 +69,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   no heading at all when their subsystem was switched off.
 - Kubernetes Workloads names the switch instead of showing `HTTP 404` when the fleet asset model
   is off, and keeps its heading when the fetch fails for any other reason.
+- The Findings Over Time axis labels every grid line with a value it actually reaches. Four fixed
+  fractions of the maximum rounded to the same number whenever that maximum was below 4, so an
+  empty window drew five grid lines reading 0, 0, 1, 1, 1 and put three different heights at the
+  same stated count.
 
 - SAST keeps browser HTTP wrappers out of Go SSRF findings while preserving dynamic
   Node.js and Dart destinations. Server context follows supported TypeScript and

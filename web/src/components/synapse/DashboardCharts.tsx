@@ -3,6 +3,19 @@ import { cn } from '../ui'
 import type { DashboardTrendPoint } from '../../lib/types'
 
 /**
+ * Rounds a raw axis step up to the next 1, 2 or 5 times a power of ten, so the grid lands on
+ * values a reader recognises: 10 findings over four gaps gives 2.5, which becomes 5 and reads
+ * 0, 5, 10 rather than 0, 2.5, 5, 7.5, 10.
+ */
+export function niceStep(raw: number): number {
+  if (!(raw > 0) || !Number.isFinite(raw)) return 1
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)))
+  const normalised = raw / magnitude
+  const rounded = normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10
+  return rounded * magnitude
+}
+
+/**
  * Width of an element, tracked with a ResizeObserver. A fixed viewBox made the
  * trend chart render 576px wide inside a 358px card at 390px viewport width, so
  * the most recent points fell outside the card.
@@ -310,11 +323,17 @@ export function FindingsTrendChart({ points, series }: { points: DashboardTrendP
   const plotHeight = height - top - bottom
 
   const maxVal = Math.max(1, ...points.flatMap((point) => series.map((item) => point.counts[item.key] ?? 0)))
-  // Nice round max for grid ticks
-  const yTicks = [0, 0.25, 0.5, 0.75, 1]
+  // The ticks are counts, so the step has to be a whole number. Four fixed fractions of maxVal
+  // produced a repeated label whenever maxVal was below 4: at maxVal 1 the chart drew five grid
+  // lines reading 0, 0, 1, 1, 1 bottom to top, which puts three different heights at the same
+  // stated value. Deriving the step instead keeps every label distinct and every grid line on a
+  // value the axis actually reaches.
+  const yStep = Math.max(1, niceStep(maxVal / 4))
+  const yTop = yStep * Math.ceil(maxVal / yStep)
+  const yTicks = Array.from({ length: yTop / yStep + 1 }, (_, index) => index * yStep)
 
   const x = (index: number) => left + (points.length <= 1 ? 0 : (index / (points.length - 1)) * plotWidth)
-  const y = (value: number) => top + plotHeight - (value / maxVal) * plotHeight
+  const y = (value: number) => top + plotHeight - (value / yTop) * plotHeight
 
   const total = points.reduce(
     (sum, point) => sum + series.reduce((row, item) => row + (point.counts[item.key] ?? 0), 0),
@@ -368,11 +387,10 @@ export function FindingsTrendChart({ points, series }: { points: DashboardTrendP
           </defs>
 
           {/* Horizontal Grid lines & Y-axis labels */}
-          {yTicks.map((ratio) => {
-            const yPos = top + (1 - ratio) * plotHeight
-            const val = Math.round(ratio * maxVal)
+          {yTicks.map((val) => {
+            const yPos = y(val)
             return (
-              <g key={ratio}>
+              <g key={val}>
                 <line
                   x1={left}
                   x2={width - right}
@@ -380,7 +398,7 @@ export function FindingsTrendChart({ points, series }: { points: DashboardTrendP
                   y2={yPos}
                   stroke="var(--color-border-secondary)"
                   strokeWidth="1"
-                  strokeDasharray={ratio === 0 ? undefined : '3 3'}
+                  strokeDasharray={val === 0 ? undefined : '3 3'}
                 />
                 <text
                   x={left - 8}
