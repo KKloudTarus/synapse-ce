@@ -6,6 +6,7 @@
 //
 //   VITE_API_PROXY_TARGET=http://localhost:8080 pnpm dev
 //   UI_AUDIT_TOKEN=<api token> pnpm ui:audit
+//   UI_AUDIT_TOKEN=<api token> UI_AUDIT_THEME=dark pnpm ui:audit
 //
 // Without a valid token the app renders its sign-in screen on every route, and the audit says so
 // rather than reporting 64 clean screens.
@@ -30,6 +31,15 @@ const SETTLE_TIMEOUT = Number(process.env.UI_AUDIT_SETTLE_TIMEOUT ?? 15000)
 const TOKEN = process.env.UI_AUDIT_TOKEN ?? ''
 if (!TOKEN) {
   console.error('set UI_AUDIT_TOKEN to a token the backend accepts')
+  process.exit(1)
+}
+// web/src/main.tsx resolves the theme from localStorage['synapse-theme'] before the first render
+// and defaults to light, so a sweep that sets nothing only ever photographs the light theme. Each
+// theme is its own run: sweeping both in one pass doubles the wall clock, and the two reports are
+// read separately anyway.
+const THEME = process.env.UI_AUDIT_THEME ?? 'light'
+if (THEME !== 'light' && THEME !== 'dark') {
+  console.error(`UI_AUDIT_THEME must be light or dark, got ${THEME}`)
   process.exit(1)
 }
 
@@ -96,9 +106,13 @@ for (const viewport of VIEWPORTS) {
   // Scoped to the origin under test: addInitScript runs in every page and frame the context
   // loads, so an unguarded write would hand a working API token to any other origin the app
   // ever embeds or redirects to.
-  await context.addInitScript(({ token, origin }) => {
-    if (location.origin === origin) sessionStorage.setItem('synapse.token', token)
-  }, { token: TOKEN, origin: new URL(BASE).origin })
+  await context.addInitScript(({ token, origin, theme }) => {
+    if (location.origin !== origin) return
+    sessionStorage.setItem('synapse.token', token)
+    // Written before the module that reads it, so the first paint is already in the right theme
+    // and no screen is captured mid-switch.
+    try { localStorage.setItem('synapse-theme', theme) } catch { /* site data blocked */ }
+  }, { token: TOKEN, origin: new URL(BASE).origin, theme: THEME })
   for (const route of ROUTES) {
     const page = await context.newPage()
     const consoleErrors = []
@@ -310,7 +324,7 @@ for (const viewport of VIEWPORTS) {
       await page.setViewportSize({ width: viewport.width, height: shotHeight })
       await page.waitForTimeout(700)
     }
-    await page.screenshot({ path: `${OUT}/${viewport.name}${slug}.png`, fullPage: true })
+    await page.screenshot({ path: `${OUT}/${THEME}-${viewport.name}${slug}.png`, fullPage: true })
     if (shotHeight > viewport.height) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
     }
@@ -322,6 +336,7 @@ for (const viewport of VIEWPORTS) {
     findings.push({
       route,
       viewport: viewport.name,
+      theme: THEME,
       loadError,
       stillLoading,
       captureTruncated,
@@ -343,7 +358,7 @@ const problems = findings.filter(
   (f) => f.loadError || f.renderedError?.length || f.stillLoading || f.captureTruncated || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || f.overflowsParent?.length || !f.headings.length || f.buttonsWithoutName > 0 || f.focusableUnderAriaHidden?.length,
 )
 console.log(`distinct API routes exercised: ${apiCalls.size} (written to ${OUT}/api-calls.json)`)
-console.log(`screens visited: ${findings.length} (${ROUTES.length} routes x ${VIEWPORTS.length} viewports)`)
+console.log(`screens visited: ${findings.length} (${ROUTES.length} routes x ${VIEWPORTS.length} viewports, ${THEME} theme)`)
 console.log(`screens with something to look at: ${problems.length}\n`)
 // A sweep that found problems must be able to fail a pipeline, not just print.
 process.exitCode = problems.length ? 1 : 0
