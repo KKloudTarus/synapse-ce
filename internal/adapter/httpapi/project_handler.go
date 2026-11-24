@@ -29,6 +29,9 @@ type projectService interface {
 	List(context.Context, shared.ID) ([]*project.Project, error)
 	ListSummaries(context.Context, shared.ID) ([]projectuc.ProjectSummary, error)
 	Get(context.Context, shared.ID, string) (*project.Project, error)
+	// DeletionBlockedReason answers why Delete would refuse, "" when it would not, so the single
+	// project read can tell the console before the operator clicks.
+	DeletionBlockedReason(context.Context, shared.ID, shared.ID) string
 	Delete(context.Context, string, shared.ID, string) error
 	AssignGate(context.Context, string, shared.ID, string, string) (*project.Project, error)
 	SetPullRequestDecoration(context.Context, string, shared.ID, string, bool) (*project.Project, error)
@@ -109,7 +112,7 @@ func (rt *Router) createProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toProjectView(p))
+	writeJSON(w, http.StatusCreated, toProjectView(p, ""))
 }
 
 type projectSummaryAnalysisResponse struct {
@@ -161,7 +164,7 @@ func (rt *Router) listProjects(w http.ResponseWriter, r *http.Request) {
 	out := make([]projectSummaryResponse, len(list))
 	for i, summary := range list {
 		p := summary.Project
-		view := toProjectView(p)
+		view := toProjectView(p, "")
 		out[i] = projectSummaryResponse{
 			ID: view.ID, TenantID: view.TenantID, Name: view.Name, Key: view.Key,
 			SourceBinding: view.SourceBinding, DefaultProfileByLang: view.DefaultProfileByLang,
@@ -193,12 +196,13 @@ func (rt *Router) listProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) getProject(w http.ResponseWriter, r *http.Request) {
-	p, err := rt.projects.Get(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"))
+	tenant := shared.ID(TenantFrom(r.Context()))
+	p, err := rt.projects.Get(r.Context(), tenant, r.PathValue("key"))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toProjectView(p))
+	writeJSON(w, http.StatusOK, toProjectView(p, rt.projects.DeletionBlockedReason(r.Context(), tenant, p.ID)))
 }
 
 func (rt *Router) deleteProject(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +226,7 @@ func (rt *Router) assignProjectGate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toProjectView(p))
+	writeJSON(w, http.StatusOK, toProjectView(p, ""))
 }
 
 func (rt *Router) setProjectDecoration(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +242,7 @@ func (rt *Router) setProjectDecoration(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toProjectView(p))
+	writeJSON(w, http.StatusOK, toProjectView(p, ""))
 }
 
 type projectAnalysisJobResponse struct {

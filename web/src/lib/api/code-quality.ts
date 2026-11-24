@@ -101,6 +101,10 @@ function mapProject(r: ProjectWire): Project {
     createdAt: r.created_at ?? null,
     latestAnalysis: r.latest_analysis ? mapProjectSummaryAnalysis(r.latest_analysis) : null,
     latestJob: r.latest_job ? mapScanJob(r.latest_job) : null,
+    // Only the single project read carries this; the list omits it and an older server never sends
+    // it. Both read as "nothing known to block deleting", which is the permissive answer: the
+    // server still refuses correctly if it is wrong.
+    deletionBlocked: typeof r.deletion_blocked === 'string' ? r.deletion_blocked : '',
   }
 }
 

@@ -87,6 +87,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- The project Delete control states why it is unavailable instead of producing a `409` when
+  clicked. A project whose analyses sealed evidence cannot be deleted, because the custody chain is
+  append-only; the single project read now carries the reason, and the control is disabled with it
+  as the accessible name. The list endpoint does not carry it, because answering per row would cost
+  one evidence read per project.
 - **An engagement scope refuses a target the sandbox would drop, and says why.** The kernel floor
   below made the scope misleading: a target such as `169.254.169.254` was accepted, so the scope
   claimed an authorization the run could never exercise, and the operator saw an empty result with

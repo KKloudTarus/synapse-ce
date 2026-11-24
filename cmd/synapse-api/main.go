@@ -1053,6 +1053,10 @@ func main() {
 	}
 	projectService.SetArchiveStore(file.NewProjectArchiveStore(cfg.ProjectUploadDir, cfg.MaxWorkspaceBytes))
 	projectService.SetAnalysisStore(projectAnalysisStore)
+	// Lets the project overview say, before the operator clicks Delete, that this project cannot be
+	// deleted because its analyses sealed evidence. The delete path refuses either way; this only
+	// moves the refusal to where the decision is made.
+	projectService.SetEvidenceStore(evidenceStore)
 	// A pipeline-imported analysis leaves a scan-job record, so the project's status and job history
 	// show the CI run exactly as they show a server run.
 	projectService.SetScanJobs(scanJobStore)

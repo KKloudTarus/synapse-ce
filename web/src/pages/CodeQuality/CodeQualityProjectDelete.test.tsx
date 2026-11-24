@@ -81,3 +81,40 @@ describe('project deletion', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 })
+
+// A project whose analyses sealed evidence is permanent, because the custody chain is append-only.
+// The control used to offer Delete anyway, and the operator met a 409 after clicking; worse, with
+// the refusal misclassified it read as a retryable internal error with a Retry that could never
+// work. The reason now reaches the control itself.
+describe('project deletion blocked by sealed evidence', () => {
+  const reason = "This project's analyses sealed evidence, and the custody chain is append-only, so it cannot be deleted."
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    api.projectAnalysisStatus.mockResolvedValue(null)
+    api.projectBranches.mockResolvedValue([])
+    api.listQualityGates.mockResolvedValue([])
+  })
+
+  it('disables Delete and says why, without asking the server', async () => {
+    api.getProject.mockResolvedValue({ ...project, deletionBlocked: reason })
+    renderPage()
+    const button = await screen.findByRole('button', { name: /delete/i })
+    expect(button).toBeDisabled()
+    // title is unreliable on a disabled control, so the reason is also the accessible name.
+    expect(button).toHaveAccessibleName(new RegExp('sealed evidence'))
+    expect(api.deleteProject).not.toHaveBeenCalled()
+  })
+
+  it('leaves Delete alone when nothing blocks it', async () => {
+    api.getProject.mockResolvedValue({ ...project, deletionBlocked: '' })
+    renderPage()
+    expect(await screen.findByRole('button', { name: /delete/i })).toBeEnabled()
+  })
+
+  it('leaves Delete alone when an older server sends no signal', async () => {
+    api.getProject.mockResolvedValue(project)
+    renderPage()
+    expect(await screen.findByRole('button', { name: /delete/i })).toBeEnabled()
+  })
+})

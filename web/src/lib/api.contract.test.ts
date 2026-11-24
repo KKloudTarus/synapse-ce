@@ -176,6 +176,9 @@ describe('project wire contract', () => {
       createdAt: '2026-09-05T02:57:07.865295985Z',
       latestAnalysis: null,
       latestJob: null,
+      // projectSummaryResponse does not carry deletion_blocked: answering it per row would cost one
+      // evidence read per project. Only the single project read pays for it.
+      deletionBlocked: '',
     })
   })
 

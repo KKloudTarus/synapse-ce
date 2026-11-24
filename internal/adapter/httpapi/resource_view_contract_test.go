@@ -28,6 +28,8 @@ var wireContract = map[string][]string{
 	"projectView": {
 		"id", "tenant_id", "name", "key", "source_binding", "default_profile_by_lang",
 		"gate_id", "decorate_pull_requests", "created_at", "updated_at",
+		// omitempty: present only on the single project read, which is the one that pays for it.
+		"deletion_blocked",
 	},
 	"engagementFindingsView": {"total", "critical", "high", "medium", "low", "info"},
 	"scopeView":              {"in_scope", "out_of_scope"},

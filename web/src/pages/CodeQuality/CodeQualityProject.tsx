@@ -182,6 +182,12 @@ export function CodeQualityProject() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, startError])
 
+  // Why Delete would be refused, carried on the project itself. A project whose analyses sealed
+  // evidence is permanent, because the custody chain is append-only; the control says so rather
+  // than letting the operator discover it from a 409 after clicking. Absent on an older server,
+  // which reads as "nothing known to block it": the server still refuses correctly either way.
+  const deletionBlocked = project?.deletionBlocked ?? ''
+
   const { data: fetchedGates } = useFetch(
     () => api.listQualityGates().catch(() => [] as QualityGate[]),
     { deps: [] },
@@ -399,8 +405,12 @@ export function CodeQualityProject() {
             ) : (
               <Button
                 variant="secondary"
-                disabled={isRunning}
-                title={isRunning ? 'Wait for the running analysis to finish' : 'Delete this project'}
+                disabled={isRunning || deletionBlocked !== ''}
+                // title is unreliable on a disabled control, so the reason is also the accessible
+                // name: a keyboard or screen-reader user learns why the action is unavailable
+                // instead of meeting a button that reports only "Delete".
+                title={isRunning ? 'Wait for the running analysis to finish' : deletionBlocked || 'Delete this project'}
+                aria-label={deletionBlocked !== '' ? `Delete. ${deletionBlocked}` : undefined}
                 onClick={() => setConfirmingDelete(true)}
               >
                 <Trash01 className="size-4" aria-hidden="true" /> Delete
