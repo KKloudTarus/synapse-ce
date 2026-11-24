@@ -1,6 +1,8 @@
 package ownsbom
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -28,8 +30,14 @@ repositories {
 	got := map[string]string{}
 	for _, c := range comps {
 		got[c.Name] = c.Version
-		if c.PURL == "" || c.Scope != sbom.ScopeProduction {
-			t.Errorf("component missing PURL/scope: %+v", c)
+		// testImplementation is a test-only declaration, so the junit-jupiter coordinate is development scope; the
+		// rest sit under implementation and stay production.
+		wantScope := sbom.ScopeProduction
+		if c.Name == "org.junit.jupiter:junit-jupiter" {
+			wantScope = sbom.ScopeDevelopment
+		}
+		if c.PURL == "" || c.Scope != wantScope {
+			t.Errorf("component missing PURL or wrong scope (want %s): %+v", wantScope, c)
 		}
 	}
 	want := map[string]string{
@@ -93,6 +101,274 @@ dependencies {
 	}
 	if len(comps) != 2 {
 		t.Errorf("want exactly 2 components (real:lib, ok:concrete), got %d: %+v", len(comps), comps)
+	}
+}
+
+// scopesOf indexes components by group:artifact@version so a case can compare the whole scope assignment.
+func scopesOf(comps []sbom.Component) map[string]string {
+	out := make(map[string]string, len(comps))
+	for _, c := range comps {
+		out[c.Name+"@"+c.Version] = c.Scope
+	}
+	return out
+}
+
+func TestParseBuildGradleDepsScope(t *testing.T) {
+	const (
+		prod = sbom.ScopeProduction
+		test = sbom.ScopeDevelopment
+	)
+	cases := []struct {
+		name string
+		src  string
+		want map[string]string // group:artifact@version -> scope
+	}{
+		{
+			name: "groovy command syntax",
+			src: `dependencies {
+    implementation 'com.google.guava:guava:31.0-jre'
+    testImplementation 'junit:junit:4.12'
+}`,
+			want: map[string]string{"com.google.guava:guava@31.0-jre": prod, "junit:junit@4.12": test},
+		},
+		{
+			name: "groovy with parentheses and double quotes",
+			src: `dependencies {
+    implementation('a:prod:1.0')
+    testImplementation('a:test:1.0')
+    testImplementation("a:testdq:1.0")
+}`,
+			want: map[string]string{"a:prod@1.0": prod, "a:test@1.0": test, "a:testdq@1.0": test},
+		},
+		{
+			name: "kotlin dsl",
+			src: `dependencies {
+    implementation("a:prod:1.0")
+    testImplementation("a:test:1.0")
+    testRuntimeOnly("a:rt:1.0")
+}`,
+			want: map[string]string{"a:prod@1.0": prod, "a:test@1.0": test, "a:rt@1.0": test},
+		},
+		{
+			// Where a configuration has no generated accessor the Kotlin DSL names it by string. The name
+			// belongs to the statement it opens, so it must not carry over to the next declaration.
+			name: "kotlin dsl string-named configuration",
+			src: `subprojects {
+    dependencies {
+        "implementation"("a:prod:1.0")
+        "testImplementation"("a:test:1.0")
+        "implementation"("a:prod2:1.0")
+    }
+}`,
+			want: map[string]string{"a:prod@1.0": prod, "a:test@1.0": test, "a:prod2@1.0": prod},
+		},
+		{
+			name: "platform wrapper keeps the declaring configuration",
+			src: `dependencies {
+    testImplementation platform('a:bom1:1.0')
+    testImplementation(platform("a:bom2:1.0"))
+    implementation(platform("a:bom3:1.0"))
+    implementation enforcedPlatform('a:bom4:1.0')
+}`,
+			want: map[string]string{"a:bom1@1.0": test, "a:bom2@1.0": test, "a:bom3@1.0": prod, "a:bom4@1.0": prod},
+		},
+		{
+			name: "argument list spread over several lines",
+			src: `dependencies {
+    testImplementation(
+        'a:one:1.0',
+        'a:two:1.0'
+    )
+    implementation 'a:prod:1.0'
+}`,
+			want: map[string]string{"a:one@1.0": test, "a:two@1.0": test, "a:prod@1.0": prod},
+		},
+		{
+			name: "groovy list continued after a trailing comma",
+			src: `dependencies {
+    testImplementation 'a:one:1.0',
+                       'a:two:1.0'
+    implementation 'a:prod:1.0'
+}`,
+			want: map[string]string{"a:one@1.0": test, "a:two@1.0": test, "a:prod@1.0": prod},
+		},
+		{
+			name: "configuration closure does not leak into the next declaration",
+			src: `dependencies {
+    testImplementation('a:test:1.0') {
+        exclude group: 'x', module: 'y'
+    }
+    implementation 'a:prod:1.0'
+}`,
+			want: map[string]string{"a:test@1.0": test, "a:prod@1.0": prod},
+		},
+		{
+			name: "comments between the configuration and the coordinate",
+			src: `dependencies {
+    testImplementation 'a:test:1.0' // only for tests
+    implementation /* main */ 'a:prod:1.0'
+    testImplementation /* again */ 'a:test2:1.0'
+}`,
+			want: map[string]string{"a:test@1.0": test, "a:prod@1.0": prod, "a:test2@1.0": test},
+		},
+		{
+			name: "statements separated by a semicolon",
+			src:  `dependencies { testImplementation 'a:test:1.0'; implementation 'a:prod:1.0' }`,
+			want: map[string]string{"a:test@1.0": test, "a:prod@1.0": prod},
+		},
+		{
+			name: "dependencies nested in subprojects and allprojects",
+			src: `subprojects {
+    apply plugin: 'java'
+    dependencies {
+        testImplementation 'a:test:1.0'
+        implementation 'a:prod:1.0'
+    }
+}
+allprojects { dependencies { testImplementation 'a:test2:1.0' } }`,
+			want: map[string]string{"a:test@1.0": test, "a:prod@1.0": prod, "a:test2@1.0": test},
+		},
+		{
+			name: "block nested inside dependencies",
+			src: `dependencies {
+    constraints {
+        implementation('a:constrained:1.0')
+    }
+    testImplementation 'a:test:1.0'
+}`,
+			want: map[string]string{"a:constrained@1.0": prod, "a:test@1.0": test},
+		},
+		{
+			name: "buildscript classpath stays excluded",
+			src: `buildscript {
+    dependencies {
+        classpath 'a:plugin:1.0'
+        testImplementation 'a:nope:1.0'
+    }
+}
+dependencies { testImplementation 'a:test:1.0' }`,
+			want: map[string]string{"a:test@1.0": test},
+		},
+		{
+			name: "statement that does not start with a configuration is production",
+			src: `dependencies {
+    val extras = listOf("a:extra:1.0")
+    testImplementation("a:test:1.0")
+}`,
+			want: map[string]string{"a:extra@1.0": prod, "a:test@1.0": test},
+		},
+		{
+			name: "test declaration first, production declaration later",
+			src: `dependencies {
+    testImplementation 'a:both:1.0'
+    implementation 'a:both:1.0'
+}`,
+			want: map[string]string{"a:both@1.0": prod},
+		},
+		{
+			name: "production declaration first, test declaration later",
+			src: `dependencies {
+    implementation 'a:both:1.0'
+    testImplementation 'a:both:1.0'
+}`,
+			want: map[string]string{"a:both@1.0": prod},
+		},
+		{
+			name: "test then production across separate dependencies blocks",
+			src: `dependencies { testImplementation 'a:both:1.0' }
+dependencies { api 'a:both:1.0' }`,
+			want: map[string]string{"a:both@1.0": prod},
+		},
+		{
+			name: "declared only under test configurations",
+			src: `dependencies {
+    testImplementation 'a:only:1.0'
+    androidTestImplementation 'a:only:1.0'
+}`,
+			want: map[string]string{"a:only@1.0": test},
+		},
+		{
+			name: "windows line endings",
+			src: strings.ReplaceAll(`dependencies {
+    testImplementation 'a:test:1.0'
+    implementation 'a:prod:1.0'
+    testImplementation('a:test2:1.0') // note
+    implementation('a:prod2:1.0')
+}
+`, "\n", "\r\n"),
+			want: map[string]string{"a:test@1.0": test, "a:prod@1.0": prod, "a:test2@1.0": test, "a:prod2@1.0": prod},
+		},
+		{
+			name: "same coordinate in both branches of a conditional",
+			src: `dependencies {
+    if (project.hasProperty('lean')) {
+        testImplementation 'a:both:1.0'
+    } else {
+        implementation 'a:both:1.0'
+    }
+}`,
+			want: map[string]string{"a:both@1.0": prod},
+		},
+		{
+			name: "same artifact at two versions is two components",
+			src: `dependencies {
+    testImplementation 'a:lib:1.0'
+    implementation 'a:lib:2.0'
+}`,
+			want: map[string]string{"a:lib@1.0": test, "a:lib@2.0": prod},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scopesOf(ParseBuildGradleDeps([]byte(tc.src)))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("scopes mismatch\n got: %v\nwant: %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseBuildGradleDepsConfigurationNames pins which declaration names mean "test only". The match is on
+// the whole name, so an unrelated configuration that merely contains "test" is not demoted, and the
+// testFixtures family stays production: its dependencies are published with the module and reach consumers.
+func TestParseBuildGradleDepsConfigurationNames(t *testing.T) {
+	test := []string{
+		"testImplementation", "testApi", "testCompileOnly", "testRuntimeOnly", "testAnnotationProcessor",
+		"testCompile", "testRuntime", "kaptTest", "kspTest",
+		"androidTestImplementation", "androidTestApi", "androidTestCompileOnly", "androidTestRuntimeOnly",
+		"androidTestAnnotationProcessor", "androidTestCompile", "androidTestUtil", "kaptAndroidTest",
+		"kaptTestDebug", "kspAndroidTest",
+		"debugAndroidTestImplementation", "releaseAndroidTestImplementation", "freeDebugAndroidTestImplementation",
+		"testDebugImplementation", "testReleaseImplementation", "testFreeDebugImplementation",
+		"androidTestDebugImplementation", "debugUnitTestImplementation", "releaseUnitTestImplementation",
+	}
+	prod := []string{
+		"implementation", "api", "compile", "runtime", "compileOnly", "runtimeOnly", "annotationProcessor",
+		"kapt", "ksp", "debugImplementation", "releaseImplementation", "freeDebugImplementation",
+		"latestImplementation", "contestImplementation", "testing", "testingImplementation", "attest",
+		"testFixturesApi", "testFixturesImplementation", "testFixturesCompileOnly", "kaptTestFixtures",
+		"integrationTestImplementation", "jvmTestImplementation", "testImplementationExtra", "classpath",
+	}
+	check := func(t *testing.T, config, want string) {
+		t.Helper()
+		for _, decl := range []string{
+			config + " 'a:lib:1.0'",         // Groovy command syntax
+			config + "('a:lib:1.0')",        // Groovy with parentheses
+			config + `("a:lib:1.0")`,        // Kotlin DSL
+			`"` + config + `"("a:lib:1.0")`, // Kotlin DSL, configuration named by string
+		} {
+			src := "dependencies {\n    " + decl + "\n}\n"
+			got := scopesOf(ParseBuildGradleDeps([]byte(src)))
+			if !reflect.DeepEqual(got, map[string]string{"a:lib@1.0": want}) {
+				t.Errorf("%s: got %v, want scope %s", decl, got, want)
+			}
+		}
+	}
+	for _, config := range test {
+		t.Run(config, func(t *testing.T) { check(t, config, sbom.ScopeDevelopment) })
+	}
+	for _, config := range prod {
+		t.Run(config, func(t *testing.T) { check(t, config, sbom.ScopeProduction) })
 	}
 }
 

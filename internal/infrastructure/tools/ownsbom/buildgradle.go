@@ -18,7 +18,9 @@ import (
 // without a concrete version they cannot be matched against an advisory. Coordinates inside a
 // `buildscript { }` (build-plugin classpath) are ignored – those are build-time tooling, not runtime
 // artifacts. Gradle uses Maven coordinates, so the components are pkg:maven PURLs; the registry dedups by
-// PURL, so overlap with the resolver/catalog is merged rather than double-counted.
+// PURL, so overlap with the resolver/catalog is merged rather than double-counted. A coordinate declared
+// under a test configuration (testImplementation, androidTestImplementation, kaptTest, ...) is development scope,
+// the scope an npm devDependency gets; every other declaration is production.
 type BuildGradle struct{}
 
 // Ecosystem identifies this parser's package ecosystem (Gradle deps are Maven coordinates).
@@ -43,27 +45,70 @@ func (BuildGradle) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []
 // rejected by the digit-lead requirement.
 var concreteVersionRE = regexp.MustCompile(`^[0-9][A-Za-z0-9_.-]*$`)
 
+// testConfigurationRE matches, on the WHOLE name, the dependency configurations Gradle and the Android and
+// kapt/ksp plugins create for a test source set. A name is matched structurally and not by substring, so a
+// custom configuration that merely contains "test" (latestImplementation, testing) is left alone. Forms:
+//   - <marker>[Variant]<Kind>: the marker is the unit-test source set ("test"), the instrumented one
+//     ("androidTest") or a build-type/flavor prefix on either Android test variant ("debugAndroidTest",
+//     "freeReleaseUnitTest"); Variant is the capitalised build-type/flavor words that may follow it
+//     (testDebugImplementation); Kind is the declaration kind, including the pre-Gradle-7 compile/runtime.
+//   - kapt/ksp name the processor configuration after the source set it serves: kaptTest, kaptAndroidTest,
+//     kspTestDebug.
+//   - androidTestUtil, the instrumented-test helper APKs.
+//
+// A custom test suite (integrationTestImplementation) is not matched: nothing in its name proves it is not
+// shipped, and a name wrongly read as test-only would hide a production dependency from the gate.
+var testConfigurationRE = regexp.MustCompile(`^(?:` +
+	`(?:test|androidTest|[a-z][A-Za-z0-9]*(?:Android|Unit)Test)(?:[A-Z][A-Za-z0-9]*)?` +
+	`(?:Api|Implementation|CompileOnly|CompileOnlyApi|RuntimeOnly|AnnotationProcessor|Compile|Runtime)` +
+	`|(?:kapt|ksp)(?:[A-Z][A-Za-z0-9]*)?(?:Android|Unit)?Test(?:[A-Z][A-Za-z0-9]*)?` +
+	`|androidTestUtil` +
+	`)$`)
+
+// isTestConfiguration reports whether a dependency declared under this configuration name is test-only.
+// The testFixtures family is deliberately NOT test-only: java-test-fixtures publishes those dependencies
+// with the module and hands them to every consumer's test classpath, so they are API of the published
+// artifact and not private to this module's tests.
+func isTestConfiguration(name string) bool {
+	if strings.Contains(strings.ToLower(name), "fixtures") {
+		return false
+	}
+	return testConfigurationRE.MatchString(name)
+}
+
 // ParseBuildGradleDeps extracts inline Maven coordinates (with a literal version) from a Gradle build
 // script's dependencies { } block(s). It is a small comment- and string-aware scanner that tracks a stack
 // of enclosing block names, so a coordinate is emitted only when it sits inside a `dependencies { }` that
 // is NOT nested under `buildscript { }` (build-plugin classpath). Dedups by group:artifact@version.
+//
+// Each coordinate is scoped by the configuration it is declared under: the first identifier of its
+// statement (`testImplementation` in `testImplementation platform('g:a:1')`, or the quoted name in the Kotlin
+// DSL's `"testImplementation"("g:a:1")`). A coordinate declared both ways is production whatever the order,
+// because it ships: dropping the production declaration would lose it from the gate.
 func ParseBuildGradleDeps(data []byte) []sbom.Component {
 	var out []sbom.Component
-	seen := map[string]bool{}
-	collect := func(content string) {
+	at := map[string]int{} // group:artifact@version -> index in out
+	collect := func(content string, test bool) {
 		group, artifact, ver, ok := splitGradleCoord(content)
 		if !ok {
 			return
 		}
+		scope := sbom.ScopeProduction
+		if test {
+			scope = sbom.ScopeDevelopment
+		}
 		key := group + ":" + artifact + "@" + ver
-		if seen[key] {
+		if i, dup := at[key]; dup {
+			if scope == sbom.ScopeProduction {
+				out[i].Scope = scope
+			}
 			return
 		}
-		seen[key] = true
+		at[key] = len(out)
 		out = append(out, sbom.Component{
 			Name:    group + ":" + artifact,
 			Version: ver,
-			Scope:   sbom.ScopeProduction,
+			Scope:   scope,
 			PURL:    "pkg:maven/" + group + "/" + artifact + "@" + ver,
 		})
 	}
@@ -75,11 +120,22 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 	var quote byte                  // active quote char (0 = none)
 	qStart := -1                    // index just after the opening quote
 	inLine, inBlock := false, false // // and /* */ comments
+	head := ""                      // first identifier of the current statement: the configuration its coordinates are declared under
+	depth := 0                      // open ( and [ in the current statement; a newline inside them does not end it
+	var lastSig byte                // last non-blank byte outside strings and comments; a trailing ',' continues the statement
 	flushIdent := func() {
 		if s := strings.TrimSpace(string(ident)); s != "" {
 			lastIdent = s
+			if head == "" {
+				head = s
+			}
 		}
 		ident = ident[:0]
+	}
+	newline := func() {
+		if depth == 0 && lastSig != ',' {
+			head = ""
+		}
 	}
 	for i := 0; i < len(src); i++ {
 		c := src[i]
@@ -87,6 +143,7 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 		case inLine:
 			if c == '\n' {
 				inLine = false
+				newline()
 			}
 			continue
 		case inBlock:
@@ -97,9 +154,14 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 			continue
 		case quote != 0:
 			if c == quote {
-				if inRuntimeDeps(stack) {
-					collect(string(src[qStart:i]))
+				content := string(src[qStart:i])
+				if head == "" {
+					head = content // a statement opened by a string: the Kotlin DSL's "configuration"(...)
 				}
+				if inRuntimeDeps(stack) {
+					collect(content, isTestConfiguration(head))
+				}
+				lastSig = c
 				quote = 0
 			}
 			continue
@@ -117,9 +179,11 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 			flushIdent()
 			quote = c
 			qStart = i + 1
+			lastSig = c
 			continue
 		case isIdentByte(c):
 			ident = append(ident, c)
+			lastSig = c
 			continue
 		case c == '{':
 			name := strings.TrimSpace(string(ident))
@@ -129,6 +193,8 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 			stack = append(stack, name)
 			ident = ident[:0]
 			lastIdent = ""
+			head = "" // what follows is a new statement inside the block
+			lastSig = c
 			continue
 		case c == '}':
 			if len(stack) > 0 {
@@ -136,9 +202,26 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 			}
 			ident = ident[:0]
 			lastIdent = ""
+			head, depth = "", 0 // closing a block ends every statement in it, even one left unbalanced
+			lastSig = c
 			continue
 		default:
 			flushIdent()
+			switch c {
+			case '(', '[':
+				depth++
+			case ')', ']':
+				if depth > 0 {
+					depth--
+				}
+			case ';':
+				head = ""
+			case '\n':
+				newline()
+			}
+			if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+				lastSig = c
+			}
 		}
 	}
 	return out
