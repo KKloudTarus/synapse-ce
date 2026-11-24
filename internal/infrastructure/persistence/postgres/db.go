@@ -539,6 +539,19 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.inbound_webhook_endpoints') IS NOT NULL").Scan(&inboundInstalled); err != nil {
 		return fmt.Errorf("inspect inbound webhook registry: %w", err)
 	}
+	var scanRunBridgeInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.scan_run_engagement_tenants') IS NOT NULL").Scan(&scanRunBridgeInstalled); err != nil {
+		return fmt.Errorf("inspect scan run tenant bridge: %w", err)
+	}
+	if scanRunBridgeInstalled {
+		// Migration 0144 revokes this bridge from PUBLIC and says runtime roles must reach it only
+		// through the SECURITY DEFINER trigger functions, never by direct cross-tenant reads. The
+		// blanket GRANT above hands it back to the runtime role by name. It maps every engagement
+		// to its tenant and has no tenant column of its own to carry RLS, so a direct SELECT is the
+		// whole engagement-to-tenant map and a direct UPDATE re-points new scan runs at another
+		// tenant. The triggers that need it are SECURITY DEFINER and run as the owner.
+		statements = append(statements, "REVOKE ALL ON TABLE scan_run_engagement_tenants FROM "+quotedRole)
+	}
 	if inboundInstalled {
 		statements = append(statements,
 			"REVOKE ALL ON TABLE inbound_webhook_endpoints FROM "+quotedRole,
@@ -633,6 +646,13 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 		statements = append(statements,
 			"GRANT EXECUTE ON FUNCTION synapse_identity_recovery_activation_tenant(TEXT) TO "+quotedRole,
 			"GRANT EXECUTE ON FUNCTION synapse_identity_recovery_person_epoch(TEXT,TEXT) TO "+quotedRole,
+			// Migration 0211 calls this table "the sole global recovery lookup surface" and revokes
+			// it from PUBLIC, but the blanket GRANT above hands it back to the runtime role by name.
+			// The role reaches it through the SECURITY DEFINER locator, which takes an exact digest;
+			// direct SELECT would list every recovery digest with its tenant and expiry, and direct
+			// UPDATE would re-point an activation at another tenant. The sibling retry table is
+			// revoked the same way below.
+			"REVOKE ALL ON TABLE identity_recovery_activation_routes FROM "+quotedRole,
 		)
 	}
 	var identityWriterFenceInstalled bool

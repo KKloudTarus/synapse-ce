@@ -63,6 +63,21 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **The runtime database role no longer holds direct DML on two global lookup tables.**
+  `scan_run_engagement_tenants` (the engagement-to-tenant map, migration 0144) and
+  `identity_recovery_activation_routes` (every recovery secret digest with its tenant and expiry,
+  migration 0211) have no tenant column to carry RLS, so each migration revokes them from PUBLIC
+  and routes the runtime role through a `SECURITY DEFINER` function taking an exact key. The
+  blanket `GRANT ... ON ALL TABLES IN SCHEMA public` granted them back to the role by name, which a
+  `REVOKE ... FROM PUBLIC` does not undo. Both are now revoked explicitly, as the sibling
+  `identity_session_switch_retry_routes` already was.
+- A notification redrive reason is scrubbed of every channel and provider credential, not only the
+  webhook URL and signing secret. A Telegram or Slack `bot_token`, a PagerDuty `routing_key` and a
+  JSM `api_key` were never handed to the targeted redactor, and the pattern scrubber only removes a
+  keyed form such as `token=`, so a bare credential pasted into the reason reached the append-only
+  audit row and the SIEM stream in cleartext.
+- An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
+  console renders it straight into an `href`.
 - **Maven POM fetches enforce their address policy at dial time (SSRF).** A scanned `pom.xml` can
   name any repository URL, and the policy was applied to a DNS answer taken separately from the one
   `net/http` used to connect, so a host the pom author controls could answer public for the check

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -260,11 +261,13 @@ func recoveryValue(name string) string {
 	}[name]
 }
 
-// allHumanRoutes parses both human route tables: router.go and the ownership routes.
+// allHumanRoutes parses every human route table. registeredRoutes reads router.go; the rest
+// register on the same mux from their own files. humanRouteFilesAreComplete keeps this list
+// honest, because a file left out here is a file whose routes no guard test ever sees.
 func allHumanRoutes(t *testing.T) []RouteRegistration {
 	t.Helper()
 	routes := registeredRoutes(t)
-	for _, file := range []string{"ownership_handler.go", "enterprise_handler.go", "enterprise_admin_handler.go"} {
+	for _, file := range humanRouteFiles {
 		additional, err := ParseRouteRegistrations(file)
 		if err != nil {
 			t.Fatal(err)
@@ -272,6 +275,50 @@ func allHumanRoutes(t *testing.T) []RouteRegistration {
 		routes = append(routes, additional...)
 	}
 	return routes
+}
+
+// humanRouteFiles are the files other than router.go that register on the human mux.
+var humanRouteFiles = []string{
+	"ownership_handler.go",
+	"enterprise_handler.go",
+	"enterprise_admin_handler.go",
+	"enterprise_provisioning_handler.go",
+	"jira_webhook_admin.go",
+}
+
+// nonHumanRouteFiles register on a different plane and are guarded by that plane's own tests:
+// the agent fleet mux and the egress-broker listener.
+var nonHumanRouteFiles = []string{"fleet_handler.go", "egress_grant_handler.go"}
+
+// A file that registers routes and is in neither list is a file whose routes no guard test reads.
+// Two such files existed, carrying seven PermAdminister routes that happened to be guarded; the
+// next route added to either of them would not have been checked by anything.
+func TestHumanRouteFileListIsComplete(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := map[string]bool{"router.go": true}
+	for _, file := range append(append([]string{}, humanRouteFiles...), nonHumanRouteFiles...) {
+		known[file] = true
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || known[name] {
+			continue
+		}
+		// Asked of the same parser the inventory uses, so a comment that merely mentions a
+		// registration does not count. A parse error means the file registers something the
+		// inventory cannot read, which is the stronger version of the same problem.
+		found, err := ParseRouteRegistrations(name)
+		if err != nil {
+			t.Errorf("%s registers routes the inventory cannot read and is in neither list: %v", name, err)
+			continue
+		}
+		if len(found) > 0 {
+			t.Errorf("%s registers %d routes but is in neither humanRouteFiles nor nonHumanRouteFiles, so no guard test reads them", name, len(found))
+		}
+	}
 }
 
 // Every human route has exactly one classification, and the classification is backed by the

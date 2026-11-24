@@ -71,3 +71,45 @@ func TestCanonicalEndpointAndExternalKeyFailClosed(t *testing.T) {
 		t.Fatalf("benign double-dot key=%q err=%v", key, err)
 	}
 }
+
+// The console renders ExternalRun.URL straight into an href (web/src/pages/Settings/Integrations.tsx).
+// Normalize checked only its length, so the single thing keeping a javascript: URL out of an
+// operator's browser was every adapter choosing to build the URL itself instead of passing through
+// whatever the provider returned. The invariant belongs here, where every writer has to pass.
+func TestExternalRunRejectsAURLThatIsNotAbsoluteHTTP(t *testing.T) {
+	valid := func() ExternalRun {
+		return ExternalRun{
+			ID: "run", TenantID: "tenant", IntegrationID: "integration",
+			PipelineKey: "pipeline", ProviderKey: "provider:build:1",
+			Lifecycle: RunCompleted, Result: ResultSuccess,
+			Correlation: CorrelationLinked, ProviderUpdatedAt: time.Unix(1700000000, 0).UTC(),
+		}
+	}
+	for _, raw := range []string{
+		"javascript:alert(document.domain)",
+		"data:text/html,<script>alert(1)</script>",
+		"vbscript:msgbox(1)",
+		"file:///etc/passwd",
+		"/builds/17", // relative: no scheme, no host
+		"https://",   // absolute with no host
+		"not a url at all",
+	} {
+		run := valid()
+		run.URL = raw
+		if err := run.Normalize(); !errors.Is(err, shared.ErrValidation) {
+			t.Errorf("url %q error = %v, want validation", raw, err)
+		}
+	}
+	// A self-hosted Jenkins on an internal network serves plain http, so http stays admitted.
+	for _, raw := range []string{
+		"https://ci.example.test/job/build/17/",
+		"http://jenkins.internal:8080/job/build/17/",
+		"", // a run with no URL is ordinary: the provider did not give one
+	} {
+		run := valid()
+		run.URL = raw
+		if err := run.Normalize(); err != nil {
+			t.Errorf("url %q must be accepted, got %v", raw, err)
+		}
+	}
+}

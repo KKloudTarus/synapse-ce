@@ -20,19 +20,23 @@ func (rt *Router) SetEnterpriseProvisioning(provisioning *identityenterprise.Pro
 	return nil
 }
 
+// The guard is written at each registration rather than inside the wrapper, because
+// TestEveryHumanRouteGoesThroughAuthz reads the registration expression: a route whose guard hides
+// one call deeper is classified unguarded, and the test that is supposed to catch the next
+// unguarded route added here cannot see it.
 func (rt *Router) registerEnterpriseProvisioning(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/identity/provisioning/begin", rt.enterpriseProvisioningRoute("begin"))
-	mux.HandleFunc("POST /api/v1/identity/provisioning/status", rt.enterpriseProvisioningRoute("status"))
-	mux.HandleFunc("POST /api/v1/identity/provisioning/draft", rt.enterpriseProvisioningRoute("draft"))
-	mux.HandleFunc("POST /api/v1/identity/provisioning/test", rt.enterpriseProvisioningRoute("test"))
-	mux.HandleFunc("POST /api/v1/identity/provisioning/activate", rt.enterpriseProvisioningRoute("activate"))
-	mux.HandleFunc("POST /api/v1/identity/provisioning/invitation", rt.enterpriseProvisioningRoute("invitation"))
+	mux.HandleFunc("POST /api/v1/identity/provisioning/begin", rt.authz(user.PermAdminister, rt.enterpriseProvisioningAction("begin")))
+	mux.HandleFunc("POST /api/v1/identity/provisioning/status", rt.authz(user.PermAdminister, rt.enterpriseProvisioningAction("status")))
+	mux.HandleFunc("POST /api/v1/identity/provisioning/draft", rt.authz(user.PermAdminister, rt.enterpriseProvisioningAction("draft")))
+	mux.HandleFunc("POST /api/v1/identity/provisioning/test", rt.authz(user.PermAdminister, rt.enterpriseProvisioningAction("test")))
+	mux.HandleFunc("POST /api/v1/identity/provisioning/activate", rt.authz(user.PermAdminister, rt.enterpriseProvisioningAction("activate")))
+	mux.HandleFunc("POST /api/v1/identity/provisioning/invitation", rt.authz(user.PermAdminister, rt.enterpriseProvisioningAction("invitation")))
 }
 
-func (rt *Router) enterpriseProvisioningRoute(action string) http.HandlerFunc {
-	return rt.authz(user.PermAdminister, func(w http.ResponseWriter, r *http.Request) {
+func (rt *Router) enterpriseProvisioningAction(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		rt.enterpriseProvisioning(w, r, action)
-	})
+	}
 }
 
 func initialProvisioningView(v ports.IdentityInitialProvisioning) map[string]any {

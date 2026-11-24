@@ -635,14 +635,23 @@ func (s *Service) redriveAuditReason(ctx context.Context, tenant, id shared.ID, 
 	if err != nil {
 		return "", fmt.Errorf("notification channel configuration unavailable for audit: %w", shared.ErrConflict)
 	}
+	// Every credential field any channel or provider config defines, not just the webhook pair.
+	// A reason is operator-typed free text, and the text an operator pastes is usually the
+	// provider's own error, which carries the credential it was called with. ScrubSecretPatterns
+	// only catches a keyed form such as `token=` or `Bearer `; a bare xoxb- or routing key
+	// survives it, so the exact values have to be handed to the targeted redactor.
 	var cfg struct {
-		URL    string `json:"url"`
-		Secret string `json:"secret"`
+		URL        string `json:"url"`
+		Secret     string `json:"secret"`
+		BotToken   string `json:"bot_token"`
+		RoutingKey string `json:"routing_key"`
+		APIKey     string `json:"api_key"`
 	}
 	if json.Unmarshal(raw, &cfg) != nil {
 		return "", fmt.Errorf("notification channel configuration unavailable for audit: %w", shared.ErrConflict)
 	}
-	return privacy.ScrubSecretPatterns(redact.AuditText(reason, []string{cfg.URL, cfg.Secret, work.Delivery.Recipient})), nil
+	known := []string{cfg.URL, cfg.Secret, cfg.BotToken, cfg.RoutingKey, cfg.APIKey, work.Delivery.Recipient}
+	return privacy.ScrubSecretPatterns(redact.AuditText(reason, known)), nil
 }
 
 func emailDomainSummary(recipients []string) string {

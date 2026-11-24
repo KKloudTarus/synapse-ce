@@ -144,6 +144,48 @@ func TestRedriveDeliveryAuditsSafeReasonAndDestination(t *testing.T) {
 	}
 }
 
+// A redrive reason is operator-typed free text, and what an operator pastes is usually the
+// provider's own error, which carries the credential it was called with. The scrubber only knows
+// keyed forms (`token=`, `Bearer `), so a bare bot token, routing key or API key survives it and
+// has to be removed by value. The config was read for `url` and `secret` only, so every other
+// channel type's credential reached the append-only audit row in cleartext, and from there the
+// SIEM stream.
+func TestRedriveAuditRemovesEveryChannelCredentialByValue(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		config  string
+		secret  string
+		channel domain.ChannelType
+	}{
+		{name: "telegram bot token", config: `{"bot_token":"7654321:AAFmokeTokenValue"}`, secret: "7654321:AAFmokeTokenValue", channel: domain.ChannelTelegram},
+		{name: "pagerduty routing key", config: `{"routing_key":"R0FAKEROUTINGKEY0000000000000000"}`, secret: "R0FAKEROUTINGKEY0000000000000000", channel: domain.ChannelPagerDuty},
+		{name: "jsm api key", config: `{"api_key":"jsmFakeApiKeyValue0000"}`, secret: "jsmFakeApiKeyValue0000", channel: domain.ChannelJSM},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := shared.WithTenant(context.Background(), "tenant")
+			repo := &fakeRepo{
+				delivery:       domain.Delivery{ID: "delivery", ChannelType: tc.channel, State: domain.DeliveryDead, RedriveFence: 1},
+				redriveChannel: domain.Channel{ID: "channel", Type: tc.channel, Destination: "https://provider.example.test/hook"},
+			}
+			audit := &capturingAudit{}
+			svc, err := NewService(repo, fakeProtector{raw: []byte(tc.config)}, nil, audit, fakeClock{time.Unix(1700000000, 0).UTC()}, &fakeIDs{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reason := "provider refused " + tc.secret + " retry"
+			if _, err := svc.RedriveDelivery(ctx, "admin", "delivery", RedriveInput{Reason: reason, ExpectedFence: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if len(audit.entries) != 1 {
+				t.Fatalf("audit entries=%d", len(audit.entries))
+			}
+			if got := audit.entries[0].Metadata["reason"]; strings.Contains(got, tc.secret) {
+				t.Errorf("the audit row kept the credential in cleartext: %q", got)
+			}
+		})
+	}
+}
+
 func TestRedriveEmailAuditKeepsOnlyRecipientDomains(t *testing.T) {
 	ctx := shared.WithTenant(context.Background(), "tenant")
 	repo := &fakeRepo{
