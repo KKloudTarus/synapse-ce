@@ -41,6 +41,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   drift observations, and weekly PDF delivery to verified email destinations.
   Delivery retains tenant permissions, legal holds, durable idempotency and an
   explicit uncertain state when a remote acknowledgement is lost.
+- The GitHub Action takes an `args` input and an `install-grype` input (#1665).
+  `args` appends flags such as `--json` or `--require-complete` to `synapse-cli scan`.
+  It is split on whitespace into argv words with no quoting, expansion or shell parsing,
+  so a value such as `; id` is passed to the CLI as text and never run. A flag that has
+  its own input (`--fail-on`, `--image`, `--offline`, `--server`, `--project`, `--sarif`,
+  `--sarif-out`) is rejected, and `--json` or `--sbom` together with `sarif: true` fails
+  the step before the scan, because the CLI takes only one of them. `install-grype: false`
+  skips the Grype download for a workflow that does not select Grype; the default stays
+  `true`, so existing workflows install it as before.
 
 ### Changed
 
