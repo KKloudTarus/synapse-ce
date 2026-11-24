@@ -6,8 +6,10 @@ package risk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -62,14 +64,22 @@ func New(kevURL, epssURL string, client *http.Client) *Enricher {
 var _ ports.RiskEnricher = (*Enricher)(nil)
 
 // Enrich annotates each vuln with KEV + EPSS. Best-effort: a source failure leaves
-// the affected fields zero (the scan still succeeds).
+// the affected fields zero (the scan still succeeds). A KEV catalogue that could not
+// be read is named in RiskResult.Unavailable so the zero is not mistaken for "no match".
 func (e *Enricher) Enrich(ctx context.Context, vulns []vulnerability.Vulnerability) ports.RiskResult {
 	versions := map[string]string{}
-	kev, kevVer := e.loadKEV(ctx)
+	cves := cveIDs(vulns)
+	kev, kevVer, kevErr := e.loadKEV(ctx)
 	if kevVer != "" {
 		versions["kev-catalog"] = kevVer
 	}
-	epss, epssDate := e.queryEPSS(ctx, cveIDs(vulns))
+	// An unread catalogue leaves every vuln at KEV=false, the same as a catalogue that matched nothing, so it
+	// is named in the result. With no CVE id to look up there is nothing the catalogue could have flagged.
+	var unavailable map[string]string
+	if kevErr != nil && len(cves) > 0 {
+		unavailable = map[string]string{"kev": failureCause(kevErr)}
+	}
+	epss, epssDate := e.queryEPSS(ctx, cves)
 	if epssDate != "" {
 		versions["epss-date"] = epssDate
 	}
@@ -97,6 +107,8 @@ func (e *Enricher) Enrich(ctx context.Context, vulns []vulnerability.Vulnerabili
 		Vulns:    out,
 		Versions: versions,
 		Matches:  map[string]int{"kev": kevHits, "epss": epssHits},
+
+		Unavailable: unavailable,
 	}
 }
 
@@ -122,24 +134,64 @@ func cveCandidates(v vulnerability.Vulnerability) []string {
 	return out
 }
 
-func (e *Enricher) loadKEV(ctx context.Context) (map[string]struct{}, string) {
+// loadKEV returns the catalogue, refreshing it when the cache is older than kevTTL. The error is non-nil
+// only when there is NO catalogue to serve: a failed refresh that still has an earlier catalogue keeps
+// serving it (its date stays in the report's versions), so the caller can tell "nothing was checked" from
+// "checked against an older copy".
+func (e *Enricher) loadKEV(ctx context.Context) (map[string]struct{}, string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.kev != nil && time.Since(e.kevAt) < kevTTL {
-		return e.kev, e.kevVersion
+		return e.kev, e.kevVersion, nil
 	}
 	set, ver, err := e.fetchKEV(ctx)
 	if err != nil {
-		return e.kev, e.kevVersion // keep any prior cache (possibly nil)
+		if e.kev != nil {
+			return e.kev, e.kevVersion, nil // keep the prior cache
+		}
+		return nil, "", err
 	}
 	e.kev, e.kevVersion, e.kevAt = set, ver, time.Now()
-	return set, ver // return the freshly-built map (never read e.kev outside the lock)
+	return set, ver, nil // return the freshly-built map (never read e.kev outside the lock)
+}
+
+// statusError is a non-200 answer from a feed. Only the code is kept: a body can echo credentials or
+// carry an operator's error page, and neither belongs in a scan report.
+type statusError struct{ code int }
+
+func (e statusError) Error() string { return fmt.Sprintf("kev: status %d", e.code) }
+
+var (
+	errMalformed = errors.New("kev: malformed catalogue")
+	errBadURL    = errors.New("kev: invalid feed URL")
+)
+
+// failureCause reduces a feed error to a short class that is safe to print and to put in a report. The
+// error text itself is never used: a transport error quotes the full request URL, and an operator may have
+// put a token or user:password in a mirror's SYNAPSE_KEV_URL.
+func failureCause(err error) string {
+	var status statusError
+	var netErr net.Error
+	switch {
+	case errors.As(err, &status):
+		return "http " + strconv.Itoa(status.code)
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return "timeout"
+	case errors.Is(err, errMalformed):
+		return "malformed response"
+	case errors.Is(err, errBadURL):
+		return "invalid URL"
+	default:
+		return "network error"
+	}
 }
 
 func (e *Enricher) fetchKEV(ctx context.Context) (map[string]struct{}, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.kevURL, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", errBadURL // not wrapped: the parse error quotes the URL
 	}
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -147,7 +199,7 @@ func (e *Enricher) fetchKEV(ctx context.Context) (map[string]struct{}, string, e
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("kev: status %d", resp.StatusCode)
+		return nil, "", statusError{code: resp.StatusCode}
 	}
 	var doc struct {
 		CatalogVersion  string `json:"catalogVersion"`
@@ -156,7 +208,7 @@ func (e *Enricher) fetchKEV(ctx context.Context) (map[string]struct{}, string, e
 		} `json:"vulnerabilities"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxKEVBytes)).Decode(&doc); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("%w: %w", errMalformed, err)
 	}
 	set := make(map[string]struct{}, len(doc.Vulnerabilities))
 	for _, v := range doc.Vulnerabilities {

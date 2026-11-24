@@ -1266,6 +1266,10 @@ type ScanResult struct {
 	// SourceWarnings flags a configured detection source that did NOT run (e.g. the Grype
 	// binary/DB is missing), so a silently-degraded source can't masquerade as "0 vulns / clean".
 	SourceWarnings []string `json:"source_warnings,omitempty"`
+	// RiskUnavailable names each risk feed the scan needed but could not read, with the cause class
+	// ("kev": "http 403"). Absent when every needed feed was read, so a consumer can tell "the catalogue
+	// had no match" (risk_matches.kev == 0) from "the catalogue was never consulted".
+	RiskUnavailable map[string]string `json:"risk_unavailable,omitempty"`
 	// AnalysisCoverage makes semantic-analysis negative-proof coverage explicit. A partial analyzer can
 	// still produce positive witnesses, but an empty result must not be interpreted as clean.
 	AnalysisCoverage []ports.AnalysisCoverage `json:"analysis_coverage,omitempty"`
@@ -2987,6 +2991,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	var vulns []vulnerability.Vulnerability
 	var riskVersions map[string]string
 	var riskMatches map[string]int
+	var riskUnavailable map[string]string
 	var detectionSourceWarnings []string
 	var detectionProvenanceIncomplete bool
 	var detectionReadinessWarn string     // snapshotted readiness verdict (captured once, applied at result build)
@@ -3034,7 +3039,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if s.riskEnricher != nil {
 			step = trace.start(stageRisk, "risk-enrichment", "risk-enricher", "Enrich vulnerabilities with risk signals", map[string]int{"vulnerabilities": len(vulns)})
 			r := s.riskEnricher.Enrich(ctx, vulns)
-			vulns, riskVersions, riskMatches = r.Vulns, r.Versions, r.Matches
+			vulns, riskVersions, riskMatches, riskUnavailable = r.Vulns, r.Versions, r.Matches, r.Unavailable
 			trace.succeed(step, "Risk enrichment completed", map[string]int{"vulnerabilities": len(vulns)})
 		}
 		vulnerability.SortByRisk(vulns)
@@ -3121,6 +3126,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		InventoryAdmission: admission, InventoryCompleteness: inventoryCompletenessState(inventoryCompleteness.Confident),
 		InventoryAuthoritative: inventoryCompleteness.Confident, InventoryAuthorityReason: "server_validated_import_artifact"}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
+	sourceWarnings = append(sourceWarnings, riskUnavailableWarnings(riskUnavailable)...)               // a risk feed that could not be read
 	sourceWarnings = append(sourceWarnings, detectionSourceWarnings...)                                // sources skipped by the non-strict degrade policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 	manifest.SBOMSHA256 = record.SHA256
@@ -3139,6 +3145,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		LicenseCoverageBreakdown: licenseCoverageBreakdown,
 		Manifest:                 manifest,
 		RiskMatches:              riskMatches,
+		RiskUnavailable:          riskUnavailable,
 		SourceWarnings:           sourceWarnings,
 		DebugEvents:              trace.snapshot(),
 		LineCoverage:             opts.LineCoverage,
@@ -3976,6 +3983,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	var vulns []vulnerability.Vulnerability
 	var riskVersions map[string]string
 	var riskMatches map[string]int
+	var riskUnavailable map[string]string
 	var detectionSourceWarnings []string
 	var detectionProvenanceIncomplete bool
 	var detectionReadinessWarn string     // snapshotted readiness verdict (captured once, applied at result build)
@@ -4035,7 +4043,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if s.riskEnricher != nil {
 			step = trace.start(stageRisk, "risk-enrichment", "risk-enricher", "Enrich vulnerabilities with risk signals", map[string]int{"vulnerabilities": len(vulns)})
 			r := s.riskEnricher.Enrich(ctx, vulns)
-			vulns, riskVersions, riskMatches = r.Vulns, r.Versions, r.Matches
+			vulns, riskVersions, riskMatches, riskUnavailable = r.Vulns, r.Versions, r.Matches, r.Unavailable
 			counts := map[string]int{"vulnerabilities": len(vulns)}
 			for k, v := range riskMatches {
 				counts[k+"_matches"] = v
@@ -4197,6 +4205,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		GrypeDBVersion: grypeDB,
 	}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
+	sourceWarnings = append(sourceWarnings, riskUnavailableWarnings(riskUnavailable)...)               // a risk feed that could not be read
 	sourceWarnings = append(sourceWarnings, detectionSourceWarnings...)                                // sources skipped by the non-strict degrade policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 	manifest.SourcePackage = publicSourcePackage(req.SourcePackage)
@@ -4219,6 +4228,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		LicenseCoverageBreakdown: licenseCoverageBreakdown,
 		Manifest:                 manifest,
 		RiskMatches:              riskMatches,
+		RiskUnavailable:          riskUnavailable,
 		SourceWarnings:           append(append([]string(nil), producerWarnings...), sourceWarnings...),
 		Image:                    ws.Image,
 		DebugEvents:              trace.snapshot(),
@@ -5170,6 +5180,7 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 		current.Manifest = previous.Manifest
 		current.Manifest.SourcePackage = source
 		current.RiskMatches = previous.RiskMatches
+		current.RiskUnavailable = previous.RiskUnavailable
 		current.Findings = mergeFindingsByKind(previous.Findings, current.Findings, true)
 		current.AnalysisCoverage = cloneAnalysisCoverage(previous.AnalysisCoverage)
 		preservedVulnerabilities = len(previous.Vulnerabilities) > 0 || hasFindingKind(previous.Findings, false)

@@ -2498,6 +2498,11 @@ type RiskResult struct {
 	Vulns    []vulnerability.Vulnerability
 	Versions map[string]string // source versions only, e.g. {"kev-catalog":..., "epss-date":...}
 	Matches  map[string]int    // per-scan match counts (kev/epss) – diagnostic, NOT versions
+	// Unavailable maps a reference feed this scan needed but could not read ("kev") to a short cause class
+	// such as "http 403" or "timeout". It carries no URL, header or response body. A feed that was read
+	// leaves no entry, so a zero in Matches and an entry here mean different things: "nothing matched" and
+	// "nothing was checked".
+	Unavailable map[string]string
 }
 
 // RiskEnricher annotates vulnerabilities with CISA KEV + EPSS so they can be

@@ -197,6 +197,16 @@ Passing more than one exits `2` rather than silently honoring the last flag. Whi
 the `--server` push status lines (engagement ingest, SBOM import, source publication) go to stderr, so stdout
 stays exactly one document.
 
+When the scan cannot read the CISA KEV catalogue (a blocked network, an HTTP error, an unparseable answer) it
+still finishes and exits as before, but it says so. A source warning names the cause class, for example
+`http 403`, `timeout` or `network error`, and the JSON document carries it as `risk_unavailable`
+(`{"kev": "http 403"}`). While that field is present, `kev: false` on a vulnerability and
+`risk_matches.kev: 0` mean the catalogue was not consulted, not that nothing is known to be exploited.
+Point `SYNAPSE_KEV_URL` at a mirror the pipeline can reach. The outage does not lower engine coverage, so
+`--require-complete` is unaffected, and `--offline` skips the catalogue by design and reports nothing. A
+scan with no CVE-identified vulnerability reports nothing either, because there was nothing for the
+catalogue to flag.
+
 ### Suppressing findings with `.synapseignore`
 
 Drop known/accepted findings by committing a `.synapseignore` file at the scan root. Every suppression
