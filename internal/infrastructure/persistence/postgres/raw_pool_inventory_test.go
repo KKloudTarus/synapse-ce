@@ -369,6 +369,11 @@ func TestRuntimeGrantInventory(t *testing.T) {
 		`"GRANT SELECT ON TABLE inbound_webhook_endpoints TO "+quotedRole`,
 		`"REVOKE ALL ON TABLE identity_persons, identity_person_audit, identity_person_membership_index, identity_credential_digests FROM "+quotedRole`,
 		`"REVOKE ALL ON FUNCTION synapse_identity_person_command(TEXT,TEXT,TEXT,TEXT) FROM "+quotedRole`,
+		// Two global lookup tables the runtime role must reach only through their SECURITY DEFINER
+		// functions. Each migration revokes them from PUBLIC, which does not undo a later grant to
+		// the role by name, and the blanket GRANT ON ALL TABLES is exactly such a grant.
+		`"REVOKE ALL ON TABLE scan_run_engagement_tenants FROM "+quotedRole`,
+		`"REVOKE ALL ON TABLE identity_recovery_activation_routes FROM "+quotedRole`,
 	} {
 		if !strings.Contains(src, stmt) {
 			t.Fatalf("GrantRuntimePrivileges no longer contains %s", stmt)
