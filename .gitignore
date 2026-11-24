@@ -37,3 +37,11 @@ prompt.txt
 
 # goreleaser build output
 dist/
+
+# Local agent configuration. These hold machine-specific paths, tool
+# permissions and MCP server endpoints, and an MCP file can carry a token.
+# They are per-developer, never shared, and a stray commit of one leaks that.
+.claude/
+CLAUDE.md
+AGENTS.md
+.mcp.json
