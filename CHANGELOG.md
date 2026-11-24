@@ -78,6 +78,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- **An allowed egress domain can no longer open a kernel rule to a cloud metadata address.**
+  `ResolveEgressPolicy` resolves the sandbox's allow-domains separately from every earlier check,
+  and wrote whatever that lookup returned straight into the namespace as an ALLOW rule, so a host
+  whose DNS the other side controls could answer public for an earlier check and a link-local or
+  carrier-grade-NAT metadata endpoint for this one. Allowed addresses and pre-resolved pins are
+  now judged against the same range table every outbound client uses. Private-use and loopback
+  addresses stay admitted, the second because these rules apply inside the sandbox's own network
+  namespace. DENY rules are untouched, since filtering one could only widen what gets through.
+- Deleting an engagement that owns sealed evidence answers `409` with the reason instead of a
+  `500` marked retryable. The custody chain is append-only by design and its trigger raises
+  `P0001`, which carries no constraint name, so the refusal reached the client unclassified and
+  the console offered a Retry that could never succeed.
+
 - **Maven POM fetches enforce their address policy at dial time (SSRF).** A scanned `pom.xml` can
   name any repository URL, and the policy was applied to a DNS answer taken separately from the one
   `net/http` used to connect, so a host the pom author controls could answer public for the check
@@ -86,6 +99,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   fetch past the policy. The accepted ranges come from the same table as every other outbound
   client, which closes carrier-grade NAT (holding the Alibaba and OpenStack metadata service at
   `100.100.100.200`), `192.0.0.0/24`, `198.18.0.0/15`, `240.0.0.0/4`, NAT64 and `fd00:ec2::/32`.
+- The asset and assessment-cycle detail routes carry a page heading in every whole-route state.
+  Their loading, error and not-found branches rendered bare, so a Chromium sweep of `/assets/:key`
+  and its five sub-tabs found 12 of 12 captures with no heading at all, in both themes and at both
+  widths.
 - A console screen whose whole content is the "feature is not enabled" state now carries a
   page heading. The title rendered as a paragraph, so `/fleet/hosts`, `/fleet/workloads`,
   `/fleet/agents`, `/fleet/asset-graph` and the AI-triage screens reached a screen reader with

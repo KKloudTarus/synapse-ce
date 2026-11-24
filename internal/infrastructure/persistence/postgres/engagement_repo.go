@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -162,6 +163,14 @@ func (r *EngagementRepository) Delete(ctx context.Context, id shared.ID) error {
 				case "ticket_mappings_engagement_fk", "ticket_intents_finding_fk":
 					return fmt.Errorf("%w: engagement has retained durable ticket intents", shared.ErrConflict)
 				}
+			}
+			// The evidence custody chain is append-only and its trigger raises P0001 rather than
+			// a constraint violation, so it has no ConstraintName to switch on. Without this the
+			// refusal reached the caller as an unclassified error and became a 500 marked
+			// retryable, which it is not: every retry raises the same trigger. The sealed chain
+			// is a safety invariant, so the answer is an honest refusal, never a weaker trigger.
+			if errors.As(err, &pgErr) && pgErr.Code == "P0001" && strings.Contains(pgErr.Message, "append-only") {
+				return fmt.Errorf("%w: engagement has sealed evidence, which is append-only and cannot be deleted", shared.ErrConflict)
 			}
 			return fmt.Errorf("delete engagement: %w", err)
 		}

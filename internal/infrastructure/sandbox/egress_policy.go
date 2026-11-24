@@ -11,8 +11,29 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// egressAllowFloor is the address class a resolved address must pass before it becomes an ALLOW
+// rule in the kernel. Link-local (where the cloud metadata service lives), carrier-grade NAT,
+// NAT64 and the other IANA special-purpose ranges are not a destination any egress policy means
+// to open.
+//
+// Private-use addresses stay admitted, because scanning an internal network is a legitimate
+// deployment. Loopback stays admitted too, for a narrower reason: these rules are applied inside
+// the sandbox's own network namespace, where 127.0.0.1 is the sandbox's loopback and not the
+// host's. A rule or a pin reaching it gains an attacker nothing, so refusing it would cost real
+// grants (the broker canonicalizer resolves "localhost") and buy no isolation.
+//
+// It exists because the policy's domains are resolved here, separately from every earlier check:
+// acquire resolves a host twice before this third lookup, and a DNS answer the other side controls
+// can differ on each one. The rule written into the kernel has to be judged on the address that
+// goes into it, not on an address something else resolved earlier.
+//
+// Only the allow path is filtered. A DENY rule for an internal address is already implied by the
+// namespace's default drop, and removing one could only widen what gets through.
+var egressAllowFloor = safehttp.Policy{AllowPrivate: true, AllowLoopback: true}
 
 type egressLookup func(context.Context, string, string) ([]netip.Addr, error)
 
@@ -44,12 +65,19 @@ func resolveEgressPolicy(ctx context.Context, policy ports.EgressPolicy, lookup 
 			if !addr.IsValid() || !addr.Is4() {
 				return ports.EgressPolicy{}, fmt.Errorf("pinned host %q contains a non-IPv4 address", host)
 			}
+			if !egressAllowFloor.AllowsAddress(addr) {
+				return ports.EgressPolicy{}, fmt.Errorf("pinned host %q resolves to %s, which is not a permitted egress destination", host, addr)
+			}
 			resolved.PinnedHosts[host] = append(resolved.PinnedHosts[host], addr)
 			resolved.Rules = append(resolved.Rules, ports.EgressRule{Allow: true, Net: netip.PrefixFrom(addr, 32)})
 		}
 	}
 	for _, domain := range domainRules(policy.AllowDomains, policy.AllowDomainRules) {
 		host, addrs, err := resolveEgressDomain(ctx, domain.Host, lookup)
+		if err != nil {
+			return ports.EgressPolicy{}, fmt.Errorf("resolve allowed egress domain: %w", err)
+		}
+		addrs, err = admitEgressAddrs(host, addrs)
 		if err != nil {
 			return ports.EgressPolicy{}, fmt.Errorf("resolve allowed egress domain: %w", err)
 		}
@@ -108,6 +136,22 @@ func resolveEgressDomain(ctx context.Context, rawHost string, lookup egressLooku
 		return "", nil, fmt.Errorf("lookup %q returned no IPv4 addresses", host)
 	}
 	return host, ipv4, nil
+}
+
+// admitEgressAddrs keeps the addresses an allow rule may open and refuses the domain outright when
+// none survives. Dropping the whole domain is the fail-closed answer: a name that resolves only to
+// special-purpose space is the rebinding case this floor exists for, not a configuration to repair.
+func admitEgressAddrs(host string, addrs []netip.Addr) ([]netip.Addr, error) {
+	kept := make([]netip.Addr, 0, len(addrs))
+	for _, addr := range addrs {
+		if egressAllowFloor.AllowsAddress(addr.Unmap()) {
+			kept = append(kept, addr)
+		}
+	}
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("domain %q resolves only to addresses that are not permitted egress destinations", host)
+	}
+	return kept, nil
 }
 
 func exactEgressHost(raw string) (string, error) {

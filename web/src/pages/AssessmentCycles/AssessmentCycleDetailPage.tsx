@@ -26,9 +26,25 @@ export function AssessmentCycleDetailPage() {
   const [downloadError, setDownloadError] = useState('')
   const [downloading, setDownloading] = useState('')
 
-  if (result.loading && !result.data) return <Spinner label="Loading Assessment Cycle…" />
-  if (result.error) return <ErrorState message={result.error} />
-  if (!result.data) return <EmptyState icon={Lock01} title="Assessment Cycle not found" />
+  // Whole-route states, so each carries the only heading the screen has. Without one the document
+  // has no heading at all and a screen reader cannot name the page it landed on.
+  if (result.loading && !result.data) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight text-primary">Assessment Cycle</h1>
+        <Spinner label="Loading Assessment Cycle…" />
+      </div>
+    )
+  }
+  if (result.error) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight text-primary">Assessment Cycle</h1>
+        <ErrorState message={result.error} />
+      </div>
+    )
+  }
+  if (!result.data) return <EmptyState icon={Lock01} title="Assessment Cycle not found" titleAs="h1" />
 
   const [detail, manifests, me] = result.data
   const cycle = detail.cycle
