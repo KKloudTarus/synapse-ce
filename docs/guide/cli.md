@@ -537,6 +537,62 @@ Emit SARIF and upload it to the Security tab, while still failing the build on h
 
 Set `offline: true` to run against the bundled offline databases only (no network egress).
 
+### Extra scan flags
+
+`args` appends flags to `synapse-cli scan` for anything the other inputs do not cover, such as
+`--require-complete`, `--min-confidence`, `--base` or `--json`:
+
+```yaml
+- uses: KKloudTarus/synapse-ce@v1
+  with:
+    fail-on: high
+    args: --require-complete --min-confidence high
+```
+
+The value is read as plain text, never as shell, so these rules are all there is:
+
+- It is split on whitespace (spaces, tabs and line breaks) into words, and each word reaches `synapse-cli`
+  as exactly one argument. A multi-line block works, one flag per line.
+- Nothing else is interpreted. There is no quoting or escaping, and `$`, backticks, `;`, `&&`, `|`, `*` and
+  quote characters are ordinary characters of a word. `args: "; id"` reaches the CLI as the two words `;`
+  and `id`, which it rejects as an unknown option; nothing is run. The cost is that a value containing a
+  space, such as a path with a space in it, cannot be passed.
+- An empty or whitespace-only value adds nothing, and the scan is the one the action ran before `args` existed.
+- The words come after the flags the action sets from its other inputs. The CLI exits 2 on a word it does not
+  recognise, so a typo fails the step rather than being skipped.
+- A flag that has its own input is rejected with exit 2 before the scan starts: `--fail-on`, `--image`,
+  `--offline`, `--server`, `--project`, `--sarif` and `--sarif-out`. Use `fail-on`, `image`, `offline`,
+  `server` and `project`, or `sarif` and `sarif-output` instead. The CLI keeps the last copy of a repeated
+  flag, so without this a second `--fail-on` in `args` would quietly replace the one in the `with:` block.
+- The CLI accepts only one of `--json`, `--sarif` (or `--sarif-out`) and `--sbom`, and `sarif: true` makes the
+  action pass `--sarif-out`. Passing `--json` or `--sbom` together with `sarif: true` therefore fails the step
+  with exit 2 before the scan runs. With `sarif` left off, `--json` prints the JSON report to the step's log:
+
+```yaml
+- uses: KKloudTarus/synapse-ce@v1
+  with:
+    args: --json --require-complete
+```
+
+`args` cannot run a command, but its words still choose scan flags, so do not build it from text an outsider
+controls, such as a pull request title or a dispatch input.
+
+### Skipping the Grype install
+
+The action installs Grype after `synapse-cli` and sets `SYNAPSE_GRYPE_BIN` to it. Grype takes part in a scan
+only when `SYNAPSE_DETECTION_SOURCES` lists `grype`, and the default does not, so a workflow that never
+selects it can skip the download:
+
+```yaml
+- uses: KKloudTarus/synapse-ce@v1
+  with:
+    install-grype: false
+```
+
+The default is `true`, so existing workflows install it as before; only the value `false` skips the step. If a scan lists `grype` and it is not installed, Grype contributes nothing and the scan carries on with
+its other sources, unless `SYNAPSE_GRYPE_BIN` already points at a Grype you provide. See
+[Configuration](configuration.md) for `SYNAPSE_DETECTION_SOURCES`.
+
 ### From source
 
 Without the action you can install the tools and build the CLI yourself:

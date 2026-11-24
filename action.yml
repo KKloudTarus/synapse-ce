@@ -46,6 +46,14 @@ inputs:
     description: "Synapse API token with the operate permission. Pass a secret, never a literal. Required when `server` is set."
     required: false
     default: ""
+  args:
+    description: "Extra flags appended to `synapse-cli scan`, for example `--require-complete --min-confidence high` or `--json`. The value is split on whitespace (spaces, tabs, newlines, so a multi-line block works) into separate words and nothing else is interpreted: no quoting or escaping, and `$`, backticks, `;`, `&&`, `*` and quotes are ordinary characters of a word, so a value containing a space cannot be passed. A flag that has its own input (`--fail-on`, `--image`, `--offline`, `--server`, `--project`, `--sarif`, `--sarif-out`) is rejected: set it through that input. `--json` and `--sbom` take stdout and cannot be combined with `sarif: true`; the step fails before the scan runs. Default: no extra flags."
+    required: false
+    default: ""
+  install-grype:
+    description: "When true (the default), install Grype and point `SYNAPSE_GRYPE_BIN` at it. Set to false to skip the install when no scan selects Grype: it joins a scan only when `SYNAPSE_DETECTION_SOURCES` lists `grype`, which the default does not. If a scan lists it and it is not installed, Grype contributes nothing and the scan continues with the other sources, unless `SYNAPSE_GRYPE_BIN` already points at a Grype you provide."
+    required: false
+    default: "true"
 
 outputs:
   sarif-file:
@@ -55,20 +63,17 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install synapse-cli and grype
+    - name: Install synapse-cli
       shell: bash
       # No GITHUB_TOKEN is exposed here on purpose: the release lookup hits a PUBLIC endpoint, and
-      # keeping the token out of this step means the `curl | sh` tool installers below cannot exfiltrate
-      # it. Pin `version` to a tag to skip the unauthenticated API call entirely.
+      # keeping the token out of this step means nothing it runs can exfiltrate it (the `curl | sh`
+      # grype installer is in its own step below, with no token either). Pin `version` to a tag to
+      # skip the unauthenticated API call entirely.
       env:
         SYNAPSE_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
 
-        # Kept at the version the release container image builds. This downloads anchore's published
-        # binary, which carries anchore's own dependency versions; the container image instead rebuilds
-        # grype from this tag with a patched golang.org/x/net and brotli.
-        GRYPE_VERSION="v0.121.2"
         REPO="KKloudTarus/synapse-ce"
         BIN_DIR="${RUNNER_TEMP}/synapse-bin"
         mkdir -p "${BIN_DIR}"
@@ -138,14 +143,31 @@ runs:
 
         # SBOM generation is the OWNED engine (pure Go, in-process), so syft is not installed: it was a
         # `curl | sh` in every consumer's CI for a tool nothing on the default path calls.
-        #
+        echo "${BIN_DIR}" >> "${GITHUB_PATH}"
+
+    - name: Install grype
+      # Skipped only by an explicit `install-grype: false`, so a workflow that does not set the input
+      # installs it as before. A step of its own, rather than a branch inside the one above, so the
+      # run log shows it skipped instead of saying nothing.
+      if: inputs.install-grype != 'false'
+      shell: bash
+      # No env block: this step runs a `curl | sh` installer, so nothing from the workflow is passed in.
+      run: |
+        set -euo pipefail
+
+        # Kept at the version the release container image builds. This downloads anchore's published
+        # binary, which carries anchore's own dependency versions; the container image instead rebuilds
+        # grype from this tag with a patched golang.org/x/net and brotli.
+        GRYPE_VERSION="v0.121.2"
+        BIN_DIR="${RUNNER_TEMP}/synapse-bin"
+        mkdir -p "${BIN_DIR}"
+
         # grype stays as an OPT-IN vulnerability source and nothing selects it by default. Without a synced
         # advisory store it is the only way a scan can match OS-package CVEs, and a scan that has neither says
         # so rather than reporting a clean result. The installer is pinned to the tool version tag (not the
         # moving main branch) so the script itself is fixed, and it checksum-verifies the binary it fetches.
         curl -fsSL "https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh" | sh -s -- -b "${BIN_DIR}" "${GRYPE_VERSION}"
 
-        echo "${BIN_DIR}" >> "${GITHUB_PATH}"
         echo "SYNAPSE_GRYPE_BIN=${BIN_DIR}/grype" >> "${GITHUB_ENV}"
 
     - name: Run scan
@@ -161,6 +183,9 @@ runs:
         SYNAPSE_SERVER: ${{ inputs.server }}
         SYNAPSE_PROJECT: ${{ inputs.project }}
         SYNAPSE_API_TOKEN: ${{ inputs.api-token }}
+        # Reaches the script only through this variable. Writing the `inputs.args` expression inside `run:`
+        # would paste the caller's text into the script before bash parses it, which is a script-injection hole.
+        SYNAPSE_ARGS: ${{ inputs.args }}
       run: |
         # Not `-e`: the scan's non-zero exit IS the gate result, propagated deliberately at the end so
         # the SARIF output is still recorded when the gate fails (an `if: always()` upload keeps working).
@@ -176,6 +201,37 @@ runs:
           # Record the result on the server as the project's next analysis. synapse-cli reads the
           # branch, run id, run URL and actor from the GITHUB_* variables, so nothing else is passed.
           args+=(--server "${SYNAPSE_SERVER}" --project "${SYNAPSE_PROJECT}")
+        fi
+        # Extra flags from the `args` input. They are split into words with `read`, which performs no
+        # expansion, globbing or quote handling, and passed as separate argv entries below, so `; id` or
+        # `$(id)` is just text the CLI rejects as an unknown option and never a command. `-d ''` makes read
+        # take the whole value rather than its first line, so a multi-line block is not silently cut short
+        # (that would drop a gate flag without a word); `|| true` absorbs the non-zero status read returns
+        # at end of input. The array is declared first and its length tested before it is expanded, because
+        # an empty array expanded under `set -u` is an error on bash older than 4.4.
+        extra=()
+        if [ -n "${SYNAPSE_ARGS}" ]; then
+          IFS=$' \t\r\n' read -r -d '' -a extra <<< "${SYNAPSE_ARGS}" || true
+        fi
+        if [ "${#extra[@]}" -gt 0 ]; then
+          for word in "${extra[@]}"; do
+            case "${word}" in
+              # A flag with its own input has one place to be set, so a second copy here cannot change what
+              # the workflow's `with:` block says (the CLI keeps the last copy of a repeated flag).
+              --fail-on|--image|--offline|--server|--project|--sarif|--sarif-out)
+                echo "::error::args must not contain ${word}; set it through the matching input of this action" >&2
+                exit 2 ;;
+              # The CLI accepts only one of --json, --sarif (or --sarif-out) and --sbom, and `sarif: true`
+              # adds --sarif-out below. It would exit 2 anyway; say which input conflicts instead of leaving
+              # the CLI's wording to explain it.
+              --json|--sbom)
+                if [ "${SYNAPSE_SARIF}" = "true" ]; then
+                  echo "::error::args contains ${word}, which cannot be combined with sarif: true (the CLI takes only one of --json, --sarif and --sbom); drop one of them" >&2
+                  exit 2
+                fi ;;
+            esac
+          done
+          args+=("${extra[@]}")
         fi
         rc=0
         if [ "${SYNAPSE_SARIF}" = "true" ]; then
