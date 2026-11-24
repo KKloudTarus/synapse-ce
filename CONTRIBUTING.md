@@ -61,6 +61,12 @@ Synapse is a security tool. Changes must preserve these:
    reached through a `WithTenant` transaction; global reference data (e.g. `advisories`) is the
    deliberate exception. Cross-tenant access must be rejected by the hostile harness.
 
+   One table is an undeliberate exception: `credentials`, the engagement secret vault, has no
+   `tenant_id` column and no RLS, and `internal/infrastructure/vault/postgres.go` queries it by
+   `engagement_id` alone. Its isolation rests entirely on `withEngTenant` at the HTTP layer, which
+   every current route does go through. **If you add a reader of `credentials`, nothing underneath
+   will stop a cross-tenant read**, unlike every other tenant table. Tracked in #1687.
+
 If a change would weaken any of these, please open an issue to discuss first.
 
 ## Database migrations
