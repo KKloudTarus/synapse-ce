@@ -219,3 +219,35 @@ function manifest(id: string, lifecycle: AssessmentClosureManifest['lifecycle'],
     sealedAt: '2026-09-01T07:00:00Z', sealedBy: 'reviewer', supersededAt: null,
   }
 }
+
+// Each of these fills the whole route, so each carries the only heading the screen has. Rendered
+// bare they left the document with no heading at all, the same defect a Chromium sweep measured on
+// every /assets/:key capture.
+describe('AssessmentCycleDetailPage whole-route states', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  it('names the page while it loads', async () => {
+    vi.mocked(api.assessmentCycle).mockReturnValue(new Promise(() => {}) as never)
+    vi.mocked(api.listAssessmentClosureManifests).mockReturnValue(new Promise(() => {}) as never)
+    vi.mocked(api.me).mockReturnValue(new Promise(() => {}) as never)
+    renderPage()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Assessment Cycle' })).toBeInTheDocument()
+  })
+
+  it('names the page when the fetch fails', async () => {
+    vi.mocked(api.assessmentCycle).mockRejectedValue(new ApiError(503, 'HTTP 503'))
+    vi.mocked(api.listAssessmentClosureManifests).mockRejectedValue(new ApiError(503, 'HTTP 503'))
+    vi.mocked(api.me).mockRejectedValue(new ApiError(503, 'HTTP 503'))
+    renderPage()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Assessment Cycle' })).toBeInTheDocument()
+  })
+
+  it('names the page when the cycle is absent', async () => {
+    vi.mocked(api.assessmentCycle).mockRejectedValue(new ApiError(404, 'HTTP 404'))
+    vi.mocked(api.listAssessmentClosureManifests).mockRejectedValue(new ApiError(404, 'HTTP 404'))
+    vi.mocked(api.me).mockRejectedValue(new ApiError(404, 'HTTP 404'))
+    renderPage()
+    const heading = await screen.findByRole('heading', { level: 1 })
+    expect(heading.textContent === 'Assessment Cycle' || heading.textContent === 'Assessment Cycle not found').toBe(true)
+  })
+})

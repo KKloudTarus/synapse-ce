@@ -99,6 +99,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   fetch past the policy. The accepted ranges come from the same table as every other outbound
   client, which closes carrier-grade NAT (holding the Alibaba and OpenStack metadata service at
   `100.100.100.200`), `192.0.0.0/24`, `198.18.0.0/15`, `240.0.0.0/4`, NAT64 and `fd00:ec2::/32`.
+- The asset and assessment-cycle detail routes carry a page heading in every whole-route state.
+  Their loading, error and not-found branches rendered bare, so a Chromium sweep of `/assets/:key`
+  and its five sub-tabs found 12 of 12 captures with no heading at all, in both themes and at both
+  widths.
 - A console screen whose whole content is the "feature is not enabled" state now carries a
   page heading. The title rendered as a paragraph, so `/fleet/hosts`, `/fleet/workloads`,
   `/fleet/agents`, `/fleet/asset-graph` and the AI-triage screens reached a screen reader with

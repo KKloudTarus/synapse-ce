@@ -117,9 +117,26 @@ export function AssetDetail() {
   const fetchedData = result?.kind === 'found' ? result.value : null
   const context: Context | null = fetchedData ? { ...fetchedData, reload: refetch } : null
 
-  if (error && !notFound) return <div className="mx-auto max-w-6xl"><ErrorState message={error} /></div>
-  if (notFound) return <EmptyState icon={Box} title="Asset not found" hint="It may not exist or belongs to another tenant." />
-  if (!context) return <Spinner label="Loading Asset…" />
+  // Each of these fills the whole route, so each one carries the only heading on the screen. A
+  // state rendered without one leaves the document with no heading at all: a screen reader lands
+  // on a page it cannot name, and the sub-tabs under /assets/:key inherit the same blank.
+  if (error && !notFound) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight text-primary">Asset</h1>
+        <ErrorState message={error} />
+      </div>
+    )
+  }
+  if (notFound) return <EmptyState icon={Box} title="Asset not found" hint="It may not exist or belongs to another tenant." titleAs="h1" />
+  if (!context) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight text-primary">Asset</h1>
+        <Spinner label="Loading Asset…" />
+      </div>
+    )
+  }
 
   const data = context
 
