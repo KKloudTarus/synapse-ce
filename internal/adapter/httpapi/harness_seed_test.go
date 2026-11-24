@@ -31,6 +31,10 @@ import (
 // seed that stopped reaching its routes cannot pass quietly. That is the check that matters when two
 // seeds touch the same Router field and the later one replaces the earlier.
 //
+// A route whose parameter has no value cannot be addressed at all. A seed that plants the record
+// names its id in PathValues, and a route the sweep still cannot address fails the test unless
+// harnessKnownUnaddressable lists it with a reason, so no route drops out of the sweep unseen.
+//
 // Rules for a seed:
 //   - It runs before the route table is built, so a rt.SetX call it makes also registers any route
 //     that SetX enables.
@@ -77,6 +81,15 @@ type harnessSeed struct {
 	// Queries maps a route to the query string it needs before it reads anything, for example
 	// "?path=README.md". The sweep appends it to the concrete path.
 	Queries map[string]string
+	// PathValues maps a route parameter, braces included ("{did}"), to the id of the record the seed
+	// planted for it. The sweep cannot address a route whose parameter has no value, and counts that
+	// route as unaddressable; a seed that plants the record names the id here instead of every id
+	// living in harnessPathValues.
+	PathValues map[string]string
+	// ForeignDenied lists routes whose response carries nothing that names the tenant, so a marker
+	// check cannot tell tenantA's data from tenantB's. For those the sweep requires the route to
+	// refuse a foreign caller with 403 or 404, which proves the guard instead of the data.
+	ForeignDenied []string
 	// Run wires the subsystem, plants the data and returns the markers.
 	Run func(w *harnessWorld) []string
 }
@@ -136,4 +149,29 @@ func harnessRouteQueries() map[string]string {
 		}
 	}
 	return out
+}
+
+// harnessForeignDeniedRoutes is the set of routes that must refuse a foreign caller.
+func harnessForeignDeniedRoutes() map[string]bool {
+	out := map[string]bool{}
+	for _, seed := range harnessSeeds {
+		for _, route := range seed.ForeignDenied {
+			out[route] = true
+		}
+	}
+	return out
+}
+
+// harnessPathValue returns the id the sweep substitutes for a route parameter: the fixture's own
+// value first, then the one a seed declared for the record it planted.
+func harnessPathValue(param string) (string, bool) {
+	if value, ok := harnessPathValues[param]; ok {
+		return value, true
+	}
+	for _, seed := range sortedHarnessSeeds() {
+		if value, ok := seed.PathValues[param]; ok {
+			return value, true
+		}
+	}
+	return "", false
 }
