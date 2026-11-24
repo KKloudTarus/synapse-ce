@@ -88,6 +88,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   a lockfile holding only `empty=` is still a valid, complete, empty lockfile. `doctor` now lists the
   lockfile and stops asking for a JDK or Gradle when it sits beside the build script. The owned
   producer version is `ownsbom/0.9.0`, so inventories cached under the previous version are not reused.
+- **A scan that could not read the CISA KEV catalogue no longer reports every vulnerability as not known-exploited (#1665).**
+  When the catalogue request failed (an HTTP 403 from a network that blocks the feed, a 5xx, a timeout, an
+  answer that is not JSON) the enricher dropped the error, every vulnerability kept `kev: false`,
+  `risk_matches.kev` stayed `0`, and the scan looked clean. The scan result now carries
+  `risk_unavailable` (`{"kev": "http 403"}`) and a source warning, printed on stderr with `--json`, names the
+  cause class without the URL or any response body. The outage does not change engine coverage, so
+  `--require-complete` and the exit code are unchanged, and `--offline` still skips the catalogue without
+  reporting a failure. An assessment-cycle run records such a scan as `partial`, as it does for any scan
+  that carries a source warning. `SYNAPSE_KEV_URL` points the lookup at a mirror the pipeline can reach.
 - **The runtime database role no longer holds direct DML on two global lookup tables.**
   `scan_run_engagement_tenants` (the engagement-to-tenant map, migration 0144) and
   `identity_recovery_activation_routes` (every recovery secret digest with its tenant and expiry,
