@@ -87,6 +87,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- The advisory investigation page stops loading once the advisory is reported missing. A failed
+  detail fetch left its spinner on screen beside the error for good, so an unknown advisory id
+  showed "not found" and "Loading vulnerability detail…" at the same time and the second never
+  resolved.
 - The project Delete control states why it is unavailable instead of producing a `409` when
   clicked. A project whose analyses sealed evidence cannot be deleted, because the custody chain is
   append-only; the single project read now carries the reason, and the control is disabled with it
