@@ -111,6 +111,15 @@ func (verifier *IntegrityVerifier) Run(ctx context.Context, request IntegrityReq
 	if resumed && run.SourceGeneration != sourceGeneration {
 		return verifier.finish(ctx, run, leaseOwner, ports.AssessmentCycleIntegrityFailed, actor, fmt.Errorf("%w: assessment cycle integrity source changed while the run was interrupted", shared.ErrConflict))
 	}
+	// audit_log carries FORCE row level security and its policy admits only
+	// (hash_version = 2 AND tenant_id = synapse_current_tenant()). The Postgres append path picks
+	// the hash_version 2 statement only when the context names a tenant; without one it falls
+	// through to the legacy statement, whose hash_version defaults to 1. The insert is then either
+	// refused with SQLSTATE 42501, stopping the run before it does any work, or, where the role
+	// bypasses RLS, filed under the empty tenant in a table that cannot be corrected afterwards.
+	// The command-line entry points fan out over several tenants on one context, so this binds
+	// here rather than there. Same fix as assessmentcycle/backfill.go.
+	ctx = shared.WithTenant(ctx, tenantID)
 	if err := verifier.record(ctx, actor, "assessment_cycle.integrity_started", run.ID, map[string]string{
 		"tenant_id": tenantID.String(), "resumed": strconv.FormatBool(resumed), "batch_size": strconv.Itoa(run.BatchSize),
 	}); err != nil {

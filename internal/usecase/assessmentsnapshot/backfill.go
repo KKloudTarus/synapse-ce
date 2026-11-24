@@ -214,6 +214,15 @@ func (runner *BackfillRunner) Run(ctx context.Context, request BackfillRequest) 
 	if err != nil {
 		return ports.AssessmentSnapshotBackfillRun{}, err
 	}
+	// audit_log carries FORCE row level security and its policy admits only
+	// (hash_version = 2 AND tenant_id = synapse_current_tenant()). The Postgres append path picks
+	// the hash_version 2 statement only when the context names a tenant; without one it falls
+	// through to the legacy statement, whose hash_version defaults to 1. The insert is then either
+	// refused with SQLSTATE 42501, stopping the run before it does any work, or, where the role
+	// bypasses RLS, filed under the empty tenant in a table that cannot be corrected afterwards.
+	// The command-line entry points fan out over several tenants on one context, so this binds
+	// here rather than there. Same fix as assessmentcycle/backfill.go.
+	ctx = shared.WithTenant(ctx, tenantID)
 	if err := runner.record(ctx, actor, "assessment_snapshot.backfill_started", run.ID, map[string]string{
 		"tenant_id": tenantID.String(), "dry_run": strconv.FormatBool(run.DryRun), "resumed": strconv.FormatBool(resumed), "batch_size": strconv.Itoa(run.BatchSize),
 	}); err != nil {

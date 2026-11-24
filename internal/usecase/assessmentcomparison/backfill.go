@@ -79,6 +79,12 @@ func (runner *BackfillRunner) Run(ctx context.Context, request BackfillRequest) 
 	if err := normalizeBackfillRequest(&request); err != nil {
 		return BackfillResult{}, err
 	}
+	// Bind the tenant before anything audits. audit_log carries FORCE row level security and its
+	// policy admits only (hash_version = 2 AND tenant_id = synapse_current_tenant()); without a
+	// tenant on the context the append path writes the legacy hash_version 1 row, which is either
+	// refused with SQLSTATE 42501 or filed under the empty tenant. recordBatch audits on this
+	// context. Same fix as assessmentcycle/backfill.go.
+	ctx = shared.WithTenant(ctx, request.TenantID)
 	result := BackfillResult{CheckpointUpdatedAt: request.AfterUpdatedAt, CheckpointCycleID: request.AfterCycleID}
 	backlog, err := runner.comparisons.GetAssessmentComparisonBacklog(ctx, request.TenantID)
 	if err != nil {

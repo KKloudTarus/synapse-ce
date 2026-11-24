@@ -197,6 +197,12 @@ func NormalizeTarget(t Target, scopeEntry bool) (Target, error) {
 		if err != nil {
 			return Target{}, validationError("invalid IP address %q", t.Value)
 		}
+		// One spelling per address. ::ffff:203.0.113.5 and 203.0.113.5 are the same host, and
+		// netip compares them as different: neither Contains nor Overlaps crosses the mapping. An
+		// out-of-scope entry written in the 4-in-6 form therefore matched nothing, so the host it
+		// excluded was scanned with no warning. Canonicalizing here fixes the scope matcher, the
+		// unreachable floors and the egress compiler at once, because all three read this value.
+		addr = addr.Unmap()
 		if reserved, ok := unreachableRange(addr); ok {
 			return Target{}, validationError("%s is in %s (%s) and is dropped by the sandbox before any tool runs, so it can never be a target", addr, reserved.Prefix, reserved.Why)
 		}
@@ -205,6 +211,11 @@ func NormalizeTarget(t Target, scopeEntry bool) (Target, error) {
 		pfx, err := netip.ParsePrefix(v)
 		if err != nil {
 			return Target{}, validationError("invalid CIDR %q", t.Value)
+		}
+		// Same canonicalization as TargetIP. A 4-in-6 prefix also carries 96 bits of mapping
+		// prefix, so the bit count moves with the address.
+		if pfx.Addr().Is4In6() {
+			pfx = netip.PrefixFrom(pfx.Addr().Unmap(), pfx.Bits()-96)
 		}
 		pfx = pfx.Masked()
 		if reserved, ok := unreachablePrefix(pfx); ok {
@@ -219,7 +230,7 @@ func NormalizeTarget(t Target, scopeEntry bool) (Target, error) {
 		// Only a literal address can be judged here. A hostname would need DNS, which the domain
 		// does not do and must not: the sandbox's own resolution is what the kernel floor covers.
 		if addr, addrErr := netip.ParseAddr(identity.Host); addrErr == nil {
-			if reserved, ok := unreachableRange(addr); ok {
+			if reserved, ok := unreachableRange(addr.Unmap()); ok {
 				return Target{}, validationError("%s is in %s (%s) and is dropped by the sandbox before any tool runs, so it can never be a target", addr, reserved.Prefix, reserved.Why)
 			}
 		}
