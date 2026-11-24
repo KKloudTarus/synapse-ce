@@ -7,12 +7,15 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 )
 
 // A CI runner is the ordinary place a scan happens, and it has neither ~/.m2 nor mvn. Reading the local Maven
@@ -99,6 +102,13 @@ type HTTPPOMFetcher struct {
 // offline; an empty cacheDir disables the on-disk cache without disabling fetching.
 func NewHTTPPOMFetcher(cacheDir string) *HTTPPOMFetcher {
 	allowPrivate := allowPrivateMavenRepos()
+	return newPOMFetcher(cacheDir, allowPrivate, mavenPolicy(allowPrivate))
+}
+
+// newPOMFetcher builds a fetcher against an explicit destination policy. Production always passes
+// mavenPolicy. The policy is enforced inside the dialer, so unlike the validate seam a test cannot
+// relax it after construction: a test whose own server listens on loopback passes one that admits it.
+func newPOMFetcher(cacheDir string, allowPrivate bool, policy safehttp.Policy) *HTTPPOMFetcher {
 	f := &HTTPPOMFetcher{
 		client: &http.Client{
 			Timeout: remotePOMTimeout,
@@ -108,6 +118,23 @@ func NewHTTPPOMFetcher(cacheDir string) *HTTPPOMFetcher {
 				}
 				// A redirect is a second chance to reach somewhere private, so it is checked like the first.
 				return validateRepositoryURL(req.URL, allowPrivate)
+			},
+			// The address policy is enforced by the dialer, on the address it actually dials.
+			// validateRepositoryURL resolves the host to produce a clear refusal before the request
+			// is built, but that answer and the transport's own lookup are two independent
+			// resolutions: a host under the pom author's control can answer public for the check
+			// and private for the dial. net/http's default transport also honours HTTP_PROXY and
+			// HTTPS_PROXY, which would send the request somewhere the policy never saw.
+			Transport: &http.Transport{
+				Proxy:                 nil,
+				ForceAttemptHTTP2:     true,
+				DialContext:           safehttp.NewDialer(policy, 0).DialContext,
+				IdleConnTimeout:       30 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: remotePOMTimeout,
+				MaxIdleConns:          16,
+				MaxIdleConnsPerHost:   4,
+				MaxConnsPerHost:       8,
 			},
 		},
 		cacheDir:     cacheDir,
@@ -361,12 +388,10 @@ func validateRepositoryURL(target *url.URL, allowPrivate bool) error {
 	if err != nil || len(addrs) == 0 {
 		return errors.New("the host does not resolve")
 	}
+	policy := mavenPolicy(allowPrivate)
 	for _, addr := range addrs {
-		if publicUnicastIP(addr) {
+		if publicUnicastIP(policy, addr) {
 			continue
-		}
-		if allowPrivate && addr.IsPrivate() {
-			continue // an operator opted in to their own internal repository
 		}
 		return errors.New("the host resolves to a non-public address, which a scan will not fetch from " +
 			"(set SYNAPSE_MAVEN_ALLOW_PRIVATE_REPOS=true for your own internal repository)")
@@ -374,13 +399,25 @@ func validateRepositoryURL(target *url.URL, allowPrivate bool) error {
 	return nil
 }
 
+// mavenPolicy is the destination policy for every Maven fetch: public addresses, plus private-use ones
+// when an operator opted in for their own internal repository. It is the policy the dialer enforces and
+// the one validateRepositoryURL pre-checks against, so the two can never disagree about a range.
+func mavenPolicy(allowPrivate bool) safehttp.Policy {
+	return safehttp.Policy{AllowPrivate: allowPrivate}
+}
+
 // publicUnicastIP reports whether an address is one a scan may fetch from. Loopback, link-local (which is
 // where a cloud instance-metadata service lives), multicast, unspecified and private ranges are all refused,
 // because a pom.xml naming one of them is pointing the scanner at the network it runs inside.
-func publicUnicastIP(ip net.IP) bool {
-	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
+//
+// The ranges come from safehttp rather than from net.IP's own predicates, which know nothing of the
+// carrier-grade NAT block that holds the Alibaba and OpenStack metadata service at 100.100.100.200, of
+// 198.18.0.0/15, or of 240.0.0.0/4. IsPrivate covers RFC 1918 and fc00::/7 and nothing else, so each of
+// those addresses passed as public.
+func publicUnicastIP(policy safehttp.Policy, ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return false
 	}
-	return !ip.IsPrivate()
+	return policy.AllowsAddress(addr.Unmap())
 }

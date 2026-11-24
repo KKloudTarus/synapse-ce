@@ -63,6 +63,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Maven POM fetches enforce their address policy at dial time (SSRF).** A scanned `pom.xml` can
+  name any repository URL, and the policy was applied to a DNS answer taken separately from the one
+  `net/http` used to connect, so a host the pom author controls could answer public for the check
+  and private for the connection. Fetches now go through a `safehttp` dialer, which checks the
+  address it dials and uses no proxy, so `HTTP_PROXY` and `HTTPS_PROXY` can no longer redirect a
+  fetch past the policy. The accepted ranges come from the same table as every other outbound
+  client, which closes carrier-grade NAT (holding the Alibaba and OpenStack metadata service at
+  `100.100.100.200`), `192.0.0.0/24`, `198.18.0.0/15`, `240.0.0.0/4`, NAT64 and `fd00:ec2::/32`.
 - A console screen whose whole content is the "feature is not enabled" state now carries a
   page heading. The title rendered as a paragraph, so `/fleet/hosts`, `/fleet/workloads`,
   `/fleet/agents`, `/fleet/asset-graph` and the AI-triage screens reached a screen reader with

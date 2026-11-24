@@ -3,6 +3,7 @@ package ownsbom
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 )
 
 // stubFetcher serves POMs from a map, so the resolver can be tested without a network.
@@ -200,6 +203,13 @@ func TestRepositoryURLPolicyRefusesUnsafeTargets(t *testing.T) {
 		"https://10.1.2.3/maven",                   // RFC 1918
 		"https://192.168.0.9/maven",                // RFC 1918
 		"https://user:pass@repo.example.com/maven", // embedded credentials
+		// net.IP's own predicates know none of these, so each one passed as public while the
+		// first of them holds the Alibaba and OpenStack metadata service.
+		"https://100.100.100.200/latest/meta-data", // CGNAT, Alibaba and OpenStack metadata
+		"https://198.18.0.1/maven",                 // benchmarking
+		"https://192.0.0.1/maven",                  // IETF protocol assignments
+		"https://240.0.0.1/maven",                  // reserved
+		"https://[64:ff9b::7f00:1]/maven",          // NAT64 of 127.0.0.1
 	} {
 		u, err := url.Parse(raw)
 		if err != nil {
@@ -215,11 +225,54 @@ func TestRepositoryURLPolicyRefusesUnsafeTargets(t *testing.T) {
 		t.Errorf("an opted-in private repository must be allowed, got %v", err)
 	}
 	// The opt-in does NOT re-admit loopback or metadata: those are never a Maven repository.
-	for _, raw := range []string{"https://127.0.0.1/maven", "https://169.254.169.254/maven"} {
+	// fd00:ec2::254 is AWS metadata over IPv6 and sits inside fc00::/7, which the opt-in admits,
+	// so it has to be refused by name rather than by range.
+	for _, raw := range []string{
+		"https://127.0.0.1/maven",
+		"https://169.254.169.254/maven",
+		"https://100.100.100.200/maven",
+		"https://[fd00:ec2::254]/maven",
+	} {
 		u, _ := url.Parse(raw)
 		if err := validateRepositoryURL(u, true); err == nil {
 			t.Errorf("%s must be refused even with the private opt-in", raw)
 		}
+	}
+}
+
+// validateRepositoryURL resolves the host, and net/http then resolves it again when it dials. Those are
+// two independent answers, so a host under the pom author's control can return a public address for the
+// check and a private one for the connection. The address policy therefore has to be enforced where the
+// address is dialed, not where it is validated.
+func TestFetcherEnforcesTheAddressPolicyAtDialTime(t *testing.T) {
+	transport, ok := NewHTTPPOMFetcher("").client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("the fetcher must carry its own transport, not net/http's default")
+	}
+	// HTTP_PROXY and HTTPS_PROXY would send the request to a destination the policy never saw.
+	if transport.Proxy != nil {
+		t.Error("the transport must use no proxy")
+	}
+	for _, address := range []string{
+		"127.0.0.1:443",
+		"169.254.169.254:443",
+		"100.100.100.200:443",
+		"10.1.2.3:443",
+	} {
+		_, err := transport.DialContext(context.Background(), "tcp", address)
+		if !errors.Is(err, safehttp.ErrBlockedDestination) {
+			t.Errorf("dialing %s must be refused by the policy, got %v", address, err)
+		}
+	}
+	// The operator opt-in reaches the dialer too, so an internal repository still resolves. The dial
+	// itself fails because nothing is listening; what matters is that the policy did not refuse it.
+	t.Setenv("SYNAPSE_MAVEN_ALLOW_PRIVATE_REPOS", "true")
+	opted, ok := NewHTTPPOMFetcher("").client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("the fetcher must carry its own transport")
+	}
+	if _, err := opted.DialContext(context.Background(), "tcp", "10.1.2.3:443"); errors.Is(err, safehttp.ErrBlockedDestination) {
+		t.Error("an opted-in private address must reach the dial, not be refused by the policy")
 	}
 }
 
@@ -238,9 +291,11 @@ func TestClipHeaderBoundsUntrustedText(t *testing.T) {
 // place the production policy and a test must differ.
 func newTestFetcher(t *testing.T, cacheDir string) *HTTPPOMFetcher {
 	t.Helper()
-	f := NewHTTPPOMFetcher(cacheDir)
 	// The production policy refuses loopback even with the private opt-in, deliberately, so a test server that
-	// only ever listens there needs the policy relaxed for it. Everything else the fetcher does is unchanged.
+	// only ever listens there needs the policy relaxed for it, in the dialer as well as in validate.
+	// TestFetcherEnforcesTheAddressPolicyAtDialTime exercises the production constructor instead.
+	f := newPOMFetcher(cacheDir, false, safehttp.OperatorPolicy())
+	// Everything else the fetcher does is unchanged.
 	f.validate = func(*url.URL) error { return nil }
 	// No test may reach the real Maven Central: a suite that did would be doing the exact thing this file
 	// exists to stop. Clearing it leaves only the repositories a test passes in.
