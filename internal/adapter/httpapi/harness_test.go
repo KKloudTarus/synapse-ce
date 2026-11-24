@@ -1381,9 +1381,6 @@ var harnessKnownUnaddressable = map[string]string{
 	// Planted by the engagement-analysis seeds.
 
 	// Planted by the engagement-data seeds.
-	"GET /api/v1/engagements/{id}/evidence/{sha}":                          "no evidence digest is declared for {sha}",
-	"GET /api/v1/projects/{key}/analyses/{analysisID}/behavioral-hotspots": "no analysis id is declared for {analysisID}",
-	"GET /api/v1/projects/{key}/source-scans/{jobID}":                      "no scan job id is declared for {jobID}",
 }
 
 // The real root Router keeps tenant resolution entirely on the endpoint ID.
