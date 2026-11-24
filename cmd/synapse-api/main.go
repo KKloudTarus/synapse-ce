@@ -2967,6 +2967,20 @@ func main() {
 			log.Error("sarif ingest init failed", "err", serr)
 			os.Exit(1)
 		}
+		// Durable import receipts (#1183). The receipt and the rows it counts commit together, which is
+		// what makes a finalized receipt trustworthy, and that holds only where the transaction is real.
+		// PostgreSQL gives it: every adapter underneath joins the transaction bound to the context. The
+		// in-memory stores register no compensation, so a rollback there would leave rows behind a
+		// pending receipt; the ledger is left unwired in that mode and ingestion behaves as before.
+		if databasePool != nil {
+			if lerr := sarifSvc.SetRunLedger(postgres.NewImportReceiptRepository(databasePool), postgres.NewTenantTransactionRunner(databasePool)); lerr != nil {
+				log.Error("sarif import receipt ledger init failed", "err", lerr)
+				os.Exit(1)
+			}
+			log.Info("sarif import run ledger ENABLED (durable receipts; run id in X-Synapse-Import-Run-Id)")
+		} else {
+			log.Info("sarif import run ledger DISABLED (no database: the in-memory stores cannot roll back with the receipt)")
+		}
 		router.SetSARIFIngest(sarifSvc)
 		router.SetImportedFindings(importedFindingStore)
 		// #423 detection ledger READ routes. The read surface needs only the record store, so it is wired

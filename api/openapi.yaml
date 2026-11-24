@@ -2077,7 +2077,16 @@ paths:
           application/sarif+json:
             schema: {type: object}
       responses:
-        "200": {description: Ingest summary}
+        "200":
+          description: Ingest summary
+          headers:
+            X-Synapse-Import-Run-Id:
+              description: >-
+                The durable import receipt this request was recorded under. Re-posting the same document
+                into the same engagement returns the same run. Absent when the deployment has no run
+                ledger. The response body is unchanged either way.
+              required: false
+              schema: {type: string}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}

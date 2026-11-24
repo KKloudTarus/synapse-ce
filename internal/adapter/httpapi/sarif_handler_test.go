@@ -220,3 +220,57 @@ func TestSARIFImportRejectsUnknownOrWrongTenantAsset(t *testing.T) {
 		})
 	}
 }
+
+// TestSARIFImportReturnsTheRunIDAdditively locks the shape of the run-ledger surface (#1183): the run id
+// travels in a header and the 200 body is untouched, so a client written before the ledger keeps parsing
+// the same document it always did.
+func TestSARIFImportReturnsTheRunIDAdditively(t *testing.T) {
+	t.Parallel()
+
+	rt := &Router{}
+	rec := &recordingSARIF{result: sarifingest.IngestResult{Accepted: 2, RunID: "run-7"}}
+	rt.SetSARIFIngest(rec)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/eng-1/sarif", strings.NewReader(`{"version":"2.1.0","runs":[]}`))
+	req.SetPathValue("id", "eng-1")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", Role: "consultant"}))
+	w := httptest.NewRecorder()
+	rt.importSARIF(w, req)
+
+	if got := w.Header().Get(importRunIDHeader); got != "run-7" {
+		t.Fatalf("%s = %q, want the run the usecase recorded", importRunIDHeader, got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// The body carries the legacy keys and nothing else. A run id added here would change a contract
+	// other clients already parse.
+	for _, key := range []string{"accepted", "deduplicated", "matched_first_party", "disagreements", "refused", "coverage"} {
+		if _, ok := payload[key]; !ok {
+			t.Fatalf("legacy key %q disappeared from the body: %+v", key, payload)
+		}
+	}
+	if len(payload) != 6 {
+		t.Fatalf("body gained or lost a key: %+v", payload)
+	}
+}
+
+// TestSARIFImportOmitsTheRunHeaderWithoutALedger keeps the header honest: a deployment with no run ledger
+// must not answer with an empty run id a client would then try to follow.
+func TestSARIFImportOmitsTheRunHeaderWithoutALedger(t *testing.T) {
+	t.Parallel()
+
+	rt := &Router{}
+	rt.SetSARIFIngest(&recordingSARIF{result: sarifingest.IngestResult{Accepted: 1}})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/eng-1/sarif", strings.NewReader(`{"version":"2.1.0","runs":[]}`))
+	req.SetPathValue("id", "eng-1")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", Role: "consultant"}))
+	w := httptest.NewRecorder()
+	rt.importSARIF(w, req)
+
+	if _, present := w.Header()[http.CanonicalHeaderKey(importRunIDHeader)]; present {
+		t.Fatalf("%s must be absent without a ledger, got %q", importRunIDHeader, w.Header().Get(importRunIDHeader))
+	}
+}
