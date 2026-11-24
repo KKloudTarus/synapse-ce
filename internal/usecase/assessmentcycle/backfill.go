@@ -105,6 +105,13 @@ func (runner *BackfillRunner) Run(ctx context.Context, request BackfillRequest) 
 	if err != nil {
 		return ports.AssessmentCycleBackfillRun{}, err
 	}
+	// Bind the tenant for every audit write below. audit_log carries FORCE row level security and
+	// its policy admits only (hash_version = 2 AND tenant_id = synapse_current_tenant()); the
+	// append path picks the hash_version 2 statement only when the context names a tenant.
+	// Without this the first audit write fails with SQLSTATE 42501 and the backfill stops before
+	// it migrates anything, which is what it did on every database that enforces the policy. The
+	// finding-lineage backfill binds it in the same place for the same reason.
+	ctx = shared.WithTenant(ctx, tenantID)
 	if err := runner.record(ctx, actor, "assessment_cycle.backfill_started", run.ID, map[string]string{
 		"tenant_id": tenantID.String(), "dry_run": strconv.FormatBool(run.DryRun), "resumed": strconv.FormatBool(resumed), "batch_size": strconv.Itoa(run.BatchSize),
 	}); err != nil {

@@ -87,6 +87,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   audit row and the SIEM stream in cleartext.
 - An external CI run's URL must be an absolute http(s) URL. Only its length was checked, and the
   console renders it straight into an `href`.
+- **`synapse-assessment-backfill` can run against a database that enforces RLS.** It did not bind
+  the tenant to the context it audits under, so the Postgres append path took the legacy statement
+  whose `hash_version` defaults to 1, and the `audit_log` policy
+  (`hash_version = 2 AND tenant_id = synapse_current_tenant()`) refused the row with SQLSTATE
+  42501. The command failed on its first audit write and migrated nothing, on every database that
+  enforces the policy. The finding-lineage backfill binds it in the same place.
 - The advisory investigation page stops loading once the advisory is reported missing. A failed
   detail fetch left its spinner on screen beside the error for good, so an unknown advisory id
   showed "not found" and "Loading vulnerability detail…" at the same time and the second never
