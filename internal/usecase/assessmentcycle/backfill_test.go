@@ -211,3 +211,69 @@ func addHistoricalAssessment(t *testing.T, ctx context.Context, repository *memo
 	}
 	return assessment
 }
+
+// tenantWitnessAudit records the tenant each audit write carried on its context.
+type tenantWitnessAudit struct {
+	tenants []string
+}
+
+func (a *tenantWitnessAudit) Record(ctx context.Context, _ ports.AuditEntry) error {
+	if tenantID, ok := shared.TenantFrom(ctx); ok {
+		a.tenants = append(a.tenants, tenantID.String())
+		return nil
+	}
+	a.tenants = append(a.tenants, "")
+	return nil
+}
+
+// audit_log carries FORCE row level security and its policy admits only
+// (hash_version = 2 AND tenant_id = synapse_current_tenant()). The Postgres append path picks the
+// hash_version 2 statement only when the context names a tenant; without one it falls through to
+// the legacy statement, whose hash_version defaults to 1, and the insert is refused with
+// SQLSTATE 42501.
+//
+// The backfill did not bind the tenant, so it failed on its first audit write and stopped before
+// migrating anything, on every database that enforces the policy:
+//
+//	tenant default: audit assessment Cycle backfill start: insert audit:
+//	ERROR: new row violates row-level security policy for table "audit_log" (SQLSTATE 42501)
+//
+// An in-memory audit logger accepts anything, so only the context can be asserted here. The
+// finding-lineage backfill binds the tenant in the same place for the same reason.
+func TestBackfillBindsTheTenantForEveryAuditWrite(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	clock := &mutableBackfillClock{now: now}
+	ids := &seqIDGen{}
+	audit := &tenantWitnessAudit{}
+	engagements := memory.NewEngagementRepository()
+	cycles := memory.NewAssessmentCycleRepository()
+	transactions := memory.NewTenantTransactionRunner()
+	cycleService, err := cycleuc.NewService(cycles, engagements, nil, nil, transactions, ids, clock, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := shared.ID("tenant-audit-binding")
+	addHistoricalAssessment(t, ctx, engagements, tenantID, "assessment-bind", engdom.StatusCompleted, "", now.Add(-48*time.Hour), now.Add(-24*time.Hour), "owner", "reviewer")
+
+	runner, err := cycleuc.NewBackfillRunner(cycleService, engagements, memory.NewAssessmentCycleBackfillRepository(), ids, clock, audit, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A context with no tenant, which is what the command-line entry point passes.
+	run, err := runner.Run(ctx, cycleuc.BackfillRequest{TenantID: tenantID, Actor: "operator", LeaseOwner: "process-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != ports.AssessmentCycleBackfillCompleted {
+		t.Fatalf("run state = %s", run.State)
+	}
+	if len(audit.tenants) == 0 {
+		t.Fatal("the backfill wrote no audit entries, so this proves nothing")
+	}
+	for i, got := range audit.tenants {
+		if got != tenantID.String() {
+			t.Errorf("audit write %d carried tenant %q, want %q; without it Postgres refuses the row under the audit_log policy", i, got, tenantID)
+		}
+	}
+}
