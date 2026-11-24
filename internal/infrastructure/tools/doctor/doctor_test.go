@@ -363,3 +363,56 @@ func dimension(rep Report, name string) DimensionReadiness {
 	}
 	return DimensionReadiness{}
 }
+
+// A directory holding only a gradle.lockfile is something the owned parsers read, so doctor must agree with
+// the scan: the lockfile is a lockfile marker and SCA is ready, not "no supported dependency manifests".
+func TestProbeGradleLockfileOnlyIsReadyForSCA(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "gradle.lockfile"), "# Gradle generated\ng:a:1.0=compileClasspath\nempty=\n")
+
+	rep, err := Probe(context.Background(), dir, Options{
+		LookPath:     fakeLookPath(nil),
+		Version:      fakeVersion(""),
+		JavaHomePath: filepath.Join(dir, "missing-java-home"),
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(rep.Inventory.Markers) != 1 || !hasMarker(rep.Inventory.Markers, "gradle.lockfile") {
+		t.Fatalf("gradle.lockfile marker not detected: %#v", rep.Inventory.Markers)
+	}
+	if m := rep.Inventory.Markers[0]; m.Kind != "lockfile" || m.Ecosystem != "maven" {
+		t.Fatalf("marker = %#v, want a maven lockfile", m)
+	}
+	if sca := dimension(rep, "sca"); sca.Status != StatusFull {
+		t.Fatalf("SCA readiness = %#v, want full for a gradle.lockfile alone", sca)
+	}
+}
+
+// With the lockfile beside the build script the owned parser reads the whole locked tree, so doctor must not
+// send the user to install a JDK or Gradle to resolve it, any more than it does for package.json beside a
+// package-lock.json. Without the lockfile that advice stays.
+func TestProbeGradleBuildScriptWithLockfileNeedsNoToolchain(t *testing.T) {
+	probe := func(files ...string) Report {
+		t.Helper()
+		dir := t.TempDir()
+		for _, f := range files {
+			writeFile(t, filepath.Join(dir, f), "x\n")
+		}
+		rep, err := Probe(context.Background(), dir, Options{
+			LookPath:     fakeLookPath(nil),
+			Version:      fakeVersion(""),
+			JavaHomePath: filepath.Join(dir, "missing-java-home"),
+		})
+		if err != nil {
+			t.Fatalf("Probe: %v", err)
+		}
+		return rep
+	}
+	if sca := dimension(probe("build.gradle", "gradle.lockfile"), "sca"); sca.Status != StatusFull {
+		t.Fatalf("build.gradle + gradle.lockfile: SCA readiness = %#v, want full", sca)
+	}
+	if sca := dimension(probe("build.gradle"), "sca"); sca.Status != StatusPartial || !strings.Contains(sca.NextStep, "JDK") {
+		t.Fatalf("build.gradle alone: SCA readiness = %#v, want the JDK gap kept", sca)
+	}
+}

@@ -533,7 +533,9 @@ func firstSCAGap(inv Inventory, tools []ToolProbe) *DimensionReadiness {
 			return &DimensionReadiness{Dimension: "sca", Status: StatusPartial, Reason: "pom.xml found but mvn is not on PATH", NextStep: "Install Maven for transitive dependency resolution."}
 		}
 	}
-	if has["build.gradle"] || has["build.gradle.kts"] || has["settings.gradle"] || has["settings.gradle.kts"] {
+	// A committed gradle.lockfile is read by the owned parser and carries the resolved tree, so no JDK or Gradle
+	// is needed to resolve it (the same exemption package.json gets from its lockfile above).
+	if (has["build.gradle"] || has["build.gradle.kts"] || has["settings.gradle"] || has["settings.gradle.kts"]) && !has["gradle.lockfile"] {
 		if !foundTool(tools, "jdk") {
 			return &DimensionReadiness{Dimension: "sca", Status: StatusPartial, Reason: "Gradle build marker found but no JDK was detected", NextStep: "Install a JDK; Gradle dependency resolution needs one."}
 		}
