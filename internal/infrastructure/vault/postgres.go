@@ -15,6 +15,17 @@ import (
 // PostgresVault persists encrypted credentials on PostgreSQL. The column holds only the
 // AES-256-GCM ciphertext (base64) – the master key lives in process memory, never in
 // the DB – so a database compromise alone does not yield the secrets.
+//
+// TENANT ISOLATION IS NOT ENFORCED HERE. `credentials` has no tenant_id column and no row-level
+// security, and every query below is keyed on engagement_id alone. Isolation rests entirely on
+// rt.withEngTenant, which resolves the engagement inside the caller's tenant before any handler
+// runs; all three credential routes go through it today.
+//
+// That makes this table the one tenant-scoped store with no database-level backstop. A new reader
+// that does not pass through withEngTenant, or a worker or backfill that reaches the pool
+// directly, would read across tenants with nothing underneath to stop it. Everywhere else in this
+// schema the database refuses. Adding tenant_id + RLS here is tracked in #1687; until that lands,
+// treat every call site as load-bearing.
 type PostgresVault struct {
 	pool   *pgxpool.Pool
 	cipher *Cipher
