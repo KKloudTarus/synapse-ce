@@ -108,11 +108,10 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 
 	tenantScoped := map[string]bool{}
 	for _, route := range registeredRoutes(t) {
-		pattern := route.Pattern
-		// Routes under an engagement, a project or an asset carry another tenant's data when the
-		// path id is guessed, which is exactly what the harness exists to reject.
-		if strings.Contains(pattern, "/engagements/{") || strings.Contains(pattern, "/projects/{") || strings.Contains(pattern, "/assets/{") {
-			tenantScoped[pattern] = true
+		// A route that names one tenant's resource by id carries that tenant's data when the id is
+		// guessed or copied, which is exactly what the harness exists to reject.
+		if isTenantScopedPattern(route.Pattern) {
+			tenantScoped[route.Pattern] = true
 		}
 	}
 	if len(tenantScoped) == 0 {
@@ -120,13 +119,17 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 	}
 
 	// Every (method, path) pair the harness actually sends, including the generated sweep, which
-	// builds its paths from this same route table.
+	// builds its paths from this same route table. A route the sweep lists as unaddressable is left
+	// out even when it has a path: it reaches no record of tenantA's, so it proves nothing.
 	type request struct{ method, path string }
 	var sent []request
 	for _, m := range harnessRequest.FindAllStringSubmatch(harness, -1) {
 		sent = append(sent, request{method: strings.ToUpper(m[1]), path: m[2]})
 	}
 	for _, route := range tenantScopedGETRoutes(t) {
+		if _, listed := harnessKnownUnaddressable[route]; listed {
+			continue
+		}
 		if path := concreteHarnessPath(route); path != "" {
 			sent = append(sent, request{method: "GET", path: path})
 		}
@@ -157,7 +160,7 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 
 	// The honest measurement when this guard was rewritten. The ratchet may only improve: raise the
 	// floor when you add coverage, never lower it.
-	const minimumCovered = 94
+	const minimumCovered = 144
 	if covered < minimumCovered {
 		t.Errorf("hostile harness covers %d of %d tenant-scoped routes, below the ratchet of %d; add cases rather than lowering the floor.\nUncovered:\n  %s",
 			covered, len(tenantScoped), minimumCovered, strings.Join(uncovered, "\n  "))

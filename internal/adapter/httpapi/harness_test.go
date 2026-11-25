@@ -640,7 +640,7 @@ func TestHostileHarness(t *testing.T) {
 	seedMarkers := runHarnessSeeds(&harnessWorld{
 		t: t, rt: rt, engagements: engRepo, engSvc: engagementService, projectRepo: projectRepo,
 		projects: projectSvc, analyses: analysisStore, assets: attackAssets, users: usersSvc, audit: audit,
-		state: map[string]any{},
+		siem: siemStore, state: map[string]any{},
 	})
 	mux := rt.routes()
 
@@ -1237,8 +1237,17 @@ func TestHostileHarness(t *testing.T) {
 		tenantBound := harnessTenantBoundRoutes()
 		queries := harnessRouteQueries()
 		foreignDenied := harnessForeignDeniedRoutes()
+		// A value declared for one route must still name a route, and a parameter it carries, or
+		// the route it was meant for falls back to a value that reaches nothing.
+		registered := map[string]bool{}
+		for _, route := range registeredRoutes(t) {
+			registered[route.Pattern] = true
+		}
+		for _, problem := range harnessRoutePathValueProblems(registered) {
+			t.Error(problem)
+		}
 		var probed, unwired, servingTenantA int
-		var servingRoutes, unwiredRoutes, vacuousRoutes, unaddressable []string
+		var servingRoutes, unwiredRoutes, vacuousRoutes, unaddressable, unproven []string
 		for _, route := range tenantScopedGETRoutes(t) {
 			path := concreteHarnessPath(route)
 			if path == "" {
@@ -1278,6 +1287,9 @@ func TestHostileHarness(t *testing.T) {
 				servingRoutes = append(servingRoutes, route)
 			} else {
 				vacuousRoutes = append(vacuousRoutes, fmt.Sprintf("%s  [tenantA got %d]", route, code))
+				if !foreignDenied[route] {
+					unproven = append(unproven, route)
+				}
 			}
 			t.Run(route, func(t *testing.T) {
 				code, body, ran := probe("tenantB", path, bind)
@@ -1315,21 +1327,38 @@ func TestHostileHarness(t *testing.T) {
 		// How many routes serve tenantA data is not asserted as a number: each seed declares its own
 		// routes below, which fails by name, and the fixture's own five routes are declared by the
 		// "baseline" seed.
-		// A route the sweep could not address must be listed with a reason, and a listed route the
-		// sweep can address now must leave the list. Otherwise a route whose parameter has no value
-		// drops out of the sweep without anyone seeing it.
+		// A route the sweep proves nothing on must be listed with a reason, and a listed route the
+		// sweep proves something on now must leave the list. Nothing is proven when a path parameter
+		// has no value, and nothing is proven when the value reaches no record of tenantA's: tenantA's
+		// own request comes back without its data, so tenantB's answer says nothing about a guard.
+		// Otherwise a route whose family no seed plants yet drops out of the sweep without anyone
+		// seeing it. A route declared as refused for a foreign caller is proven by that refusal.
 		sort.Strings(unaddressable)
+		sort.Strings(unproven)
 		reached := map[string]bool{}
 		for _, route := range unaddressable {
 			reached[route] = true
 			if _, listed := harnessKnownUnaddressable[route]; !listed {
-				t.Errorf("%s cannot be addressed: a path parameter has no value. Plant the record in a seed and declare its id in PathValues, or list the route in harnessKnownUnaddressable with the reason", route)
+				t.Errorf("%s cannot be addressed: a path parameter has no value. Plant the record in a seed and declare its id in PathValues or RoutePathValues, or list the route in harnessKnownUnaddressable with the reason", route)
+			}
+		}
+		for _, route := range unproven {
+			reached[route] = true
+			if _, listed := harnessKnownUnaddressable[route]; !listed {
+				t.Errorf("%s answers tenantA without any of its seeded data, so a tenantB probe proves nothing. Plant tenantA's record in a seed and declare the route, or list it in harnessKnownUnaddressable with the reason", route)
 			}
 		}
 		for route, reason := range harnessKnownUnaddressable {
 			if !reached[route] {
-				t.Errorf("%s is listed in harnessKnownUnaddressable (%s) but the sweep can address it now; delete the entry", route, reason)
+				t.Errorf("%s is listed in harnessKnownUnaddressable (%s) but the sweep proves something on it now, or it is no longer a tenant-scoped GET route; delete the entry", route, reason)
 			}
+		}
+		// The list may only shrink. Seeding a family lowers the ceiling with it, so a route added to
+		// a family no seed plants yet fails here instead of joining the list unnoticed.
+		if listed := len(harnessKnownUnaddressable); listed > harnessUnaddressableCeiling {
+			t.Errorf("harnessKnownUnaddressable lists %d routes, above its ceiling of %d; seed the new route rather than listing it", listed, harnessUnaddressableCeiling)
+		} else if listed < harnessUnaddressableCeiling {
+			t.Errorf("harnessKnownUnaddressable lists %d routes; lower harnessUnaddressableCeiling from %d to %d so the list cannot grow back", listed, harnessUnaddressableCeiling, listed)
 		}
 		// A seed names the routes it makes serve tenantA's data. One that no longer does, for example
 		// because two seeds built the same service and the later one replaced the earlier, fails by
@@ -1353,12 +1382,54 @@ func TestHostileHarness(t *testing.T) {
 		t.Logf("routes skipped as unwired (%d):\n  %s", len(unwiredRoutes), strings.Join(unwiredRoutes, "\n  "))
 		t.Logf("routes probed but answering tenantA no seeded data (%d):\n  %s", len(vacuousRoutes), strings.Join(vacuousRoutes, "\n  "))
 		t.Logf("routes the sweep cannot address (%d):\n  %s", len(unaddressable), strings.Join(unaddressable, "\n  "))
+		t.Logf("harnessKnownUnaddressable lists %d routes (%d without a value, %d reaching no tenantA record)", len(harnessKnownUnaddressable), len(unaddressable), len(unproven))
 	})
 }
 
-// tenantScopedGETRoutes reads the route table and returns every GET route whose path carries an
-// engagement, project or asset id. Those are the routes that serve one tenant's resource by id, so
-// a caller from another tenant must not be answered with it.
+// harnessGlobalReferencePaths are the path prefixes whose parameter names data every tenant shares.
+// A tenantB caller asking for the same id is answered with the same record, so nothing in the path
+// belongs to tenantA and there is no tenant boundary to probe. Each entry names the code that makes
+// it global. The prefix ends at the parameter's opening brace, so the collection route beside it is
+// not matched, and TestGlobalReferencePathsMatchRegisteredRoutes keeps every entry in use.
+//
+// The recon tool list and the CVSS calculator are global too, but they carry no parameter, so the
+// selection below already leaves them out without an entry here.
+var harnessGlobalReferencePaths = map[string]string{
+	"/api/v1/rules/{": "the rule catalog: getRule (rule_handler.go) asks rules.Service.Get for the key alone, and the " +
+		"catalog is built into the binary, with no tenant in it",
+	"/api/v1/vulnerability/advisories/{": "public advisories: getVulnerabilityAdvisory and the two revision reads " +
+		"(vulnerability_read_handler.go) load the advisory with no tenant (vulnerabilityinteluc.Service.GetAdvisory " +
+		"via advisories.GetCanonical, ListAdvisoryRevisions); only the occurrence summary is per tenant, and it is " +
+		"computed for the caller's own tenant. The reconcile action under the same prefix runs for the tenant in " +
+		"the caller's context (vulnerabilityreconciliation.Service.Start)",
+	"/api/v1/vulnerability/sources/{": "deployment-wide feed configuration: vulnerabilitysource.Source has no tenant, " +
+		"vulnerabilitysourceuc.Service.Get reads a source by id alone, and every route under the prefix is for the " +
+		"platform operator only (rt.requirePlatformAdmin in router.go)",
+}
+
+// isTenantScopedPattern reports whether a registered route pattern names one tenant's resource by id:
+// its path carries a parameter, and that parameter is not global reference data. A caller from
+// another tenant who guesses or copies the id must not be answered with that resource.
+//
+// Selecting on the parameter rather than on a list of parent resources is the point. A resource
+// addressed by its own id (an integration, a SIEM sink, a notification channel) has no engagement,
+// project or asset in its path, and a list of parents misses it.
+func isTenantScopedPattern(pattern string) bool {
+	_, path, _ := strings.Cut(pattern, " ")
+	if !strings.Contains(path, "{") {
+		return false
+	}
+	for prefix := range harnessGlobalReferencePaths {
+		if strings.HasPrefix(path, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+// tenantScopedGETRoutes reads the route table and returns every GET route that serves one tenant's
+// resource by id (isTenantScopedPattern), so a caller from another tenant must not be answered with
+// it.
 func tenantScopedGETRoutes(t *testing.T) []string {
 	t.Helper()
 	var out []string
@@ -1367,12 +1438,31 @@ func tenantScopedGETRoutes(t *testing.T) []string {
 		if !strings.HasPrefix(pattern, "GET ") {
 			continue
 		}
-		if strings.Contains(pattern, "/engagements/{") || strings.Contains(pattern, "/projects/{") || strings.Contains(pattern, "/assets/{") {
+		if isTenantScopedPattern(pattern) {
 			out = append(out, pattern)
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// TestGlobalReferencePathsMatchRegisteredRoutes keeps the global list honest: an entry that matches no
+// registered route with a parameter excludes nothing today, and would silently exclude whatever
+// route is registered under it tomorrow.
+func TestGlobalReferencePathsMatchRegisteredRoutes(t *testing.T) {
+	routes := registeredRoutes(t)
+	for prefix, reason := range harnessGlobalReferencePaths {
+		used := false
+		for _, route := range routes {
+			if _, path, _ := strings.Cut(route.Pattern, " "); strings.HasPrefix(path, prefix) {
+				used = true
+				break
+			}
+		}
+		if !used {
+			t.Errorf("global reference prefix %q (%s) matches no registered route with a parameter; remove the entry", prefix, reason)
+		}
+	}
 }
 
 // harnessPathValues maps a route parameter to the concrete id the harness fixture seeds for it.
@@ -1398,7 +1488,7 @@ func concreteHarnessPath(route string) string {
 			return ""
 		}
 		param := path[open : open+closeAt+1]
-		value, ok := harnessPathValue(param)
+		value, ok := harnessPathValue(route, param)
 		if !ok {
 			return ""
 		}
@@ -1406,16 +1496,82 @@ func concreteHarnessPath(route string) string {
 	}
 }
 
-// harnessKnownUnaddressable lists the tenant-scoped GET routes the sweep cannot address because a
-// path parameter has no value, each with the reason. A route is not allowed to drop out of the sweep
-// unseen: the sweep fails for a route that is missing here, and for an entry it can address now.
-// The routes are grouped by the seed that will plant the record, so removing them touches separate
-// parts of the list.
+// harnessKnownUnaddressable lists the tenant-scoped GET routes the sweep proves nothing on, each with
+// the reason. Either a path parameter has no value, or its value reaches no record of tenantA's (most
+// often "{id}" falling back to the engagement id engA), so tenantA's own request comes back without
+// its data and a tenantB refusal says nothing about a guard. A route is not allowed to drop out of
+// the sweep unseen: the sweep fails for such a route that is missing here, and for an entry it proves
+// something on now. harnessUnaddressableCeiling keeps the list from growing.
+//
+// The routes are grouped by the family whose seed will plant the record, so removing them touches
+// separate parts of the list.
 var harnessKnownUnaddressable = map[string]string{
 	// Planted by the engagement-analysis seeds.
 
 	// Planted by the engagement-data seeds.
+	"GET /api/v1/engagements/{id}/observation-bindings": "the fixture's binding stand-in (harnessObservationBindings) answers every caller with no bindings",
+
+	// Assessment cycles, snapshots, comparisons and relationship candidates (#1702). The fixture
+	// plants cycle-A and snapshot-A for its hand-written checks, but no seed declares their ids, and
+	// no comparison or candidate is planted at all.
+	"GET /api/v1/assessment-cycles/{cycleId}":                                       "assessment cycle family not seeded yet (#1702)",
+	"GET /api/v1/assessment-cycles/{cycleId}/members":                               "assessment cycle family not seeded yet (#1702)",
+	"GET /api/v1/assessment-cycles/{cycleId}/closure-manifests":                     "assessment cycle family not seeded yet (#1702)",
+	"GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}":        "assessment cycle family not seeded yet (#1702)",
+	"GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}/report": "assessment cycle family not seeded yet (#1702)",
+	"GET /api/v1/assessment-snapshots/{snapshotId}":                                 "assessment snapshot family not seeded yet (#1702)",
+	"GET /api/v1/assessment-comparisons/{comparisonId}":                             "assessment comparison family not seeded yet (#1702)",
+	"GET /api/v1/assessment-comparisons/{comparisonId}/items":                       "assessment comparison family not seeded yet (#1702)",
+	"GET /api/v1/assessment-comparisons/{comparisonId}/summary":                     "assessment comparison family not seeded yet (#1702)",
+	"GET /api/v1/assessment-relationship-candidates/{candidateId}":                  "assessment relationship family not seeded yet (#1702)",
+
+	// Notification rules, deliveries and templates (#1702). The notifications seed plants one
+	// engagement setting and one channel; the template routes are not even registered, because the
+	// fixture's notification service has no template store.
+	"GET /api/v1/notifications/rules/{nid}":                        "notification rule family not seeded yet (#1702)",
+	"GET /api/v1/notifications/deliveries/{nid}":                   "notification delivery family not seeded yet (#1702)",
+	"GET /api/v1/notifications/deliveries/{nid}/attempts":          "notification delivery family not seeded yet (#1702)",
+	"GET /api/v1/notifications/templates/{nid}":                    "notification template family not seeded yet (#1702)",
+	"GET /api/v1/notifications/templates/{nid}/versions":           "notification template family not seeded yet (#1702)",
+	"GET /api/v1/notifications/channels/{nid}/template-resolution": "notification template family not seeded yet (#1702)",
+
+	// Ticket metadata (#1702): the ticket workflow the engagement seed wires has no Jira integration.
+	"GET /api/v1/integrations/{integrationID}/jira-metadata":   "ticket metadata family not seeded yet (#1702)",
+	"GET /api/v1/integrations/{integrationID}/ticket-metadata": "ticket metadata family not seeded yet (#1702)",
+
+	// Document publications, links and schedules (#1702): "{id}" falls back to engA, and the
+	// engagement seed's document stand-in (engmiscDocuments) serves engagement and project links only.
+	"GET /api/v1/document-publications/{id}":    "document family not seeded yet (#1702)",
+	"GET /api/v1/document-links/{id}/snapshots": "document family not seeded yet (#1702)",
+	"GET /api/v1/document-schedules/{id}/runs":  "document family not seeded yet (#1702)",
+
+	// Fleet (#1702): "{id}" falls back to engA, which names no agent, key or incident. The fixture's
+	// coverage stand-in knows agent ag1, but it filters by tenant itself, so serving ag1 here would
+	// prove the stand-in rather than a guard; the hand-written fleet checks cover that route.
+	"GET /api/v1/agents/{id}/keys":     "fleet family not seeded yet (#1702)",
+	"GET /api/v1/fleet/agents/{id}":    "fleet family not seeded yet (#1702)",
+	"GET /api/v1/fleet/incidents/{id}": "fleet incident family not seeded yet (#1702)",
+
+	// Scan jobs and users (#1702): "{id}" falls back to engA, which names neither.
+	"GET /api/v1/sca/scans/{id}":        "scan job family not seeded yet (#1702)",
+	"GET /api/v1/users/{id}/oidc-links": "user family not seeded yet (#1702)",
+
+	// Quality gates and profiles (#1702): "{key}" falls back to the project key project-a.
+	"GET /api/v1/quality-gates/{key}":    "quality gate family not seeded yet (#1702)",
+	"GET /api/v1/quality-profiles/{key}": "quality profile family not seeded yet (#1702)",
+
+	// Vulnerability runs and occurrences (#1702): "{id}" falls back to engA, which names no run and
+	// is not an occurrence id at all.
+	"GET /api/v1/vulnerability/occurrences/{id}/assessments": "vulnerability occurrence family not seeded yet (#1702)",
+	"GET /api/v1/vulnerability/occurrences/{id}/transitions": "vulnerability occurrence family not seeded yet (#1702)",
+	"GET /api/v1/vulnerability/reconcile-runs/{id}":          "vulnerability reconcile run family not seeded yet (#1702)",
+	"GET /api/v1/vulnerability/reconcile-runs/{id}/diffs":    "vulnerability reconcile run family not seeded yet (#1702)",
+	"GET /api/v1/vulnerability/sync-runs/{id}":               "vulnerability sync run family not seeded yet (#1702)",
 }
+
+// harnessUnaddressableCeiling is how many routes harnessKnownUnaddressable may list. It only goes
+// down: the seed that takes routes off the list lowers it by as many.
+const harnessUnaddressableCeiling = 34
 
 // The real root Router keeps tenant resolution entirely on the endpoint ID.
 // The hostile harness exercises both directions with an otherwise valid MAC.
