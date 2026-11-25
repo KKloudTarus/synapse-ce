@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/audit"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -363,5 +366,71 @@ func TestAuditRetryLeavesTheCallersTransactionUsable(t *testing.T) {
 
 	if got := auditRowCount(t, pool, target); got != 1 {
 		t.Errorf("audit rows = %d, want 1", got)
+	}
+}
+
+// TestVerifyGlobalAttributesABreakToOneTenantChain is the Postgres half of the contract the domain
+// test VerifyChains covers. Since migration 0085 every v2 row is linked within its own tenant,
+// enforced by audit_chain_link_v2_uniq (tenant_id, previous_hash), so each tenant's chain starts at
+// an empty previous_hash. Reading the table as a single sequence reported a break at the first row
+// of the second tenant, and synapse-verify-restore called every healthy multi-tenant restore
+// tampered. Worse, a forged row produced the same message, so the alarm could not be read.
+//
+// This asserts the half a shared database can carry. It cannot assert that a healthy log verifies,
+// because VerifyGlobal reads the WHOLE table and the suite's database accumulates audit rows from
+// every other test, which is append-only and cannot be cleaned between runs. What it can assert is
+// that a break is attributed to the chain it happened in: before the fix the message named no chain
+// at all, so this fails without it.
+func TestVerifyGlobalAttributesABreakToOneTenantChain(t *testing.T) {
+	pool := auditTxTestPool(t)
+	ctx := context.Background()
+	stamp := time.Now().UTC().Format("150405.000000000")
+	tenant := shared.ID("verify-chains-" + stamp)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, tenant.String()); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	prev := ""
+	for i := 0; i < 2; i++ {
+		action := "verify.chains." + stamp + "." + strconv.Itoa(i)
+		when := at.Add(time.Duration(i) * time.Second)
+		hash := audit.ComputeHash(prev, "operator", action, "t", nil, when)
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version)
+			 VALUES ($1,'operator',$2,'t','{}',$3,$4,$5,2)`,
+			tenant.String(), action, when, hash, prev); err != nil {
+			t.Fatalf("seed audit row: %v", err)
+		}
+		prev = hash
+	}
+
+	// A forged row whose previous_hash points at nothing in its own chain.
+	when := at.Add(time.Hour)
+	forgedAction := "verify.chains.forged." + stamp
+	forged := audit.ComputeHash("deadbeef", "mallory", forgedAction, "t", nil, when)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version)
+		 VALUES ($1,'mallory',$2,'t','{}',$3,$4,'deadbeef',2)`,
+		tenant.String(), forgedAction, when, forged); err != nil {
+		t.Fatalf("forge row: %v", err)
+	}
+
+	report, err := postgres.NewAuditLog(pool).VerifyGlobal(ctx)
+	if err != nil {
+		t.Fatalf("verify global: %v", err)
+	}
+	if report.Intact {
+		t.Fatal("a forged row was reported intact")
+	}
+	// The error has to name the chain. Before the fix it named none, because the table was read as a
+	// single sequence and there was no chain to name.
+	if !strings.Contains(report.Error, "tenant ") && !strings.Contains(report.Error, "legacy global chain") {
+		t.Fatalf("error %q names no chain; an operator cannot tell where to look", report.Error)
+	}
+	// And it has to name THIS one, unless the report had to truncate its list. The suite's database is
+	// shared and append-only, so other tests can leave their own chains broken ahead of this one.
+	if !strings.Contains(report.Error, tenant.String()) && !strings.Contains(report.Error, "further chains are broken") {
+		t.Fatalf("error %q does not name the chain this test broke, and was not truncated", report.Error)
 	}
 }

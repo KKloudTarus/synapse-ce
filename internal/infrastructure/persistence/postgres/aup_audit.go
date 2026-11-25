@@ -165,17 +165,46 @@ func (l *AuditLog) VerifyGlobal(ctx context.Context) (audit.Report, error) {
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.audit_global_read', 'on', true)"); err != nil {
 		return audit.Report{}, fmt.Errorf("global audit verify: enable read: %w", err)
 	}
+	// Read the chain each row belongs to alongside it. The table holds the legacy global chain
+	// written before tenancy and, since migration 0085, one chain per tenant: audit_chain_link_v2_uniq
+	// is (tenant_id, previous_hash), and appendTenantAudit reads its head per tenant. Every one of
+	// those starts at an empty previous_hash, so verifying the rows as a single sequence reported a
+	// break at the first row of the second tenant on every healthy multi-tenant restore.
 	rows, err := tx.Query(ctx,
-		`SELECT actor, action, target, metadata, created_at, hash, previous_hash
+		`SELECT CASE WHEN hash_version = 2 THEN 'tenant ' || COALESCE(tenant_id, '') ELSE 'legacy global chain' END AS chain,
+		        actor, action, target, metadata, created_at, hash, previous_hash
 		   FROM audit_log ORDER BY id ASC`)
 	if err != nil {
 		return audit.Report{}, fmt.Errorf("global audit verify: query: %w", err)
 	}
-	entries, err := scanEntries(rows)
-	if err != nil {
-		return audit.Report{}, err
+	defer rows.Close()
+	chains := map[string][]audit.Record{}
+	for rows.Next() {
+		var chain string
+		var e ports.AuditEntry
+		var meta []byte
+		var hash, previous *string
+		if err := rows.Scan(&chain, &e.Actor, &e.Action, &e.Target, &meta, &e.At, &hash, &previous); err != nil {
+			return audit.Report{}, fmt.Errorf("global audit verify: scan: %w", err)
+		}
+		if len(meta) > 0 {
+			if err := json.Unmarshal(meta, &e.Metadata); err != nil {
+				return audit.Report{}, fmt.Errorf("global audit verify: metadata: %w", err)
+			}
+		}
+		record := audit.Record{Actor: e.Actor, Action: e.Action, Target: e.Target, Metadata: e.Metadata, At: e.At}
+		if hash != nil {
+			record.Hash = *hash
+		}
+		if previous != nil {
+			record.PreviousHash = *previous
+		}
+		chains[chain] = append(chains[chain], record)
 	}
-	return audit.Verify(toRecords(entries)), nil
+	if err := rows.Err(); err != nil {
+		return audit.Report{}, fmt.Errorf("global audit verify: rows: %w", err)
+	}
+	return audit.VerifyChains(chains), nil
 }
 
 // MigrationMetadata returns each migration's latest recorded state in version order.
