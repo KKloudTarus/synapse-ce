@@ -2481,9 +2481,23 @@ export type AgentDetectionClass = 'process' | 'network' | 'file' | 'privilege' |
 /** A finding a third-party tool produced and a pipeline imported through the SARIF route. It is held
  *  apart from first-party findings on purpose: it entered under governance, it cannot promote itself,
  *  and its provenance (tool, version, digest, who imported it) is the point of showing it. */
+/**
+ * How a row's findingId should be read.
+ *
+ * `candidate` is the deduplicator's match on file and line: evidence that an external result and a
+ * first-party finding may describe one issue. `approved` is a person's recorded decision that they do.
+ * Treating a candidate as approved merges two remediation workflows on a coincidence of line number.
+ */
+export type ImportedFindingBinding = 'approved' | 'candidate' | 'none'
+
 export interface ImportedFinding {
   id: string
   findingId: string
+  binding: ImportedFindingBinding
+  /** Set only when binding is 'approved'. */
+  approvedFindingId: string
+  /** The approved binding's version; 0 when there is no approval. */
+  bindingVersion: number
   severity: Severity
   title: string
   message: string
@@ -2501,6 +2515,24 @@ export interface ImportedFinding {
   sourceDigest: string
   ingestedBy: string
   ingestedAt: string
+}
+
+/** One version of an approved observation-to-finding binding (#1184). */
+export interface ObservationBinding {
+  id: string
+  scope: string
+  externalIdentity: string
+  findingId: string
+  observationId: string
+  version: number
+  decidedBy: string
+  reason: string
+  decidedAt: string
+  /** Empty while this version is the one in force. */
+  supersededAt: string
+  current: boolean
+  /** In force, but no observation in the engagement carries its identity any more. */
+  orphaned: boolean
 }
 
 export interface AgentDetectionRecord {

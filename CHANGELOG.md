@@ -9,6 +9,26 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **An external observation no longer merges with a first-party finding on a coincidence of line number (#1184).**
+  The SARIF deduplicator sets an imported finding's `finding_id` when a result lands on the same file and
+  line as a first-party finding, and every reader treated that as a management decision, so two
+  remediation workflows merged with nobody asked. That match is now reported as what it is. The
+  imported-finding read carries `binding`: `approved` when a person recorded the decision, `candidate`
+  for the deduplicator's match, `none` for no link at all, and the console's Imported findings tab shows
+  the three apart and carries an Approve action, so a decision can be recorded without leaving the
+  console. `POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding` records a decision
+  with its actor and a reason, and `GET /api/v1/engagements/{id}/observation-bindings` returns every
+  version, newest first, marking any whose identity no longer matches an observation as `orphaned`. A
+  decision is keyed on the tool and an identity of the result rather than the row id, so it survives
+  re-importing the report: the tool's own fingerprint when it supplies one, otherwise the rule, the
+  location, the column and a digest of the result's words. A result with neither cannot be bound.
+  Attack-path attribution still reads the deduplicator's match directly and is unchanged.
+  Re-approving the same finding is idempotent;
+  approving a different one needs `expected_version`, and a stale value is refused rather than applied.
+  Superseded versions are kept, and the decision itself cannot be rewritten. Migration `0271` adds
+  `observation_finding_bindings` with forced row-level security, composite foreign keys that carry the
+  tenant and the engagement, and a partial unique index that resolves concurrent adoption to one binding.
+
 - **A SARIF import now leaves a durable receipt, and the run id comes back in the response (#1183).**
   Importing a third-party report wrote findings, an audit entry and attribution bindings with no record
   tying them to one run, so a request that failed after the rows landed left no way to tell what had been

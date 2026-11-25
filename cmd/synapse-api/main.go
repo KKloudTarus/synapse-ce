@@ -208,6 +208,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/nugetreach"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/observationbindinguc"
 	offensivepolicyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
@@ -2983,6 +2984,19 @@ func main() {
 		}
 		router.SetSARIFIngest(sarifSvc)
 		router.SetImportedFindings(importedFindingStore)
+		// Approved observation-to-finding bindings (#1184). Without this the imported-finding read reports
+		// every deduplicator match as the candidate it is, which is the honest answer when no decision
+		// record exists. The store is only durable on PostgreSQL, so that is where it is wired.
+		if databasePool != nil {
+			bindingSvc, berr := observationbindinguc.NewService(
+				postgres.NewObservationBindingRepository(databasePool), importedFindingStore, findingRepo, repo, auditLog, clock, ids)
+			if berr != nil {
+				log.Error("observation binding service init failed", "err", berr)
+				os.Exit(1)
+			}
+			router.SetObservationBindings(bindingSvc)
+			log.Info("approved observation-to-finding bindings ENABLED (a deduplicator match stays a candidate until adopted)")
+		}
 		// #423 detection ledger READ routes. The read surface needs only the record store, so it is wired
 		// here (inside the asset-model gate) independently of the agent transport plane. The WRITE/ingest
 		// path (detectledger.NewService → SealOnce into the evidence chain) is wired under FleetEnabled below

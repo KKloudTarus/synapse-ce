@@ -539,6 +539,19 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.inbound_webhook_endpoints') IS NOT NULL").Scan(&inboundInstalled); err != nil {
 		return fmt.Errorf("inspect inbound webhook registry: %w", err)
 	}
+	// A recorded binding decision is append-only in place: migration 0271's trigger refuses to rewrite the
+	// actor or the reason. It deliberately leaves DELETE alone, because a BEFORE DELETE trigger fires for
+	// a cascade too and would make an engagement carrying any binding impossible to delete. Revoking the
+	// privilege draws the line where it belongs: the runtime role cannot erase a decision directly, while
+	// the cascade still runs, because a referential action executes as the table owner and not as the
+	// caller. Measured both ways before choosing it.
+	var observationBindingsInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.observation_finding_bindings') IS NOT NULL").Scan(&observationBindingsInstalled); err != nil {
+		return fmt.Errorf("inspect observation binding store: %w", err)
+	}
+	if observationBindingsInstalled {
+		statements = append(statements, "REVOKE DELETE ON TABLE observation_finding_bindings FROM "+quotedRole)
+	}
 	var scanRunBridgeInstalled bool
 	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.scan_run_engagement_tenants') IS NOT NULL").Scan(&scanRunBridgeInstalled); err != nil {
 		return fmt.Errorf("inspect scan run tenant bridge: %w", err)

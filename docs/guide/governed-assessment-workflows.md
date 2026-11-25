@@ -72,13 +72,56 @@ POST /api/v1/engagements/{id}/sbom            ingest a CycloneDX SBOM
 GET  /api/v1/engagements/{id}/sbom
 POST /api/v1/engagements/{id}/sarif           ingest a third-party SARIF report
 GET  /api/v1/engagements/{id}/imported-findings
+POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding
+GET  /api/v1/engagements/{id}/observation-bindings
 POST /api/v1/engagements/import
 ```
 
 SARIF ingest records the authenticated principal as the ingesting actor and refuses results it cannot
 attribute. Validate a report locally first with
 [`synapse-cli validate-sarif`](cli.md#validate-a-third-party-sarif-report), which reports what the server
-would accept or refuse and persists nothing.
+would accept or refuse and persists nothing. Each import is recorded under a durable receipt, and the
+response carries its id in the `X-Synapse-Import-Run-Id` header; a re-post of the same document resolves
+to the same run.
+
+### A match is not a decision
+
+The deduplicator links an imported result to a first-party finding when the two land on the same file and
+line. That is evidence, so every row in `GET /api/v1/engagements/{id}/imported-findings` says how its
+`finding_id` should be read:
+
+| `binding` | meaning |
+| --- | --- |
+| `candidate` | the deduplicator's location match, and nothing more |
+| `approved` | a person recorded that the two describe one issue |
+| `none` | no link at all |
+
+Record a decision with `POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding`, which
+takes the canonical `finding_id` and a `reason` and stores both with the deciding actor. Re-approving the
+same finding is idempotent. Approving a different one needs `expected_version` naming the version being
+replaced, and a value that is not the one in force is refused rather than applied, so two reviewers
+cannot overwrite each other silently. `GET /api/v1/engagements/{id}/observation-bindings` returns every
+version, newest first, including the superseded ones: a decision that turned out to be wrong is only
+auditable against what it replaced.
+
+A decision is keyed on the producing tool and an identity of the result, not on the stored row, so it
+survives re-importing the report. That identity is the tool's own `partialFingerprints` value when it
+supplies one. When it does not, the identity is derived from the rule, the location, the column and a
+digest of the result's title and message, so two findings a reviewer would read differently never share
+one. The consequence is worth stating plainly: with a fingerprint, the decision follows whatever identity
+the producing tool asserts, and whoever can post a report chooses it. That is the same permission that
+records a binding, so it widens no authority, but a binding is only ever as precise as the identity its
+producer asserts. A result carrying neither a fingerprint nor a rule and a location cannot be bound at
+all; the route refuses it rather than attaching a decision to a key other results share.
+
+A binding in force whose identity no longer matches any observation is reported with `orphaned: true`.
+That happens when a tool changes how it fingerprints a result: the decision is still on record but has
+stopped applying to anything.
+
+One consumer still reads the deduplicator's match directly. When a SARIF import carries `asset_id`, the
+attack-path attribution records the matched first-party finding as a target of that asset, which is a
+location match rather than an approved binding. Filtering that by approval is a change to attack-path
+data and is tracked separately.
 
 To compute vulnerabilities against an imported SBOM, start a scan with an empty target: Synapse reuses the
 imported inventory and runs the detection half of the pipeline.

@@ -2,6 +2,7 @@ import type {
   Finding,
   FindingComment,
   ImportedFinding,
+  ObservationBinding,
   Retest,
   RetestOutcome,
   SLAAssessment,
@@ -16,6 +17,11 @@ export function mapImportedFinding(r: any): ImportedFinding {
   return {
     id: r.id ?? '',
     findingId: r.finding_id ?? '',
+    // A server that predates the binding record sends no field. Defaulting to 'candidate' when a link
+    // exists is the honest read: nothing proves a person approved it.
+    binding: (r.binding ?? (r.finding_id ? 'candidate' : 'none')) as ImportedFinding['binding'],
+    approvedFindingId: r.approved_finding_id ?? '',
+    bindingVersion: r.binding_version ?? 0,
     severity: (r.severity ?? 'unknown') as ImportedFinding['severity'],
     title: r.title ?? '',
     message: r.message ?? '',
@@ -33,6 +39,23 @@ export function mapImportedFinding(r: any): ImportedFinding {
     sourceDigest: r.source_digest ?? '',
     ingestedBy: r.ingested_by ?? '',
     ingestedAt: r.ingested_at ?? '',
+  }
+}
+
+export function mapObservationBinding(r: any): ObservationBinding {
+  return {
+    id: r.id ?? '',
+    scope: r.scope ?? '',
+    externalIdentity: r.external_identity ?? '',
+    findingId: r.finding_id ?? '',
+    observationId: r.observation_id ?? '',
+    version: r.version ?? 0,
+    decidedBy: r.decided_by ?? '',
+    reason: r.reason ?? '',
+    decidedAt: r.decided_at ?? '',
+    supersededAt: r.superseded_at ?? '',
+    current: r.current ?? false,
+    orphaned: r.orphaned ?? false,
   }
 }
 
@@ -207,6 +230,35 @@ export const findingsApi = {
   listImportedFindings: async (engagementId: string): Promise<ImportedFinding[]> => {
     const res = await req(`/engagements/${encodeURIComponent(engagementId)}/imported-findings`)
     return Array.isArray(res) ? res.map(mapImportedFinding) : []
+  },
+
+  // #1184: record that a person decided an imported observation and a canonical finding describe one
+  // issue. Omitting expectedVersion adopts; supplying it replaces the version in force, and a value that
+  // is not the one in force is refused rather than applied.
+  bindObservation: async (
+    engagementId: string,
+    observationId: string,
+    body: { findingId: string; reason: string; expectedVersion?: number },
+  ): Promise<ObservationBinding> =>
+    mapObservationBinding(
+      await req(
+        `/engagements/${encodeURIComponent(engagementId)}/imported-findings/${encodeURIComponent(observationId)}/binding`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            finding_id: body.findingId,
+            reason: body.reason,
+            ...(body.expectedVersion ? { expected_version: body.expectedVersion } : {}),
+          }),
+        },
+      ),
+    ),
+
+  // Every version, newest decision first. Superseded versions are kept so a decision that turned out to
+  // be wrong can be read against the one it replaced.
+  observationBindings: async (engagementId: string): Promise<ObservationBinding[]> => {
+    const res = await req(`/engagements/${encodeURIComponent(engagementId)}/observation-bindings`)
+    return Array.isArray(res) ? res.map(mapObservationBinding) : []
   },
 
   findings: async (engagementId: string): Promise<Finding[]> =>

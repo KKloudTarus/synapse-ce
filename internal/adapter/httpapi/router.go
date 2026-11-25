@@ -136,6 +136,7 @@ type Router struct {
 	retroHunter              retroHunter                // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
 	sarif                    sarifIngester              // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings         sarifReader                // optional read side for imported findings
+	observationBindings      observationBinder          // optional; nil ⇒ every imported link reads as a candidate
 	fleetRolloutAdmin        fleetRolloutService        // optional; nil ⇒ the operator rollout routes are not served
 	offensiveHalt            offensiveKillSwitch        // optional; nil ⇒ the red-team halt route is not served
 	detections               detectionReader            // optional read side for the detection ledger (#423)
@@ -968,6 +969,15 @@ func (rt *Router) routes() *http.ServeMux {
 		// it is: every row carries its provenance and states that it is external and cannot promote
 		// itself, rather than the governance claim being made by a method nothing calls.
 		mux.HandleFunc("GET /api/v1/engagements/{id}/imported-findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listImportedFindings)))
+	}
+	if rt.observationBindings != nil {
+		// Approving an observation onto a canonical finding is an OPERATE action: it decides which
+		// remediation workflow owns the issue. Without this route the deduplicator's location match stays
+		// what it is, a candidate, and the read above says so.
+		mux.HandleFunc("POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.decideObservationBinding)))
+		// The lineage read carries superseded versions too, so a decision that turned out to be wrong can
+		// be audited against what it replaced.
+		mux.HandleFunc("GET /api/v1/engagements/{id}/observation-bindings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listObservationBindings)))
 	}
 	if rt.detections != nil {
 		mux.HandleFunc("GET /api/v1/engagements/{id}/detections", rt.authz(userdom.PermView, rt.withEngTenant(rt.listDetections)))

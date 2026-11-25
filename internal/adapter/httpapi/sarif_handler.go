@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/observationbinding"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
@@ -146,7 +147,27 @@ type importedFindingPayload struct {
 	SourceDigest   string `json:"source_digest"`
 	IngestedBy     string `json:"ingested_by"`
 	IngestedAt     string `json:"ingested_at"`
+	// Binding says what finding_id means on this row (#1184). "approved" is a person's recorded
+	// decision; "candidate" is the deduplicator's location match, which is evidence and not a decision;
+	// "none" is no link at all. finding_id is populated for both of the first two, so a reader that
+	// treats it as authority without reading this field is reading a coincidence of file and line as a
+	// merge of two remediation workflows.
+	Binding string `json:"binding"`
+	// ApprovedFindingID and BindingVersion are set only when Binding is "approved".
+	ApprovedFindingID string `json:"approved_finding_id,omitempty"`
+	BindingVersion    int    `json:"binding_version,omitempty"`
+	// ApprovedObservationID is the row the decision was actually made on. It differs from this row's id
+	// when the report was imported again, because a binding is keyed on an identity that outlives the
+	// row. Surfacing it means an approval inherited from another row is never invisible.
+	ApprovedObservationID string `json:"approved_observation_id,omitempty"`
 }
+
+// Binding states for importedFindingPayload.Binding.
+const (
+	bindingApproved  = "approved"
+	bindingCandidate = "candidate"
+	bindingNone      = "none"
+)
 
 // listImportedFindings returns an engagement's third-party findings.
 func (rt *Router) listImportedFindings(w http.ResponseWriter, r *http.Request) {
@@ -162,9 +183,20 @@ func (rt *Router) listImportedFindings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
+	// The approved bindings for the whole engagement, read once. Without the usecase there are no
+	// decisions on record, so every link below is reported as the candidate it is.
+	var approved map[observationbinding.Identity]observationbinding.Binding
+	if rt.observationBindings != nil {
+		approved, err = rt.observationBindings.Current(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")))
+		if err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+	}
+
 	out := make([]importedFindingPayload, 0, len(findings))
 	for _, f := range findings {
-		out = append(out, importedFindingPayload{
+		payload := importedFindingPayload{
 			ID:             f.ID.String(),
 			FindingID:      f.FindingID.String(),
 			Severity:       string(f.Severity),
@@ -184,7 +216,24 @@ func (rt *Router) listImportedFindings(w http.ResponseWriter, r *http.Request) {
 			SourceDigest:   f.Provenance.SourceDigest,
 			IngestedBy:     f.Provenance.IngestedBy.String(),
 			IngestedAt:     f.Provenance.IngestedAt.UTC().Format(time.RFC3339),
-		})
+		}
+		payload.Binding = bindingNone
+		if !f.FindingID.IsZero() {
+			payload.Binding = bindingCandidate
+		}
+		// Deriving the identity allocates, and an engagement can hold tens of thousands of rows. With no
+		// decision on record there is nothing to look it up in, which is every engagement until someone
+		// approves something, so the whole derivation is skipped.
+		if len(approved) > 0 {
+			identity := observationbinding.Identity{Scope: f.BindingScope(), ExternalIdentity: f.BindingExternalIdentity()}
+			if binding, ok := approved[identity]; ok {
+				payload.Binding = bindingApproved
+				payload.ApprovedFindingID = binding.FindingID.String()
+				payload.BindingVersion = binding.Version
+				payload.ApprovedObservationID = binding.ObservationID.String()
+			}
+		}
+		out = append(out, payload)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
