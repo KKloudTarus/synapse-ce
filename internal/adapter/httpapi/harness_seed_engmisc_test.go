@@ -27,12 +27,16 @@ const (
 	// engmiscDetection is the detection whose provenance the seed plants. Its id carries the marker,
 	// so the transitions route, which echoes it on every row, answers a body only tenantA's row can fill.
 	engmiscDetection = shared.ID("detection-" + engmiscMarker)
+	// engmiscSnapshot is the snapshot the seed plants behind the router's snapshot service, under the
+	// id the hand-written cross-tenant cases already address. Its actor is the marker.
+	engmiscSnapshot = shared.ID("snapshot-A")
 )
 
 func init() {
 	registerHarnessSeed(harnessSeed{
 		Name: "engmisc",
 		Routes: []string{
+			"GET /api/v1/assessment-snapshots/{snapshotId}",
 			"GET /api/v1/engagements/{id}/agent/approvals",
 			"GET /api/v1/engagements/{id}/agent/sessions",
 			"GET /api/v1/engagements/{id}/agent/sessions/{sid}",
@@ -57,7 +61,10 @@ func init() {
 			"GET /api/v1/projects/{key}/source-findings/{fid}/tickets",
 		},
 		PathValues: map[string]string{"{did}": engmiscDetection.String()},
-		Run:        seedEngmisc,
+		RoutePathValues: map[string]map[string]string{
+			"GET /api/v1/assessment-snapshots/{snapshotId}": {"{snapshotId}": engmiscSnapshot.String()},
+		},
+		Run: seedEngmisc,
 	})
 }
 
