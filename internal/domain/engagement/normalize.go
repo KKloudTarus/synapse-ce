@@ -240,7 +240,18 @@ func NormalizeTarget(t Target, scopeEntry bool) (Target, error) {
 			return Target{}, validationError("process scope requires a canonical ProcessEntityID")
 		}
 		out.Value = t.Value
-	case TargetRepo, TargetImage, TargetCloudAccount:
+	case TargetRepo:
+		// A repo value is a URL, an owner/name pair, or a path on the machine running the server. Only
+		// the last one is checked here, and only against locations that can never be a repository: the
+		// scope gate is this server's authorization boundary and the tenant writes the scope, so a value
+		// of "/" would have made the gate agree to anything on the host.
+		if localRepoPath(v) {
+			if refused, ok := unscannablePath(v); ok {
+				return Target{}, validationError("%q cannot be a repository target: %s", v, refused.Why)
+			}
+		}
+		out.Value = v
+	case TargetImage, TargetCloudAccount:
 		out.Value = v
 	default:
 		return Target{}, validationError("unknown scope target kind %q", t.Kind)
