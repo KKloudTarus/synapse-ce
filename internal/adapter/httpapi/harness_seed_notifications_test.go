@@ -28,34 +28,42 @@ const notificationsEngagement = shared.ID("engA")
 
 func init() {
 	notificationSetting := "GET /api/v1/notifications/engagements/{nid}/settings"
+	// "{nid}" names an engagement on the settings route and a channel on the channel routes, so
+	// each route carries its own value.
+	values := map[string]map[string]string{notificationSetting: {"{nid}": notificationsEngagement.String()}}
+	for _, route := range notificationChannelRoutes {
+		values[route] = map[string]string{"{nid}": notificationChannelID.String()}
+	}
 	registerHarnessSeed(harnessSeed{
 		Name: "notifications",
-		Routes: []string{
+		Routes: append([]string{
 			"GET /api/v1/engagements/{assessmentId}/lifecycle",
 			notificationSetting,
-		},
+		}, notificationChannelRoutes...),
 		// The notification service reads the tenant from the request context, as the production auth
 		// middleware sets it, and its repository partitions every row by it. The assessment lifecycle
 		// reads the tenant from the principal and needs nothing bound.
-		TenantBound: []string{notificationSetting},
+		TenantBound: append([]string{notificationSetting}, notificationChannelRoutes...),
 		PathValues: map[string]string{
 			"{assessmentId}": notificationsEngagement.String(),
-			"{nid}":          notificationsEngagement.String(),
 		},
-		Run: seedFB,
+		RoutePathValues: values,
+		Run:             seedFB,
 	})
 }
 
 // seedFB wires the notification service over the real in-memory repository and plants one engagement
-// setting for tenantA. The assessment lifecycle needs no wiring here (see lifecycleCycleMarker).
+// setting and one channel for tenantA. The assessment lifecycle needs no wiring here (see
+// lifecycleCycleMarker).
 func seedFB(w *harnessWorld) []string {
 	w.t.Helper()
-	seedNotificationSettings(w)
-	return []string{notificationsMarker, lifecycleCycleMarker}
+	service, repo := seedNotificationSettings(w)
+	seedNotificationChannel(w, service, repo)
+	return []string{notificationsMarker, lifecycleCycleMarker, notificationChannelMarker}
 }
 
-// notificationsProtector seals nothing: the seed stores no channel, so no secret is ever sealed, but the service
-// refuses to be built without one.
+// notificationsProtector keeps a secret as it is. The seed's one channel is sealed through it, and
+// nothing in the harness opens that secret again, but the service refuses to be built without one.
 type notificationsProtector struct{}
 
 func (notificationsProtector) Seal(plaintext, _ []byte) (string, error) {
@@ -68,13 +76,14 @@ func (notificationsProtector) Open(ciphertext string, _ []byte) ([]byte, error) 
 
 // seedNotificationSettings stores tenantA's override for the engagement engA through the real
 // service, so the row takes the path a request takes, and wires that service into the router. Wiring
-// it also registers the other notification routes; none of them carries an engagement, project or
-// asset id in its path, so the generated sweep does not address them.
+// it also registers the other notification routes; the channel routes are planted by
+// seedNotificationChannel over the same service, and the rest are listed in
+// harnessKnownUnaddressable until a seed plants their rows.
 //
 // The repository keeps one registry of engagements per tenant, and a setting can only be read or
 // written for an engagement registered under the caller's tenant. That registry is the only thing
 // standing between tenantB and the row, because the route has no engagement guard of its own.
-func seedNotificationSettings(w *harnessWorld) {
+func seedNotificationSettings(w *harnessWorld) (*notificationuc.Service, *memory.NotificationRepository) {
 	t := w.t
 	t.Helper()
 	at := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
@@ -92,6 +101,7 @@ func seedNotificationSettings(w *harnessWorld) {
 		t.Fatalf("seed engagement notification setting: %v", err)
 	}
 	w.rt.SetNotifications(service)
+	return service, repo
 }
 
 // notificationsIDs hands out distinct ids, so two rows planted through one use case never collide.

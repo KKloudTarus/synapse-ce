@@ -1,12 +1,15 @@
 package httpapi
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
+	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
@@ -35,6 +38,15 @@ import (
 // names its id in PathValues, and a route the sweep still cannot address fails the test unless
 // harnessKnownUnaddressable lists it with a reason, so no route drops out of the sweep unseen.
 //
+// A parameter name does not say what it names: "{id}" is an engagement under /engagements but an
+// integration under /integrations and a sink under /siem/sinks. A seed whose record sits behind such
+// a shared name declares the id for its own routes in RoutePathValues, which wins over every other
+// value for those routes and leaves the parameter's meaning everywhere else alone:
+//
+//	RoutePathValues: map[string]map[string]string{
+//		"GET /api/v1/integrations/{id}": {"{id}": "integration-A"},
+//	},
+//
 // Rules for a seed:
 //   - It runs before the route table is built, so a rt.SetX call it makes also registers any route
 //     that SetX enables.
@@ -59,6 +71,10 @@ type harnessWorld struct {
 	assets      *memory.AssetStore
 	users       *usersuc.Service
 	audit       *harnessAudit
+	// siem is the store behind the fixture's SIEM service. The fixture wires that service itself,
+	// because its own SIEM checks read a sealed secret back out of this store, so a seed plants a
+	// sink in this store rather than replacing the router's service.
+	siem *siemuc.Memory
 
 	// state carries what one seed leaves for another. Some services take their stores only through
 	// their constructor, so two seeds cannot each build one without the later replacing the earlier
@@ -86,6 +102,12 @@ type harnessSeed struct {
 	// route as unaddressable; a seed that plants the record names the id here instead of every id
 	// living in harnessPathValues.
 	PathValues map[string]string
+	// RoutePathValues maps a route pattern, exactly as the route table registers it, to the value of
+	// each parameter on that route, braces included. A value here takes precedence over
+	// harnessPathValues and over every seed's PathValues, for that route only. The sweep fails for
+	// a value declared on a route the table does not register, or for a parameter the route does not
+	// carry, so a renamed route cannot leave its value behind unseen.
+	RoutePathValues map[string]map[string]string
 	// ForeignDenied lists routes whose response carries nothing that names the tenant, so a marker
 	// check cannot tell tenantA's data from tenantB's. For those the sweep requires the route to
 	// refuse a foreign caller with 403 or 404, which proves the guard instead of the data.
@@ -162,9 +184,15 @@ func harnessForeignDeniedRoutes() map[string]bool {
 	return out
 }
 
-// harnessPathValue returns the id the sweep substitutes for a route parameter: the fixture's own
-// value first, then the one a seed declared for the record it planted.
-func harnessPathValue(param string) (string, bool) {
+// harnessPathValue returns the id the sweep substitutes for a parameter of route: a value a seed
+// declared for that route first, then the fixture's own value, then the one a seed declared for the
+// parameter on every route.
+func harnessPathValue(route, param string) (string, bool) {
+	for _, seed := range sortedHarnessSeeds() {
+		if value, ok := seed.RoutePathValues[route][param]; ok {
+			return value, true
+		}
+	}
 	if value, ok := harnessPathValues[param]; ok {
 		return value, true
 	}
@@ -174,4 +202,25 @@ func harnessPathValue(param string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// harnessRoutePathValueProblems names every route-specific value a seed declared on a route the
+// table does not register, or for a parameter that route does not carry.
+func harnessRoutePathValueProblems(registered map[string]bool) []string {
+	var problems []string
+	for _, seed := range sortedHarnessSeeds() {
+		for route, values := range seed.RoutePathValues {
+			if !registered[route] {
+				problems = append(problems, fmt.Sprintf("seed %q declares a path value for %s, which the route table does not register", seed.Name, route))
+				continue
+			}
+			for param := range values {
+				if !strings.Contains(route, param) {
+					problems = append(problems, fmt.Sprintf("seed %q declares %s for %s, which carries no such parameter", seed.Name, param, route))
+				}
+			}
+		}
+	}
+	sort.Strings(problems)
+	return problems
 }
