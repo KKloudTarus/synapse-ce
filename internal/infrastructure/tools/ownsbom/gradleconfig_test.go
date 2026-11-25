@@ -38,7 +38,7 @@ func TestGradleParsersShareTheTestConfigurationRule(t *testing.T) {
 		}
 	}
 	for _, name := range test {
-		t.Run(name, func(t *testing.T) { check(t, name, sbom.ScopeDevelopment) })
+		t.Run(name, func(t *testing.T) { check(t, name, sbom.ScopeTest) })
 	}
 	for _, name := range prod {
 		t.Run(name, func(t *testing.T) { check(t, name, sbom.ScopeProduction) })

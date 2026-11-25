@@ -103,6 +103,25 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- **A Gradle dependency used only by test configurations is now test scope, as a Maven
+  `<scope>test</scope>` dependency is, so the gate exempts it. This can change an exit code
+  (#1692).** Both Gradle parsers gave such a dependency development scope, which `--fail-on`
+  counts, while the Maven parser gives a test-scope dependency test scope, which it exempts, so the
+  same test-only `junit:junit:4.12` failed the gate in a Gradle build and passed it in a Maven one. A
+  coordinate a build script declares only under test configurations (`testImplementation`,
+  `testRuntimeOnly`, `androidTestImplementation`, `kaptTest`, their build-type and flavor variants,
+  and custom test suites such as `integrationTestImplementation` and `functionalTestImplementation`),
+  and a module a `gradle.lockfile` resolves only on test classpaths, is now test scope. A scan whose
+  only gating finding is on such a dependency now exits 0: the finding is still reported, and stderr
+  counts it as a background/test-scope finding exempt from the gate; its impact is `background` and
+  its priority drops from P4 to P5. `--include-test` gates it again. A dependency that a
+  production configuration also names, in the same build script or in another module, stays
+  production. Measured with `scan --json --fail-on low`: a `build.gradle`
+  holding only `testImplementation 'junit:junit:4.12'` exited 1 and now exits 0, and 1 with
+  `--include-test`; the same holds for `integrationTestImplementation`; two modules declaring junit
+  under `testImplementation` and `implementation` exit 1 in either walk order. The owned producer
+  version is `ownsbom/0.11.0`, so SBOMs cached under the previous version are not reused.
+
 - New DAST public-artifact proofs use v3 and include the version in the proof
   hash. Existing v1 and v2 proofs remain verifiable. In a mixed-version rollout,
   update proof readers and verifiers before deploying producers that emit v3 (#1638).
@@ -140,8 +159,9 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   configurations, the lockfile's: a configuration is a test configuration when a word of its name is
   `test` or `tests`, and not when one is `fixtures`. A custom test suite declared in a build script
   (`integrationTestImplementation`, `functionalTestImplementation`, Kotlin Multiplatform's
-  `jvmTestImplementation`) is therefore development scope, as its lockfile classpath already was,
-  instead of production; development scope gates, so that change alters no exit code. The owned
+  `jvmTestImplementation`) is therefore a test configuration in both parsers, as its lockfile
+  classpath already was, instead of production (the scope it gets is in the Gradle test scope entry
+  under Changed). The owned
   producer version is `ownsbom/0.10.0`, so SBOMs cached under the previous version are not reused.
 
 - **A `gradle.lockfile` is now read, and a lockfile that was never read no longer makes a scan
@@ -151,7 +171,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   supported manifest was found. Beside a `build.gradle` it reported only the direct dependencies and
   stayed confident, which is where the "generate a lockfile" advice led. The owned producer now reads
   each locked module as a `pkg:maven` component, merged with the build script's own coordinates, and
-  gives a module development scope, the scope an npm `devDependency` gets, only when every
+  gives a module test scope (#1692; development before that) only when every
   configuration it was resolved in is a test classpath (`testRuntimeClasspath`,
   `debugUnitTestRuntimeClasspath`, ...; a name that merely contains the letters "test", such as
   `latestRuntimeClasspath`, is production, and so are the `testFixtures` classpaths). A file in which no line is a
@@ -318,7 +338,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 - **Three lexical rules read their context (#1638).** A Terraform provider checksum in a lockfile is no longer reported as a high-entropy secret, while a real credential elsewhere in the same file still is. The Python redundant-`u`-prefix rule counts the letter only where it opens a string literal, so `subprocess.run(["date", "-u"], check=True)` no longer reports. A secret-named key assigned a hostname is an endpoint mapping, in test and production scope alike.
 
-- **A Gradle dependency declared under a test configuration is development scope, not production (#1665).** Every coordinate in a `build.gradle` or `build.gradle.kts` `dependencies { }` block was scoped as production, so `testImplementation 'junit:junit:4.12'` was reported like a runtime dependency. A coordinate declared under `testImplementation`, `testApi`, `testCompileOnly`, `testRuntimeOnly`, `testAnnotationProcessor`, `testCompile`, `testRuntime`, `kaptTest`, `kspTest`, `androidTestImplementation` and the other `androidTest*` configurations, or their build-type, flavor and Android-variant forms (`debugAndroidTestImplementation`, `testDebugImplementation`), now gets the scope an npm `devDependency` gets, in Groovy and Kotlin DSL alike, including `testImplementation platform(...)` and `"testImplementation"("g:a:1")`. A name that only contains the letters, such as `latestImplementation` or `testing`, stays production, and so do `testFixtures*` (published with the module); custom suites such as `integrationTestImplementation` became development scope later (#1692). Within one build script, a coordinate also declared under a production configuration is production whatever the order. The gate does not change: a vulnerable test dependency still fails `--fail-on`, exactly as an npm devDependency does. The scope shows in the SBOM and the report, and the finding's priority reflects it (for `junit:junit:4.12`, P3 becomes P4).
+- **A Gradle dependency declared under a test configuration is development scope, not production (#1665).** Every coordinate in a `build.gradle` or `build.gradle.kts` `dependencies { }` block was scoped as production, so `testImplementation 'junit:junit:4.12'` was reported like a runtime dependency. A coordinate declared under `testImplementation`, `testApi`, `testCompileOnly`, `testRuntimeOnly`, `testAnnotationProcessor`, `testCompile`, `testRuntime`, `kaptTest`, `kspTest`, `androidTestImplementation` and the other `androidTest*` configurations, or their build-type, flavor and Android-variant forms (`debugAndroidTestImplementation`, `testDebugImplementation`), now gets the scope an npm `devDependency` gets, in Groovy and Kotlin DSL alike, including `testImplementation platform(...)` and `"testImplementation"("g:a:1")`. A name that only contains the letters, such as `latestImplementation` or `testing`, stays production, and so do `testFixtures*` (published with the module); custom suites such as `integrationTestImplementation` became development scope later (#1692). Within one build script, a coordinate also declared under a production configuration is production whatever the order. These dependencies are now test scope and gate-exempt, which can change an exit code (#1692, under Changed). The scope shows in the SBOM and the report, and the finding's priority reflects it (for `junit:junit:4.12`, P3 became P4, and test scope makes it P5).
 
 ### Added
 

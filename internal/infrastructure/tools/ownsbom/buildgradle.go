@@ -21,7 +21,7 @@ import (
 // PURL, so overlap with the resolver/catalog is merged rather than double-counted. A coordinate declared
 // under a test configuration (testImplementation, androidTestImplementation, kaptTest,
 // integrationTestImplementation, ...; gradleTestConfiguration decides, for the lockfile parser too) gets
-// gradleTestScope, development; every other declaration is production.
+// gradleTestScope, test; every other declaration is production.
 type BuildGradle struct{}
 
 // Ecosystem identifies this parser's package ecosystem (Gradle deps are Maven coordinates).
