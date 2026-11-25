@@ -105,7 +105,7 @@ func (GradleLockfile) Parse(ctx context.Context, in ParseInput) ([]sbom.Componen
 		l := byPURL[purl]
 		l.comp.Scope = sbom.ScopeProduction
 		if l.testOnly {
-			l.comp.Scope = sbom.ScopeDevelopment
+			l.comp.Scope = gradleTestScope
 		}
 		comps = append(comps, l.comp)
 	}
@@ -133,9 +133,8 @@ func splitGradleLockCoord(s string) (group, artifact, version string, ok bool) {
 // so it stays production; a module with no configuration listed cannot be shown to be test-only, so it also
 // stays production. Both default to the side that never hides a dependency.
 //
-// A test classpath is scoped development: the scope an npm devDependency gets and the one the build-script
-// parser gives a testImplementation declaration. Development scope is not exempt from the gate, so classifying a
-// module here never hides it from --fail-on.
+// Whether a classpath is a test classpath is gradleTestConfiguration's call, the same rule the build-script
+// parser applies to a declaration, and a test-only module gets the same scope (gradleTestScope) from both.
 func gradleTestOnly(configs string) bool {
 	n := 0
 	for _, c := range strings.Split(configs, ",") {
@@ -149,59 +148,4 @@ func gradleTestOnly(configs string) bool {
 		n++
 	}
 	return n > 0
-}
-
-// gradleTestConfiguration reports whether a Gradle configuration name is a test classpath. Gradle names are
-// camelCase compositions (testCompileClasspath, debugUnitTestRuntimeClasspath, integrationTestRuntimeClasspath),
-// so the name is split into its words and counts as a test configuration when one of them is exactly "test" or "tests". Matching the word, not the substring, is the point: a source set
-// called "latest" yields latestRuntimeClasspath, which contains the letters "test" and is production.
-//
-// The testFixtures classpaths are not test configurations: java-test-fixtures publishes those dependencies with
-// the module for other modules' tests, so they are not private to this module's tests. The build-script parser
-// makes the same call for testFixturesImplementation.
-func gradleTestConfiguration(name string) bool {
-	isTest := false
-	for _, w := range camelCaseWords(name) {
-		switch w {
-		case "fixtures":
-			return false
-		case "test", "tests":
-			isTest = true
-		}
-	}
-	return isTest
-}
-
-// camelCaseWords splits an identifier into lower-cased words at lower-to-upper transitions, at the end of an
-// acronym (UITest -> UI, Test), at letter/digit transitions, and at any non-alphanumeric character.
-func camelCaseWords(s string) []string {
-	rs := []rune(s)
-	var words []string
-	start := -1
-	flush := func(end int) {
-		if start >= 0 && end > start {
-			words = append(words, strings.ToLower(string(rs[start:end])))
-		}
-		start = -1
-	}
-	for i, r := range rs {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			flush(i)
-			continue
-		}
-		if start < 0 {
-			start = i
-			continue
-		}
-		prev := rs[i-1]
-		boundary := unicode.IsDigit(prev) != unicode.IsDigit(r) ||
-			(unicode.IsLower(prev) && unicode.IsUpper(r)) ||
-			(unicode.IsUpper(prev) && unicode.IsUpper(r) && i+1 < len(rs) && unicode.IsLower(rs[i+1]))
-		if boundary {
-			flush(i)
-			start = i
-		}
-	}
-	flush(len(rs))
-	return words
 }

@@ -125,3 +125,26 @@ func TestDedupeComponentsAnonymousNotMerged(t *testing.T) {
 		t.Fatalf("unidentifiable components must be kept as-is, got %d", len(out))
 	}
 }
+
+// The same package reached from a test-only manifest and from a shipping one is production whichever copy
+// came first (#1692), and its Location names the manifest that made it production, so the pair still says
+// where the classification came from.
+func TestDedupeComponentsShippingCopyDecidesScope(t *testing.T) {
+	testCopy := Component{Name: "junit", Version: "4.12", PURL: "pkg:maven/junit/junit@4.12", Scope: ScopeTest, Location: "a/pom.xml"}
+	prodCopy := Component{Name: "junit", Version: "4.12", PURL: "pkg:maven/junit/junit@4.12", Scope: ScopeProduction, Location: "b/pom.xml"}
+	for name, in := range map[string][]Component{
+		"test copy first":       {testCopy, prodCopy},
+		"production copy first": {prodCopy, testCopy},
+	} {
+		out := DedupeComponents(in)
+		if len(out) != 1 {
+			t.Fatalf("%s: want one component, got %+v", name, out)
+		}
+		if out[0].Scope != ScopeProduction || out[0].Location != "b/pom.xml" {
+			t.Errorf("%s: scope=%q location=%q, want production from b/pom.xml", name, out[0].Scope, out[0].Location)
+		}
+		if !reflect.DeepEqual(out[0].Locations, []string{"a/pom.xml", "b/pom.xml"}) {
+			t.Errorf("%s: both manifests stay listed, got %v", name, out[0].Locations)
+		}
+	}
+}

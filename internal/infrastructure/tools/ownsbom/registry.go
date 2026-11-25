@@ -27,7 +27,10 @@ const (
 	// 0.8.0: Composer/Mix/Julia/renv/Dart now emit dependency edges (EPIC #1034, #1036).
 	// 0.9.0: gradle.lockfile is parsed. The bump matters beyond provenance: an SBOM cached under 0.8.0 for a tree
 	// holding a gradle.lockfile has no components from it, and the cache key includes this version.
-	ownsbomVersion = "ownsbom/0.9.0"
+	// 0.10.0: a component named by several manifests takes the scope sbom.MergeScope picks, not the first
+	// manifest's, and a build script's custom test suite is a test configuration (#1692). An SBOM cached under
+	// 0.9.0 would keep the walk-order scope.
+	ownsbomVersion = "ownsbom/0.10.0"
 	// maxManifestBytes caps a single manifest read so a hostile/corrupt repo cannot OOM the scan with an
 	// absurd file. Real manifests are KB–low-MB; exceeding this is malicious or wrong, so it fails loud.
 	maxManifestBytes = 64 << 20
@@ -164,13 +167,15 @@ func (r *Registry) MarkerEcosystems() map[string]string {
 // merges the fragments into a normalized SBOM. Manifests are matched by basename (case-insensitive);
 // unknown files and dependency-cache/VCS directories (node_modules, vendor,.git, …) are skipped. A
 // manifest that fails to parse fails the whole scan with its path (fail-loud – a silently-dropped
-// manifest is undercounted risk). Components are de-duplicated by identity (PURL, else name@version);
-// edges are concatenated. Hardened against a hostile tree: non-regular files are skipped (no symlink
+// manifest is undercounted risk). Components are de-duplicated by identity (PURL, else name@version): the
+// first copy is kept and sbom.MergeScope decides its scope across every copy, so a package one manifest
+// declares for production is production even when a test-only declaration was walked first (#1692). Edges
+// are concatenated. Hardened against a hostile tree: non-regular files are skipped (no symlink
 // escape), each manifest is size-capped, and the total manifest count is bounded.
 func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, error) {
 	var comps []sbom.Component
 	var deps []sbom.Dependency
-	seen := map[string]bool{}
+	index := map[string]int{} // component identity -> position in comps
 	walkErr := r.walkManifests(ctx, targetRef, func(path string, parser EcosystemParser) error {
 		content, err := os.ReadFile(path) // #nosec G304 -- WalkDir entry under the target root, re-verified regular (non-symlink) via Lstat immediately above
 		if err != nil {
@@ -182,10 +187,16 @@ func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, 
 		}
 		for _, c := range pcomps {
 			id := sbom.ComponentID(c.Name, c.Version, c.PURL)
-			if seen[id] {
+			if i, dup := index[id]; dup {
+				// The first copy stays the component, but not its scope: the walk reached its manifest first
+				// because of the directory names, which says nothing about how the dependency is used. Location
+				// follows the scope, since it names the manifest the scope came from.
+				if scope := sbom.MergeScope(comps[i].Scope, c.Scope); scope != comps[i].Scope {
+					comps[i].Scope, comps[i].Location = scope, c.Location
+				}
 				continue
 			}
-			seen[id] = true
+			index[id] = len(comps)
 			c.Supplier, c.SupplierSource = sbom.SupplierWithSource(c.Supplier, c.PURL)
 			comps = append(comps, c)
 		}

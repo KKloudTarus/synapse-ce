@@ -11,7 +11,8 @@ package sbom
 // the rare PURL-less entry. Components with no identity at all (no PURL, no name+version) are kept
 // as-is. The first occurrence wins for scalar fields; a later occurrence only FILLS values the first
 // left empty (license list, location, layer, license provenance) – so merging a licensed entry with
-// an empty one yields the licensed result and never drops information.
+// an empty one yields the licensed result and never drops information. Scope is the exception:
+// MergeScope decides it, so a shipping copy is never hidden behind a test-only one that came first.
 //
 // Layer note (Epic D): identity intentionally does NOT include LayerID – the phantom-UNKNOWN twin is
 // precisely a same-package entry with an empty LayerID, so keying on layer would stop the merge and
@@ -51,23 +52,27 @@ func componentIdentity(c Component) string {
 
 // mergeComponents folds src into dst: licenses are unioned (deduped), and any scalar field dst left
 // empty is filled from src. dst (the earlier occurrence) otherwise wins, keeping the result stable
-// and order-preserving.
+// and order-preserving, except for the scope (and the Location that records it), which MergeScope
+// decides.
 func mergeComponents(dst, src Component) Component {
 	dst.Licenses = unionLicenses(dst.Licenses, src.Licenses)
 	dst.Locations = uniqueSorted(append(append(append([]string(nil), dst.Locations...), dst.Location), append(append([]string(nil), src.Locations...), src.Location)...))
 	if dst.CPE == "" {
 		dst.CPE = src.CPE
 	}
+	// Scope is not decided by position: which copy came first is input order, not a fact about the package.
+	// Location moves with the scope because it names the manifest the scope was derived from.
+	if scope := MergeScope(dst.Scope, src.Scope); scope != dst.Scope {
+		dst.Scope = scope
+		if src.Location != "" {
+			dst.Location = src.Location
+		}
+	}
 	if dst.Location == "" {
 		dst.Location = src.Location
 	}
 	if dst.Location == "" && len(dst.Locations) > 0 {
 		dst.Location = dst.Locations[0]
-	}
-	if dst.Scope == "" || dst.Scope == ScopeUnknown {
-		if src.Scope != "" && src.Scope != ScopeUnknown {
-			dst.Scope = src.Scope
-		}
 	}
 	if dst.LayerID == "" {
 		dst.LayerID = src.LayerID

@@ -57,19 +57,25 @@ func parsePomComponents(data []byte) []sbom.Component {
 		}
 		return v
 	}
-	seen := map[string]bool{}
+	seen := map[string]int{} // group:artifact@version -> position in out
 	var out []sbom.Component
-	add := func(d pomDependency, scope string) {
+	// declared is true for a <dependencies> entry. Two declarations of one coordinate merge their scopes with
+	// sbom.MergeScope, so the order they are written in does not decide whether it ships; a dependencyManagement
+	// entry only pins a version, so it never changes the scope of a declared dependency.
+	add := func(d pomDependency, scope string, declared bool) {
 		g, a := strings.TrimSpace(d.GroupID), strings.TrimSpace(d.ArtifactID)
 		if g == "" || a == "" {
 			return
 		}
 		ver := resolve(d.Version)
 		key := g + ":" + a + "@" + ver
-		if seen[key] {
+		if i, dup := seen[key]; dup {
+			if declared {
+				out[i].Scope = sbom.MergeScope(out[i].Scope, scope)
+			}
 			return
 		}
-		seen[key] = true
+		seen[key] = len(out)
 		comp := sbom.Component{
 			Name:    g + ":" + a,
 			Version: ver,
@@ -87,10 +93,10 @@ func parsePomComponents(data []byte) []sbom.Component {
 		} else if strings.EqualFold(d.Scope, "provided") {
 			sc = sbom.ScopeDevelopment
 		}
-		add(d, sc)
+		add(d, sc, true)
 	}
 	for _, d := range p.DependencyManagement.Dependencies.Dependency {
-		add(d, sbom.ScopeProduction)
+		add(d, sbom.ScopeProduction, false)
 	}
 	return out
 }

@@ -19,8 +19,9 @@ import (
 // `buildscript { }` (build-plugin classpath) are ignored – those are build-time tooling, not runtime
 // artifacts. Gradle uses Maven coordinates, so the components are pkg:maven PURLs; the registry dedups by
 // PURL, so overlap with the resolver/catalog is merged rather than double-counted. A coordinate declared
-// under a test configuration (testImplementation, androidTestImplementation, kaptTest, ...) is development scope,
-// the scope an npm devDependency gets; every other declaration is production.
+// under a test configuration (testImplementation, androidTestImplementation, kaptTest,
+// integrationTestImplementation, ...; gradleTestConfiguration decides, for the lockfile parser too) gets
+// gradleTestScope, development; every other declaration is production.
 type BuildGradle struct{}
 
 // Ecosystem identifies this parser's package ecosystem (Gradle deps are Maven coordinates).
@@ -45,37 +46,6 @@ func (BuildGradle) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []
 // rejected by the digit-lead requirement.
 var concreteVersionRE = regexp.MustCompile(`^[0-9][A-Za-z0-9_.-]*$`)
 
-// testConfigurationRE matches, on the WHOLE name, the dependency configurations Gradle and the Android and
-// kapt/ksp plugins create for a test source set. A name is matched structurally and not by substring, so a
-// custom configuration that merely contains "test" (latestImplementation, testing) is left alone. Forms:
-//   - <marker>[Variant]<Kind>: the marker is the unit-test source set ("test"), the instrumented one
-//     ("androidTest") or a build-type/flavor prefix on either Android test variant ("debugAndroidTest",
-//     "freeReleaseUnitTest"); Variant is the capitalised build-type/flavor words that may follow it
-//     (testDebugImplementation); Kind is the declaration kind, including the pre-Gradle-7 compile/runtime.
-//   - kapt/ksp name the processor configuration after the source set it serves: kaptTest, kaptAndroidTest,
-//     kspTestDebug.
-//   - androidTestUtil, the instrumented-test helper APKs.
-//
-// A custom test suite (integrationTestImplementation) is not matched: nothing in its name proves it is not
-// shipped, and a name wrongly read as test-only would hide a production dependency from the gate.
-var testConfigurationRE = regexp.MustCompile(`^(?:` +
-	`(?:test|androidTest|[a-z][A-Za-z0-9]*(?:Android|Unit)Test)(?:[A-Z][A-Za-z0-9]*)?` +
-	`(?:Api|Implementation|CompileOnly|CompileOnlyApi|RuntimeOnly|AnnotationProcessor|Compile|Runtime)` +
-	`|(?:kapt|ksp)(?:[A-Z][A-Za-z0-9]*)?(?:Android|Unit)?Test(?:[A-Z][A-Za-z0-9]*)?` +
-	`|androidTestUtil` +
-	`)$`)
-
-// isTestConfiguration reports whether a dependency declared under this configuration name is test-only.
-// The testFixtures family is deliberately NOT test-only: java-test-fixtures publishes those dependencies
-// with the module and hands them to every consumer's test classpath, so they are API of the published
-// artifact and not private to this module's tests.
-func isTestConfiguration(name string) bool {
-	if strings.Contains(strings.ToLower(name), "fixtures") {
-		return false
-	}
-	return testConfigurationRE.MatchString(name)
-}
-
 // ParseBuildGradleDeps extracts inline Maven coordinates (with a literal version) from a Gradle build
 // script's dependencies { } block(s). It is a small comment- and string-aware scanner that tracks a stack
 // of enclosing block names, so a coordinate is emitted only when it sits inside a `dependencies { }` that
@@ -84,7 +54,8 @@ func isTestConfiguration(name string) bool {
 // Each coordinate is scoped by the configuration it is declared under: the first identifier of its
 // statement (`testImplementation` in `testImplementation platform('g:a:1')`, or the quoted name in the Kotlin
 // DSL's `"testImplementation"("g:a:1")`). A coordinate declared both ways is production whatever the order,
-// because it ships: dropping the production declaration would lose it from the gate.
+// because it ships: dropping the production declaration would lose it from the gate (sbom.MergeScope, the
+// rule every merge of two copies of a component follows).
 func ParseBuildGradleDeps(data []byte) []sbom.Component {
 	var out []sbom.Component
 	at := map[string]int{} // group:artifact@version -> index in out
@@ -95,13 +66,11 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 		}
 		scope := sbom.ScopeProduction
 		if test {
-			scope = sbom.ScopeDevelopment
+			scope = gradleTestScope
 		}
 		key := group + ":" + artifact + "@" + ver
 		if i, dup := at[key]; dup {
-			if scope == sbom.ScopeProduction {
-				out[i].Scope = scope
-			}
+			out[i].Scope = sbom.MergeScope(out[i].Scope, scope)
 			return
 		}
 		at[key] = len(out)
@@ -159,7 +128,7 @@ func ParseBuildGradleDeps(data []byte) []sbom.Component {
 					head = content // a statement opened by a string: the Kotlin DSL's "configuration"(...)
 				}
 				if inRuntimeDeps(stack) {
-					collect(content, isTestConfiguration(head))
+					collect(content, gradleTestConfiguration(head))
 				}
 				lastSig = c
 				quote = 0
