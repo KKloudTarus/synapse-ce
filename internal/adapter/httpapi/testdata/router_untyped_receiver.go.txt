@@ -1,0 +1,12 @@
+package httpapi
+
+import "net/http"
+
+func (rt *Router) routes(mux *http.ServeMux) {
+	rt.side.HandleFunc("GET /field", rt.handler)
+	built := buildMux()
+	built.HandleFunc("GET /built", rt.handler)
+	undeclared.HandleFunc("GET /undeclared", rt.handler)
+	register := mux.HandleFunc
+	register("GET /method-value", rt.handler)
+}

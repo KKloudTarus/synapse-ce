@@ -1,0 +1,28 @@
+package httpapi
+
+import "net/http"
+
+var shared = http.NewServeMux()
+
+func (rt *Router) register(m *http.ServeMux) {
+	m.HandleFunc("GET /param", rt.authz(perm, rt.handler))
+}
+
+func (rt *Router) Handler() http.Handler {
+	top := http.NewServeMux()
+	top.HandleFunc("POST /local", rt.handler)
+	var value http.ServeMux
+	value.Handle("GET /value", someHandler)
+	allocated := new(http.ServeMux)
+	allocated.HandleFunc("GET /new", rt.handler)
+	literal := &http.ServeMux{}
+	literal.HandleFunc("GET /literal", rt.handler)
+	alias := top
+	alias.HandleFunc("GET /alias", rt.handler)
+	shared.HandleFunc("GET /file-level", rt.handler)
+	http.HandleFunc("GET /default", rt.handler)
+	func(inner *http.ServeMux) {
+		inner.HandleFunc("GET /closure", rt.handler)
+	}(top)
+	return top
+}

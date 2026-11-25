@@ -51,10 +51,8 @@ func TestMultipartRoutesCarryAnUploadCeiling(t *testing.T) {
 // would have caught POST /api/v1/engagements/{id}/vex, which reads 8 MiB through readBounded and
 // therefore never matched a pattern looking only for http.MaxBytesReader.
 func TestEveryBoundedHandlerFitsItsRouteCeiling(t *testing.T) {
-	routes, err := ParseRouteRegistrations("router.go")
-	if err != nil {
-		t.Fatalf("read the route table: %v", err)
-	}
+	// The human mux only: limitRequestBody wraps the human chain, not the outer mux in front of it.
+	routes := registeredRoutes(t)
 	routerSource, err := os.ReadFile("router.go")
 	if err != nil {
 		t.Fatal(err)

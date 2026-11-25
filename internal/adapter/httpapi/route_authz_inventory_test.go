@@ -38,13 +38,11 @@ var publicRoutePatterns = map[string]string{
 // registeredRoutes parses router.go into the routes it actually registers. Parsing rather than
 // matching text is what makes the guards below hard to fool: a registration written across several
 // lines, one built with mux.Handle, or a line that merely mentions rt.authz in a comment all read
-// correctly, and a form the parser does not model is a failure rather than a silent skip.
+// correctly, and a form the parser does not model is a failure rather than a silent skip. The outer
+// mux Router.Handler builds is left out here: TestEveryNonHumanRouteHasAReasonedEntry reads it.
 func registeredRoutes(t *testing.T) []RouteRegistration {
 	t.Helper()
-	routes, err := ParseRouteRegistrations("router.go")
-	if err != nil {
-		t.Fatalf("read the route table: %v", err)
-	}
+	routes, _ := routerRegistrations(t)
 	if len(routes) < 100 {
 		t.Fatalf("found %d route registrations; the inventory is no longer reading the route table", len(routes))
 	}

@@ -286,8 +286,9 @@ var humanRouteFiles = []string{
 	"jira_webhook_admin.go",
 }
 
-// nonHumanRouteFiles register on a different plane and are guarded by that plane's own tests:
-// the agent fleet mux and the egress-broker listener.
+// nonHumanRouteFiles register on a different plane: the agent fleet mux and the egress-broker
+// listener. Listing a file here does not exempt it from the inventory: every registration in it must
+// have an entry in nonHumanRoutes (TestEveryNonHumanRouteHasAReasonedEntry).
 var nonHumanRouteFiles = []string{"fleet_handler.go", "egress_grant_handler.go"}
 
 // A file that registers routes and is in neither list is a file whose routes no guard test reads.

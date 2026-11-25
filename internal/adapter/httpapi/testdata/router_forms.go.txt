@@ -1,6 +1,8 @@
 package httpapi
 
-func (rt *Router) routes() {
+import "net/http"
+
+func (rt *Router) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /guarded", rt.authz(perm, rt.handler))
 	mux.HandleFunc("GET /public", rt.handler)
 	// A comment that mentions rt.authz( must not make the next line look guarded.
