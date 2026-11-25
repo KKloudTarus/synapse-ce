@@ -659,7 +659,20 @@ export function HostDetail() {
   const { data: me } = useFetch(() => api.me(), { deps: [] })
   const canOperate = me?.role === 'admin' || me?.role === 'consultant' || me?.role === 'member'
 
-  if (loading && !host) return <div className="mx-auto max-w-[1400px] space-y-4 p-4"><BackLink /><TableSkeleton rows={8} columns={6} /></div>
+  // The loading and error branches replace the whole route, so without a heading of their own the
+  // document has none at all: a screen reader lands on a page it cannot name, and the sweep in
+  // web/scripts/ui-audit.mjs reported this route as headless in both themes at both widths. The
+  // heading cannot name the host, because the fetch that would have named it is the one that has not
+  // finished or has failed.
+  if (loading && !host) {
+    return (
+      <div className="mx-auto max-w-[1400px] space-y-4 p-4">
+        <BackLink />
+        <h1 className="text-2xl font-bold tracking-tight text-primary">Host</h1>
+        <TableSkeleton rows={8} columns={6} />
+      </div>
+    )
+  }
   if (error && !host) {
     if (isFeatureDisabledMessage(error)) {
       return <FeatureDisabledState feature="Fleet host inventory" envVar="SYNAPSE_FLEET_HOST_INGEST_ENABLED" hint="Host vulnerabilities need the fleet asset model and host inventory ingest." />
@@ -667,6 +680,7 @@ export function HostDetail() {
     return (
       <div className="mx-auto max-w-3xl space-y-4 p-4">
         <BackLink />
+        <h1 className="text-2xl font-bold tracking-tight text-primary">Host</h1>
         <Card bodyClass="p-0"><OperationalState tone="error" title="Could not load this host" detail={error} onRetry={refetch} /></Card>
       </div>
     )

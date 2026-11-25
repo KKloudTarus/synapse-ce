@@ -238,3 +238,26 @@ describe('host finding helpers', () => {
   })
 
 })
+
+describe('HostDetail page heading', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  // These two branches replace the whole route. Without a heading the document has none, so a screen
+  // reader lands on a page it cannot name. The sweep caught this route headless in both themes.
+  it('keeps a page heading while the host is still loading', async () => {
+    vi.mocked(api.hostVulnerabilities).mockReturnValue(new Promise(() => {}) as never)
+    vi.mocked(api.me).mockResolvedValue({ role: 'admin' } as never)
+    render(<MemoryRouter initialEntries={['/fleet/hosts/h-1']}><Routes><Route path="/fleet/hosts/:id" element={<HostDetail />} /></Routes></MemoryRouter>)
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Host' })).toBeInTheDocument()
+  })
+
+  it('keeps a page heading when the host cannot be loaded', async () => {
+    vi.mocked(api.hostVulnerabilities).mockRejectedValue(new Error('asset id lookup: not found'))
+    vi.mocked(api.me).mockResolvedValue({ role: 'admin' } as never)
+    render(<MemoryRouter initialEntries={['/fleet/hosts/h-1']}><Routes><Route path="/fleet/hosts/:id" element={<HostDetail />} /></Routes></MemoryRouter>)
+
+    expect(await screen.findByText('Could not load this host')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Host' })).toBeInTheDocument()
+  })
+})
