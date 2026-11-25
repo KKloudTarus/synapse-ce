@@ -132,6 +132,16 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 			sent = append(sent, request{method: "GET", path: path})
 		}
 	}
+	// The write sweep's requests count for the write routes it proves: tenantA's own request with
+	// the same body succeeded, or tenantA's record read the same after tenantB's success. A write
+	// route it leaves vacuous is left out, as an unproven read is above, and the sweep fails when
+	// that list no longer matches what it proved.
+	for _, route := range harnessCountedWriteRoutes() {
+		if path := harnessWritePath(route); path != "" {
+			method, _, _ := strings.Cut(route, " ")
+			sent = append(sent, request{method: method, path: path})
+		}
+	}
 	if len(sent) < 40 {
 		t.Fatalf("read %d harness requests; the harness is no longer being parsed", len(sent))
 	}
@@ -158,7 +168,7 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 
 	// The honest measurement when this guard was rewritten. The ratchet may only improve: raise the
 	// floor when you add coverage, never lower it.
-	const minimumCovered = 144
+	const minimumCovered = 187
 	if covered < minimumCovered {
 		t.Errorf("hostile harness covers %d of %d tenant-scoped routes, below the ratchet of %d; add cases rather than lowering the floor.\nUncovered:\n  %s",
 			covered, len(tenantScoped), minimumCovered, strings.Join(uncovered, "\n  "))
