@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -113,6 +114,58 @@ func Verify(items []Record) Report {
 		rep.Error = err.Error()
 	}
 	return rep
+}
+
+// maxReportedBrokenChains bounds how many broken chains one report names. The message is stored and
+// rendered, so a database whose chains are all broken must not produce an error field that grows with
+// the tenant count.
+const maxReportedBrokenChains = 8
+
+// VerifyChains builds one Report over several INDEPENDENT chains.
+//
+// The audit log holds more than one chain. The legacy rows written before tenancy form a single
+// global chain; every row written since is linked within its own tenant, which the partial unique
+// index audit_chain_link_v2_uniq (tenant_id, previous_hash) is what enforces. Each of those starts
+// at an empty previous_hash, so concatenating them and checking the result as one chain reports a
+// break at the first row of the second tenant. It is not a break: it is the next chain beginning.
+//
+// The returned Report is intact only when every chain is. Verified and Unchained are summed across
+// them, and Head is left empty, because several chains have several heads and reporting one of them
+// would be arbitrary. Error names the chain that broke, so an operator knows where to look.
+func VerifyChains(chains map[string][]Record) Report {
+	names := make([]string, 0, len(chains))
+	for name := range chains {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := Report{Intact: true}
+	broken := make([]string, 0, len(names))
+	for _, name := range names {
+		rep := Verify(chains[name])
+		out.Verified += rep.Verified
+		out.Unchained += rep.Unchained
+		if rep.Intact {
+			continue
+		}
+		out.Intact = false
+		// Every broken chain is named, not only the first. One chain breaking says nothing about the
+		// others, and an operator told about the earliest one alone would repair it and re-run into the
+		// next. The list is bounded because the message is stored and rendered.
+		switch {
+		case len(broken) < maxReportedBrokenChains:
+			broken = append(broken, name+": "+rep.Error)
+		case len(broken) == maxReportedBrokenChains:
+			broken = append(broken, "further chains are broken; re-run after repairing these")
+		}
+	}
+	out.Error = strings.Join(broken, "; ")
+	if len(chains) == 1 {
+		for _, only := range chains {
+			out.Head = Verify(only).Head
+		}
+	}
+	return out
 }
 
 // ensure shared is used (sentinel parity with other domains; reserved for future

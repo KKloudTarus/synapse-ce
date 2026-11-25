@@ -7,6 +7,23 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Fixed
+
+- **Restore verification no longer reports every healthy multi-tenant database as tampered.**
+  Since migration 0085 each tenant's audit entries form their own hash chain, enforced by
+  `audit_chain_link_v2_uniq (tenant_id, previous_hash)`, so every chain starts at an empty
+  previous hash. `VerifyGlobal` read the table as one sequence, so `synapse-verify-restore` answered
+  `Intact: false` with "audit chain broken" at the first entry of the second tenant on a database
+  nobody had touched. A genuinely forged entry produced the same message, so the alarm could not be
+  read. Verification now runs per chain, and a break names the chain it happened in.
+
+- **The RFC-3161 anchor is append-only.** `timestamp_tokens` holds the external timestamps that make
+  a custody chain tamper-proof, and is named as the out-of-band detection in
+  `migrations/0033_evidence_audit_append_only.sql`. It was the one custody table with no trigger, no
+  row-level security and no revoke, so the runtime role could rewrite or delete the anchors for a
+  chain and leave the truncation check with nothing to compare against. Migration `0272` refuses
+  UPDATE, DELETE and TRUNCATE on it, as `evidence` and `audit_log` already do.
+
 ### Added
 
 - **An external observation no longer merges with a first-party finding on a coincidence of line number (#1184).**
