@@ -328,9 +328,17 @@ dependencies { api 'a:both:1.0' }`,
 	}
 }
 
-// TestParseBuildGradleDepsConfigurationNames pins which declaration names mean "test only". The match is on
-// the whole name, so an unrelated configuration that merely contains "test" is not demoted, and the
-// testFixtures family stays production: its dependencies are published with the module and reach consumers.
+// TestParseBuildGradleDepsConfigurationNames pins which declaration names mean "test only". The rule is the
+// lockfile parser's word rule (gradleTestConfiguration): a name is a test configuration when one of its
+// camelCase words is "test" or "tests", so an unrelated configuration that merely contains the letters
+// (latestImplementation, testing) is not demoted, and the testFixtures family stays production: its
+// dependencies are published with the module and reach consumers.
+//
+// Three rows moved from production to test when the build script adopted that rule (#1692): a custom test suite
+// (integrationTestImplementation), the Kotlin Multiplatform jvmTest source set (jvmTestImplementation), and a
+// custom configuration named testImplementationExtra. Each has "test" as a word of its name, and the lockfile
+// already read the same source sets' classpaths (integrationTestRuntimeClasspath, jvmTestCompileClasspath) as
+// test, so the two parsers disagreed on one module.
 func TestParseBuildGradleDepsConfigurationNames(t *testing.T) {
 	test := []string{
 		"testImplementation", "testApi", "testCompileOnly", "testRuntimeOnly", "testAnnotationProcessor",
@@ -341,13 +349,16 @@ func TestParseBuildGradleDepsConfigurationNames(t *testing.T) {
 		"debugAndroidTestImplementation", "releaseAndroidTestImplementation", "freeDebugAndroidTestImplementation",
 		"testDebugImplementation", "testReleaseImplementation", "testFreeDebugImplementation",
 		"androidTestDebugImplementation", "debugUnitTestImplementation", "releaseUnitTestImplementation",
+		"integrationTestImplementation", "jvmTestImplementation", "testImplementationExtra",
+		"functionalTestImplementation",
 	}
 	prod := []string{
 		"implementation", "api", "compile", "runtime", "compileOnly", "runtimeOnly", "annotationProcessor",
 		"kapt", "ksp", "debugImplementation", "releaseImplementation", "freeDebugImplementation",
 		"latestImplementation", "contestImplementation", "testing", "testingImplementation", "attest",
+		"attestImplementation", "protestApi",
 		"testFixturesApi", "testFixturesImplementation", "testFixturesCompileOnly", "kaptTestFixtures",
-		"integrationTestImplementation", "jvmTestImplementation", "testImplementationExtra", "classpath",
+		"classpath",
 	}
 	check := func(t *testing.T, config, want string) {
 		t.Helper()

@@ -97,6 +97,67 @@ func TestParsePomComponents(t *testing.T) {
 	}
 }
 
+// A pom.xml that declares one coordinate twice ships it if either declaration does, whatever their order; a
+// dependencyManagement entry only pins a version, so it does not make a test-scope dependency production.
+func TestParsePomComponentsDuplicateDeclarationShips(t *testing.T) {
+	dep := func(scope string) string {
+		return "<dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.12</version><scope>" + scope + "</scope></dependency>"
+	}
+	for name, deps := range map[string]string{
+		"test declaration first":    dep("test") + dep("compile"),
+		"compile declaration first": dep("compile") + dep("test"),
+	} {
+		comps := parsePomComponents([]byte("<project><dependencies>" + deps + "</dependencies></project>"))
+		if len(comps) != 1 || comps[0].Scope != sbom.ScopeProduction {
+			t.Errorf("%s: want junit once, production, got %+v", name, comps)
+		}
+	}
+	managed := parsePomComponents([]byte("<project><dependencies>" + dep("test") + "</dependencies>" +
+		"<dependencyManagement><dependencies><dependency><groupId>junit</groupId><artifactId>junit</artifactId>" +
+		"<version>4.12</version></dependency></dependencies></dependencyManagement></project>"))
+	if len(managed) != 1 || managed[0].Scope != sbom.ScopeTest {
+		t.Errorf("a managed version must not change a declared test scope, got %+v", managed)
+	}
+}
+
+// The enricher reads every build script and pom.xml in the tree; a coordinate two modules declare is added once,
+// and the walk order of the modules must not decide its scope (#1692).
+func TestEnrichMergedScopeDoesNotFollowWalkOrder(t *testing.T) {
+	const (
+		gradleTest = "dependencies {\n    testImplementation 'junit:junit:4.12'\n}\n"
+		gradleProd = "dependencies {\n    implementation 'junit:junit:4.12'\n}\n"
+	)
+	pom := func(scope string) string {
+		return "<project><dependencies><dependency><groupId>junit</groupId><artifactId>junit</artifactId>" +
+			"<version>4.12</version><scope>" + scope + "</scope></dependency></dependencies></project>"
+	}
+	for name, files := range map[string]map[string]string{
+		"gradle: test module walked first":       {"a/build.gradle": gradleTest, "b/build.gradle": gradleProd},
+		"gradle: production module walked first": {"a/build.gradle": gradleProd, "b/build.gradle": gradleTest},
+		"maven: test module walked first":        {"a/pom.xml": pom("test"), "b/pom.xml": pom("compile")},
+		"maven: compile module walked first":     {"a/pom.xml": pom("compile"), "b/pom.xml": pom("test")},
+	} {
+		dir := t.TempDir()
+		for rel, content := range files {
+			path := filepath.Join(dir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		doc := &sbom.SBOM{}
+		res := (Enricher{}).Enrich(context.Background(), dir, doc)
+		if res.ComponentsAdded != 1 || len(doc.Components) != 1 {
+			t.Fatalf("%s: want junit added once, got %d: %+v", name, res.ComponentsAdded, doc.Components)
+		}
+		if doc.Components[0].Scope != sbom.ScopeProduction {
+			t.Errorf("%s: scope = %q, want production", name, doc.Components[0].Scope)
+		}
+	}
+}
+
 // (TestParseGradleCatalog moved to ownsbom/gradle_test.go – the catalog parser now lives in ownsbom and is
 // shared with this enricher via ownsbom.ParseGradleCatalog.)
 

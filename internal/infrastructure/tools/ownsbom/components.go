@@ -9,19 +9,26 @@ import "github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 // can't drift between parsers. A component missing a name, version, or PURL is dropped – an SBOM entry must
 // be identifiable and matchable against an advisory.
 type componentSet struct {
-	seen  map[string]bool
+	seen  map[string]int // PURL -> position in comps
 	comps []sbom.Component
 }
 
 // newComponentSet returns an empty set.
-func newComponentSet() *componentSet { return &componentSet{seen: map[string]bool{}} }
+func newComponentSet() *componentSet { return &componentSet{seen: map[string]int{}} }
 
-// add records a component unless it is incomplete (no name/version/PURL) or a PURL-duplicate of one held.
+// add records a component unless it is incomplete (no name/version/PURL). A PURL-duplicate of one held is not
+// added, but its scope is merged into the held one with sbom.MergeScope: one manifest can name a package twice
+// (npm installs one version at several paths, and iterates them in map order; a pom.xml can declare a
+// coordinate twice), and which entry came first must not decide whether the package ships.
 func (s *componentSet) add(c sbom.Component) {
-	if c.Name == "" || c.Version == "" || c.PURL == "" || s.seen[c.PURL] {
+	if c.Name == "" || c.Version == "" || c.PURL == "" {
 		return
 	}
-	s.seen[c.PURL] = true
+	if i, dup := s.seen[c.PURL]; dup {
+		s.comps[i].Scope = sbom.MergeScope(s.comps[i].Scope, c.Scope)
+		return
+	}
+	s.seen[c.PURL] = len(s.comps)
 	s.comps = append(s.comps, c)
 }
 

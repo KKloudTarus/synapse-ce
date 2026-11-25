@@ -71,3 +71,21 @@ func TestClassifyVulnsGraphScopeRefinement(t *testing.T) {
 		})
 	}
 }
+
+// A vulnerability is matched to components by name and version, and two components can share both under
+// different PURLs (a qualifier, two producers' spellings). Their order in the SBOM must not decide whether the
+// vulnerability gates: a production copy makes it production (#1692).
+func TestClassifyVulnsScopeDoesNotFollowComponentOrder(t *testing.T) {
+	testCopy := sbom.Component{Name: "junit:junit", Version: "4.12", PURL: "pkg:maven/junit/junit@4.12", Scope: sbom.ScopeTest}
+	prodCopy := sbom.Component{Name: "junit:junit", Version: "4.12", PURL: "pkg:maven/junit/junit@4.12?type=jar", Scope: sbom.ScopeProduction}
+	for name, comps := range map[string][]sbom.Component{
+		"production copy first": {prodCopy, testCopy},
+		"test copy first":       {testCopy, prodCopy},
+	} {
+		vulns := []vulnerability.Vulnerability{{ID: "CVE-2020-15250", Component: "junit:junit", Version: "4.12", Severity: shared.SeverityMedium}}
+		classifyVulns(&sbom.SBOM{Components: comps}, vulns)
+		if vulns[0].Scope != sbom.ScopeProduction {
+			t.Errorf("%s: scope = %q, want production", name, vulns[0].Scope)
+		}
+	}
+}

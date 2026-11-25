@@ -5909,7 +5909,10 @@ func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 			firstParty[c.Name] = true
 		}
 		if c.Scope != "" {
-			scopeByCV[c.Name+"\x00"+c.Version] = c.Scope
+			// Components that share a name and version (two PURL spellings of one package) are one match for a
+			// vulnerability; their order in the SBOM must not decide its scope.
+			key := c.Name + "\x00" + c.Version
+			scopeByCV[key] = sbom.MergeScope(scopeByCV[key], c.Scope)
 		}
 		if c.Reachability != "" {
 			reachByCV[c.Name+"\x00"+c.Version] = c.Reachability

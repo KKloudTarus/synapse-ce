@@ -154,23 +154,33 @@ func attachChecksums(doc *sbom.SBOM, byID map[string][]sbom.Checksum) int {
 	return n
 }
 
-// mergeComponents adds components the generator missed (by name@version identity).
+// mergeComponents adds components the generator missed (by name@version identity). A coordinate several
+// manifests name is added once, with the scope sbom.MergeScope picks across their copies. A component the
+// generator already holds is left as the generator made it.
 func mergeComponents(doc *sbom.SBOM, extra []sbom.Component) int {
 	have := make(map[string]bool, len(doc.Components))
 	for _, c := range doc.Components {
 		have[c.Name+"@"+c.Version] = true
 	}
-	added := 0
+	added := map[string]int{} // name@version -> position in doc.Components of a component added here
 	for _, c := range extra {
 		key := c.Name + "@" + c.Version
-		if c.Name == "" || have[key] {
+		if c.Name == "" {
+			continue
+		}
+		if i, ok := added[key]; ok {
+			// Several manifests name it; the walk order that put one first decides nothing about its use.
+			doc.Components[i].Scope = sbom.MergeScope(doc.Components[i].Scope, c.Scope)
+			continue
+		}
+		if have[key] {
 			continue
 		}
 		have[key] = true
+		added[key] = len(doc.Components)
 		doc.Components = append(doc.Components, c)
-		added++
 	}
-	return added
+	return len(added)
 }
 
 // mergeEdges adds reconstructed dependency edges not already present.
