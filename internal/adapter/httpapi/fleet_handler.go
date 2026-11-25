@@ -409,48 +409,67 @@ func agentFrom(ctx context.Context) (*fleetagent.Agent, bool) {
 type fleetAgentPlaneRoute struct {
 	pattern string // the mux pattern, including the method
 	mount   string // the top-level prefix Router.Handler() mounts this plane under
+	// guard is the authentication the route runs behind. It is declared data rather than a wrapper
+	// inside handler so the route inventory can read it from this table (#1702), and the
+	// registration loop applies it, so a handler cannot be reached around the guard its row declares.
+	guard fleetRouteGuard
 	// handler produces the route's handler from the router. Carrying it here rather than in a
 	// side table makes the pattern/mount/handler relation TOTAL by construction: a new route cannot
 	// be declared without a handler, so there is no missing-case branch to fail open or 404.
 	handler func(*fleetRouter) http.HandlerFunc
 }
 
+// fleetRouteGuard names the authentication an agent-plane route runs behind.
+type fleetRouteGuard int
+
+const (
+	// fleetGuardUndeclared is the zero value: a row that leaves its guard out. It is refused, never
+	// served open.
+	fleetGuardUndeclared fleetRouteGuard = iota
+	// fleetGuardAgent throttles per client IP and checks the protocol version on the mTLS host, then
+	// requires the agent transport identity and throttles per agent.
+	fleetGuardAgent
+	// fleetGuardEnrolment throttles per client IP and checks the protocol version on the enrolment
+	// host. The handler redeems the one-use enrolment token itself: no agent credential exists yet.
+	fleetGuardEnrolment
+)
+
 // fleetAgentPlaneRoutes is the single source of truth consumed by BOTH fleetRouter.handler() (which
 // registers the patterns) and Router.Handler() (which mounts the distinct prefixes).
 func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 	return []fleetAgentPlaneRoute{
-		{"POST /api/v1/fleet/enrol", "/api/v1/fleet/enrol",
-			func(f *fleetRouter) http.HandlerFunc { return f.entryForHost(f.enrollmentHost, f.enrol) }},
-		{"POST /api/v1/fleet/heartbeat", "/api/v1/fleet/heartbeat",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.heartbeat)) }},
-		{"GET /api/v1/fleet/privacy-policy", "/api/v1/fleet/privacy-policy",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.activePrivacyPolicy)) }},
-		{"POST /api/v1/fleet/decommission", "/api/v1/fleet/decommission",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.decommission)) }},
-		{"POST /api/v1/fleet/work/claim", "/api/v1/fleet/work/",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.claim)) }},
-		{"POST /api/v1/fleet/work/{id}/progress", "/api/v1/fleet/work/",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.progress)) }},
-		{"POST /api/v1/fleet/work/{id}/result", "/api/v1/fleet/work/",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.result)) }},
-		{"POST /api/v1/fleet/inventory/cluster", "/api/v1/fleet/inventory/",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.clusterInventory)) }},
-		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
-		{"POST /api/v1/fleet/inventory/runtime", "/api/v1/fleet/inventory/",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestRuntimeEvidence)) }},
-		{"POST /api/v1/fleet/processes", "/api/v1/fleet/processes",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.reportProcesses)) }},
-		{"POST /api/v1/fleet/telemetry", "/api/v1/fleet/telemetry",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestTelemetry)) }},
-		{"POST /api/v1/fleet/sensor-states", "/api/v1/fleet/sensor-states",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestSensorState)) }},
-		{"POST /api/v1/fleet/response-verifications", "/api/v1/fleet/response-verifications",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestResponseVerification)) }},
-		{"POST /api/v1/fleet/detections", "/api/v1/fleet/detections",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestDetections)) }},
-		{"POST /api/v1/fleet/keys", "/api/v1/fleet/keys",
-			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.registerKey)) }},
+		{"POST /api/v1/fleet/enrol", "/api/v1/fleet/enrol", fleetGuardEnrolment,
+			func(f *fleetRouter) http.HandlerFunc { return f.enrol }},
+		{"POST /api/v1/fleet/heartbeat", "/api/v1/fleet/heartbeat", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.heartbeat }},
+		{"GET /api/v1/fleet/privacy-policy", "/api/v1/fleet/privacy-policy", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.activePrivacyPolicy }},
+		{"POST /api/v1/fleet/decommission", "/api/v1/fleet/decommission", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.decommission }},
+		{"POST /api/v1/fleet/work/claim", "/api/v1/fleet/work/", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.claim }},
+		{"POST /api/v1/fleet/work/{id}/progress", "/api/v1/fleet/work/", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.progress }},
+		{"POST /api/v1/fleet/work/{id}/result", "/api/v1/fleet/work/", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.result }},
+		{"POST /api/v1/fleet/inventory/cluster", "/api/v1/fleet/inventory/", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.clusterInventory }},
+		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.hostInventory }},
+		{"POST /api/v1/fleet/inventory/runtime", "/api/v1/fleet/inventory/", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.ingestRuntimeEvidence }},
+		{"POST /api/v1/fleet/processes", "/api/v1/fleet/processes", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.reportProcesses }},
+		{"POST /api/v1/fleet/telemetry", "/api/v1/fleet/telemetry", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.ingestTelemetry }},
+		{"POST /api/v1/fleet/sensor-states", "/api/v1/fleet/sensor-states", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.ingestSensorState }},
+		{"POST /api/v1/fleet/response-verifications", "/api/v1/fleet/response-verifications", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.ingestResponseVerification }},
+		{"POST /api/v1/fleet/detections", "/api/v1/fleet/detections", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.ingestDetections }},
+		{"POST /api/v1/fleet/keys", "/api/v1/fleet/keys", fleetGuardAgent,
+			func(f *fleetRouter) http.HandlerFunc { return f.registerKey }},
 	}
 }
 
@@ -473,9 +492,24 @@ func fleetAgentPlaneMounts() []string {
 func (f *fleetRouter) handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range fleetAgentPlaneRoutes() {
-		mux.HandleFunc(route.pattern, route.handler(f))
+		mux.HandleFunc(route.pattern, f.guard(route.guard, route.handler(f)))
 	}
 	return mux
+}
+
+// guard wraps an agent-plane handler in the authentication its route declares.
+func (f *fleetRouter) guard(declared fleetRouteGuard, next http.HandlerFunc) http.HandlerFunc {
+	switch declared {
+	case fleetGuardAgent:
+		return f.entry(f.authed(next))
+	case fleetGuardEnrolment:
+		return f.entryForHost(f.enrollmentHost, next)
+	}
+	// An undeclared guard must never mean an open route. It is a server misconfiguration rather
+	// than a caller's failure, so it answers 500, not the 401 a missing credential gets.
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusInternalServerError, errorBody{Error: "internal error"})
+	}
 }
 
 // entry is the outermost wrapper on every fleet route. It throttles per client IP BEFORE any

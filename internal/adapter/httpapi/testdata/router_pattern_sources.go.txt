@@ -1,0 +1,14 @@
+package httpapi
+
+import "net/http"
+
+const basePath = "/internal/v1/things"
+
+func (f *fleetRouter) handler() http.Handler {
+	mux := http.NewServeMux()
+	for _, route := range agentRoutes() {
+		mux.HandleFunc(route.pattern, f.guard(route.guard, route.handler(f)))
+	}
+	mux.HandleFunc("POST "+basePath, f.thing)
+	return mux
+}
