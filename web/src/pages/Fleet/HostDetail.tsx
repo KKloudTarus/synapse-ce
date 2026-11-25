@@ -319,7 +319,9 @@ function toLocalInput(d: Date): string {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
 
-export function RetroHuntBody({ assetId }: { assetId: string }) {
+// canOperate mirrors the server: starting a retro-hunt is PermOperate (router.go). It only disables the
+// control for accounts the server would refuse; the server still decides.
+export function RetroHuntBody({ assetId, canOperate }: { assetId: string; canOperate: boolean }) {
   const localZone = (() => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
@@ -380,10 +382,13 @@ export function RetroHuntBody({ assetId }: { assetId: string }) {
           <span className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">Entity (optional)</span>
           <Input value={entityId} onChange={(e) => setEntityId(e.target.value)} placeholder="entity id" className="w-48 font-mono" aria-label="Retro-hunt entity id" />
         </label>
-        <Button variant="primary" className="px-3 py-2" loading={busy} disabled={busy || (beforeMin === 0 && afterMin === 0)} onClick={run}>
+        <Button variant="primary" className="px-3 py-2" loading={busy} disabled={!canOperate || busy || (beforeMin === 0 && afterMin === 0)} onClick={run}>
           <SearchSm className="size-4" /> Hunt
         </Button>
       </div>
+      {!canOperate && (
+        <p className="text-xs text-tertiary">Starting a retro-hunt needs the operate permission, which your role does not have.</p>
+      )}
       {beforeMin === 0 && afterMin === 0 && (
         <p className="text-xs text-warning-primary">Set a non-zero look-back or look-forward; a zero-width window is rejected.</p>
       )}
@@ -752,7 +757,7 @@ export function HostDetail() {
         ) : tab === 'processes' ? (
           <ProcessesBody assetId={host.asset.id} canOperate={canOperate} />
         ) : tab === 'retrohunt' ? (
-          <RetroHuntBody assetId={host.asset.id} />
+          <RetroHuntBody assetId={host.asset.id} canOperate={canOperate} />
         ) : (
           <CoverageBody host={host} />
         )}

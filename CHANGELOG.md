@@ -103,6 +103,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 - **BREAKING CHANGE: default notification webhooks use a class-filtered envelope.** Receivers now get `synapse.notification.v1` with declared, scrubbed variables, lists and trusted console links instead of the raw event. Update receivers before upgrading notification workers. An administrator can explicitly enable `raw_event` on a `detail` webhook without a custom body; engagement disclosure limits still apply. Existing channels configured at `detail` also begin receiving finding titles in the `scan.completed` findings list. Review their recipients before rollout. Scan messages use immutable completion snapshots, bounded comparison keys and explicit unavailable deltas; built-in English and Vietnamese templates cover the routable events. Email includes escaped HTML alongside text. Follow the worker compatibility, capture-mode drain and rollback steps in [Notification content and capture rollout](docs/guide/notification-content.md).
 
+- **Starting a host retro-hunt requires the operate permission (#1702).** `POST /fleet/assets/{id}/retro-hunt` was gated `PermView`, so the `readonly` and `integration_admin` roles, which may not write anything, could run a timeline query over a window they chose. It discloses nothing the timeline read does not, but it spends compute the way its siblings, the process report and the behaviour re-baseline, do, and those are `PermOperate`. It is now `PermOperate`, which `reviewer` does not hold either. Reading the timeline stays `PermView`. The host page disables the Hunt button for a role the server would refuse and says why.
+
 ### Fixed
 
 - **A `gradle.lockfile` is now read, and a lockfile that was never read no longer makes a scan

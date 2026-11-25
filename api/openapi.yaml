@@ -6332,10 +6332,12 @@ paths:
       operationId: retroHuntFleetAssetTimeline
       summary: Re-hunt the endpoint timeline window around a pivot time
       description: >
-        Read-only analysis: pivots to the transitions in [around - before_seconds, around +
-        after_seconds] on the asset, optionally focused on one entity. Fail-closed on a missing pivot,
-        a negative look-back or look-forward, or a zero-width window. Truncated is honest: the service
-        queries one entry past the effective limit so a capped window is always reported as partial.
+        Pivots to the transitions in [around - before_seconds, around + after_seconds] on the asset,
+        optionally focused on one entity. It writes nothing, but it runs a query over a caller-chosen
+        window, so it requires the operate permission, like the process report and the behaviour
+        re-baseline. Fail-closed on a missing pivot, a negative look-back or look-forward, or a
+        zero-width window. Truncated is honest: the service queries one entry past the effective limit
+        so a capped window is always reported as partial.
       security:
       - bearerAuth: []
       requestBody:

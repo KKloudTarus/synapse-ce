@@ -786,8 +786,10 @@ func (rt *Router) routes() *http.ServeMux {
 			mux.HandleFunc("GET /api/v1/fleet/assets/{id}/timeline", rt.authz(userdom.PermView, rt.queryEndpointTimeline))
 		}
 		if rt.retroHunter != nil {
-			// B7 retro-hunt (#594): re-hunt a window of the timeline around a pivot. PermView (read-only analysis).
-			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/retro-hunt", rt.authz(userdom.PermView, rt.retroHuntEndpoint))
+			// B7 retro-hunt (#594): re-hunt a window of the timeline around a pivot. It discloses nothing the
+			// timeline read does not, but it runs a query over a caller-chosen window, so starting one is an
+			// operating action like its siblings above (#1702): PermOperate, not PermView.
+			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/retro-hunt", rt.authz(userdom.PermOperate, rt.retroHuntEndpoint))
 		}
 		if rt.legalHolds != nil {
 			// Legal hold (#635): place/release a hold on an engagement's data (exempts it from retention
