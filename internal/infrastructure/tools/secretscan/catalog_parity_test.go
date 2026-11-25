@@ -110,6 +110,12 @@ func TestCatalogParity(t *testing.T) {
 	for _, id := range parityExpansionRuleIDs() {
 		expectedCWE[id] = "CWE-798"
 	}
+	// The datasource rules are listed by id rather than as map entries: an entry keyed
+	// "spring-datasource-password" with a string value reads as a hardcoded password to a generic secret
+	// detector run over this file.
+	for _, id := range []string{"jdbc-connection-string", "jdbc-oracle-connection-string", "spring-datasource-password"} {
+		expectedCWE[id] = "CWE-798"
+	}
 	builtin := defaultRules()
 	seenInBuiltin := make(map[string]bool, len(builtin))
 

@@ -1134,6 +1134,94 @@ func templatePlaceholder(value string) bool {
 	return false
 }
 
+// credentialValuePlaceholder reports whether a value captured as a password is something that stands where the
+// password goes. It is templatePlaceholder plus the shapes a JDBC URL or a Spring property file uses in that
+// position: a mask (`****`, how SQL Server's own documentation writes the URL), a Windows %NAME% variable, a
+// Maven resource-filter token (`@db.password@`, the Spring Boot convention), an interpolation (`#{…}`), and
+// Spring Cloud Config's `{cipher}…` ciphertext, which the config server decrypts at startup.
+func credentialValuePlaceholder(value string) bool {
+	if templatePlaceholder(value) {
+		return true
+	}
+	v := strings.TrimSpace(value)
+	switch {
+	case strings.Trim(v, "*") == "":
+		return true
+	case len(v) > 2 && strings.HasPrefix(v, "%") && strings.HasSuffix(v, "%"):
+		return true
+	case len(v) > 2 && strings.HasPrefix(v, "@") && strings.HasSuffix(v, "@"):
+		return true
+	case strings.HasPrefix(v, "#{"), strings.HasPrefix(v, "{cipher}"):
+		return true
+	}
+	return false
+}
+
+// referenceValueRe matches a value that is an expression rather than a literal: a dotted reference
+// (`var.db_password`, `settings.DB_PASSWORD`) or a call or index on an identifier (`os.getenv(`,
+// `os.environ[`).
+var referenceValueRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:(?:\.[A-Za-z_][A-Za-z0-9_]*)+$|[A-Za-z0-9_.]*[(\[])`)
+
+// propertyValueIsReference reports whether the value assigned to the Spring datasource password is an
+// expression. The environment spelling SPRING_DATASOURCE_PASSWORD is also a variable name in Terraform and
+// Python, where the assignment reads a reference or a call. It is deliberately narrow: a bare word stays
+// reported, because in a properties or .env file `postgres` or `root` IS the password. The call shape also
+// covers Jasypt's `ENC(…)`, ciphertext the application decrypts at startup. The price is that a literal
+// password shaped like `name.name` is read as a reference.
+func propertyValueIsReference(value string) bool {
+	return referenceValueRe.MatchString(strings.TrimSpace(value))
+}
+
+var (
+	// jdbcURLRe finds each JDBC URL on a line, bounded the way the JDBC rules bound it.
+	jdbcURLRe = regexp.MustCompile("(?i)\\bjdbc:[a-z][a-z0-9+-]*:[^\\s\"'`<>]*")
+	// jdbcOracleAccountRe reads Oracle's user/password@ account prefix.
+	jdbcOracleAccountRe = regexp.MustCompile("(?i)^jdbc:oracle:(?:thin|oci8?):([^\\s/@:;\"'`<>]+)/([^\\s@\"'`<>\\\\]*)@")
+	// jdbcAccountPropertyRe reads the account and password connection properties.
+	jdbcAccountPropertyRe = regexp.MustCompile("(?i)[;?&:](user|username|uid|password|pwd)=([^\\s;&\"'`<>\\\\]*)")
+)
+
+// jdbcDocumentedAccountLine reports whether every JDBC credential on the line is the URL grammar written with
+// the words themselves, `jdbc:oracle:thin:username/password@host` or `…;user=user;password=password`. That is
+// the JDBC spelling of the `user:password@` line connectionStringPlaceholder stands down, and it is decided
+// the same way: BOTH parts must be generic, so `user=admin;password=password` is still reported. A URL whose
+// password is a placeholder carries no credential and is not counted. The decision is made for the whole line
+// because a line skip cannot tell its matches apart, so a line that also holds a real credential is reported.
+func jdbcDocumentedAccountLine(line string) bool {
+	documented := false
+	for _, url := range jdbcURLRe.FindAllString(line, -1) {
+		user, password, ok := jdbcAccount(url)
+		if !ok || credentialValuePlaceholder(password) {
+			continue
+		}
+		if !placeholderWords[strings.ToLower(user)] || !placeholderWords[strings.ToLower(password)] {
+			return false
+		}
+		documented = true
+	}
+	return documented
+}
+
+// jdbcAccount returns the account and password a JDBC URL carries, and whether it carries a password at all.
+func jdbcAccount(url string) (user, password string, ok bool) {
+	if m := jdbcOracleAccountRe.FindStringSubmatch(url); m != nil {
+		return m[1], m[2], true
+	}
+	for _, m := range jdbcAccountPropertyRe.FindAllStringSubmatch(url, -1) {
+		switch strings.ToLower(m[1]) {
+		case "password", "pwd":
+			if !ok {
+				password, ok = m[2], true
+			}
+		default:
+			if user == "" {
+				user = m[2]
+			}
+		}
+	}
+	return user, password, ok
+}
+
 // codecAlphabets are the ordered character tables every base64/base32/base36 implementation carries. They
 // have maximal character variety, so they clear any entropy floor by construction, and one of them appears
 // in a vendored polyfill in most JavaScript repositories.
@@ -1464,6 +1552,45 @@ func baseDefaultRules() []rule {
 			// repository's 267 secret findings, almost all of them in docs. A password component that is a
 			// substitution placeholder is a documented shape, not a credential.
 			skipValue: connectionStringPlaceholder,
+		},
+		{
+			// A JDBC URL usually carries its password as a connection PROPERTY, not in a user:password@
+			// authority, so the rule above never saw it: `jdbc:sqlserver://h;user=svc;password=…`,
+			// `jdbc:postgresql://h/db?user=svc&password=…`, DB2's `jdbc:db2://h:50000/DB:user=svc;password=…`.
+			// An ordinary password in that position was reported by nothing, because the generic rule wants 16
+			// high-entropy characters (#1665). The `jdbc:` scheme is the anchor, so a password= anywhere else
+			// stays with the generic rule. The URL body stops at whitespace, a quote and an angle bracket, so the
+			// property cannot be read from the next string, the next line or a <host> template.
+			id: "jdbc-connection-string", category: "Database", title: "JDBC connection string with credentials", severity: shared.SeverityHigh,
+			keywords:  []string{"jdbc:"},
+			re:        regexp.MustCompile("(?i)\\bjdbc:[a-z][a-z0-9+-]*:[^\\s\"'`<>]*?[;?&:](?:password|pwd)=([^\\s;&\"'`<>\\\\]{3,})"),
+			group:     1,
+			skipValue: credentialValuePlaceholder,
+			lineSkip:  jdbcDocumentedAccountLine,
+		},
+		{
+			// Oracle's drivers take the account in front of the host, `jdbc:oracle:thin:svc/<password>@host:1521/SID`,
+			// which neither the property rule nor the URI rule reads (#1665).
+			id: "jdbc-oracle-connection-string", category: "Database", title: "Oracle JDBC connection string with credentials", severity: shared.SeverityHigh,
+			keywords:  []string{"jdbc:oracle:"},
+			re:        regexp.MustCompile("(?i)\\bjdbc:oracle:(?:thin|oci8?):[^\\s/@:;\"'`<>]+/([^\\s@\"'`<>\\\\]{3,})@"),
+			group:     1,
+			skipValue: credentialValuePlaceholder,
+			lineSkip:  jdbcDocumentedAccountLine,
+		},
+		{
+			// The datasource password of a Spring application is assigned by name: in application.properties,
+			// as a flat key in YAML, as a JVM or command-line property, or through the environment as
+			// SPRING_DATASOURCE_PASSWORD. The generic rule needs 16 high-entropy characters, so the passwords
+			// people actually choose went unreported there (#1665). The key is the anchor; a named datasource or
+			// a pool (`spring.datasource.hikari.password`) is one segment deeper. A QUOTED key is a key in code
+			// or JSON, where an unquoted value is an expression, so after a quoted key the value must be quoted
+			// too; `System.setProperty("spring.datasource.password", "…")` is that shape with a comma.
+			id: "spring-datasource-password", category: "Database", title: "Spring datasource password", severity: shared.SeverityHigh,
+			keywords:  []string{"spring.datasource", "spring_datasource"},
+			re:        regexp.MustCompile("(?i)spring[._]datasource(?:[._][a-z0-9-]+)?[._]password(?:[ \\t]*[:=][ \\t]*[\"']?|[\"'][ \\t]*[:=,][ \\t]*[\"'])([^\\s\"'`<\\\\][^\\s\"'`\\\\]{2,})"),
+			group:     1,
+			skipValue: func(v string) bool { return credentialValuePlaceholder(v) || propertyValueIsReference(v) },
 		},
 		{
 			id: "putty-private-key", category: "PrivateKey", title: "PuTTY private key", severity: shared.SeverityCritical,

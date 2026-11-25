@@ -453,6 +453,11 @@ var lowSignalSecretRules = map[string]bool{
 	"aws-secret-access-key": true, // entropy-only 40-char base64, no distinctive prefix
 	"db-connection-string":  true, // credential embedded in an otherwise ordinary URL
 	"jwt":                   true, // JWTs are common and frequently non-secret
+	// A password read from a JDBC URL or a Spring datasource key: the key is the anchor, the value has no
+	// distinctive shape, which is db-connection-string's case.
+	"jdbc-connection-string":        true,
+	"jdbc-oracle-connection-string": true,
+	"spring-datasource-password":    true,
 }
 
 // keywordFreeEntropyRule is the D6.7 detector whose keyword-free hits are always routed to needs-verify.

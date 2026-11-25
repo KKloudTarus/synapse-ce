@@ -17,7 +17,8 @@ func TestSecretRuleConfidence(t *testing.T) {
 			t.Errorf("fixed-prefix rule %q confidence = %q, want high", id, got)
 		}
 	}
-	medium := []string{"generic-secret", "aws-secret-access-key", "db-connection-string", "jwt"}
+	medium := []string{"generic-secret", "aws-secret-access-key", "db-connection-string", "jwt",
+		"jdbc-connection-string", "jdbc-oracle-connection-string", "spring-datasource-password"}
 	for _, id := range medium {
 		if got := secretRuleConfidence(id); got != vulnerability.ConfidenceMedium {
 			t.Errorf("entropy/context rule %q confidence = %q, want medium", id, got)
