@@ -25,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/observationbinding"
 	projectdom "github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/purplecoverage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
@@ -49,6 +50,7 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	hostvulnuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostvuln"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/observationbindinguc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	promotionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/promotion"
@@ -161,6 +163,23 @@ func (harnessRollout) Resume(context.Context, shared.ID, string, shared.ID) (*fl
 type harnessImportedFindings struct{}
 
 func (harnessImportedFindings) ListByEngagement(context.Context, shared.ID, shared.ID) ([]importedfinding.ImportedFinding, error) {
+	return nil, nil
+}
+
+// harnessObservationBindings registers the #1184 binding routes so the harness guards their operate,
+// view and tenant gates. Every assertion against it is a DENY, so returning nothing is enough: a request
+// that reaches this fake has already crossed a gate it should not have.
+type harnessObservationBindings struct{}
+
+func (harnessObservationBindings) Decide(context.Context, observationbindinguc.DecideRequest) (observationbinding.Binding, error) {
+	return observationbinding.Binding{}, nil
+}
+
+func (harnessObservationBindings) Current(context.Context, shared.ID, shared.ID) (map[observationbinding.Identity]observationbinding.Binding, error) {
+	return nil, nil
+}
+
+func (harnessObservationBindings) List(context.Context, shared.ID, shared.ID) ([]observationbinding.Binding, error) {
 	return nil, nil
 }
 
@@ -565,6 +584,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetAttackPaths(attackSvc)              // real #419 service proves cross-tenant derived data isolation
 	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
 	rt.SetImportedFindings(harnessImportedFindings{})
+	rt.SetObservationBindings(harnessObservationBindings{}) // register the #1184 binding routes so the harness guards their operate/view/tenant gates
 	rt.SetVulnerabilityAudit(audit)
 	rt.SetDetectionReader(harnessDetections{})  // register the #423 detection-ledger read route
 	rt.SetPurpleCoverageReader(harnessPurple{}) // register the #426 purple-coverage read route
@@ -911,6 +931,20 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may read imported findings (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusOK},
 		{"cross-tenant imported-finding read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusNotFound},
 		{"principal-less imported-finding read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusUnauthorized},
+		// #1184 approved observation-to-finding bindings. Recording one decides which remediation
+		// workflow owns an observation, so it is an OPERATE action; reading the lineage is a VIEW. Both
+		// are engagement children, so a caller in another tenant is stopped at withEngTenant with a 404
+		// before the handler can name anything that exists.
+		// The harness sends no body, so an allowed write lands on the handler's own body check. 400 is
+		// therefore the pass: it proves the request crossed the authz and tenant gates, which is what
+		// the two denials below have to be measured against.
+		{"consultant reaches the binding handler (operate)", "consultant", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/imported-findings/obsA/binding", http.StatusBadRequest},
+		{"readonly may not record a binding (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/imported-findings/obsA/binding", http.StatusForbidden},
+		{"cross-tenant binding write → 404", "consultant", "tenantB", true, http.MethodPost, "/api/v1/engagements/engA/imported-findings/obsA/binding", http.StatusNotFound},
+		{"principal-less binding write is denied", "", "", false, http.MethodPost, "/api/v1/engagements/engA/imported-findings/obsA/binding", http.StatusUnauthorized},
+		{"readonly may read the binding lineage (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/observation-bindings", http.StatusOK},
+		{"cross-tenant binding lineage read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/observation-bindings", http.StatusNotFound},
+		{"principal-less binding lineage read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/observation-bindings", http.StatusUnauthorized},
 		{"readonly may read detections (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusOK},
 		{"cross-tenant detection read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusNotFound},
 		{"principal-less detection read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusUnauthorized},

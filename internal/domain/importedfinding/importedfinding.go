@@ -12,6 +12,8 @@
 package importedfinding
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -139,6 +141,99 @@ type ImportedFinding struct {
 	Fingerprint string
 	Provenance  Provenance
 	Audit       shared.Audit
+}
+
+// MaxBindingIdentityBytes bounds a derived identity. The components it is built from are themselves
+// bounded by the SARIF reader (a rule id at 512 bytes, a path at 4096), so an unbounded identity would
+// reach ~4.6 KB and overflow the 2704-byte limit of the btree index that enforces one binding per
+// identity. Past this bound the identity is replaced by a digest of the same components, which is
+// equally stable and equally unique.
+const MaxBindingIdentityBytes = 1024
+
+// BindingScope and BindingExternalIdentity name this observation ACROSS imports, which is what an
+// approved binding has to be keyed on (#1184). The row id cannot serve: re-importing a report mints new
+// rows, and a decision a person made must survive that. Neither can the storage idempotency key, which
+// includes the source document digest and therefore changes whenever the report does.
+//
+// The scope is the producing tool.
+func (f ImportedFinding) BindingScope() string {
+	return strings.TrimSpace(f.Provenance.ToolName)
+}
+
+// BindingExternalIdentity returns the cross-import identity of this observation, or the empty string when
+// the result cannot be addressed by a decision at all.
+//
+// A tool that supplies a partial fingerprint is taken at its word: that value is exactly the tool's
+// assertion of "this is the same result as last time". Note what that means for trust: whoever can post a
+// report chooses the fingerprint, so an approval follows the tool's claim of identity. It is the same
+// permission that can record a binding directly, so this widens no authority, but it does mean a binding
+// is only as precise as the identity its producer asserts.
+//
+// Without a fingerprint the identity is derived, and it has to discriminate results that a reviewer would
+// never call the same one. Rule and location alone do not: two secrets on one line, or two different
+// messages from one rule at one place, would collapse into a single identity and one person's decision
+// would mark the other as approved without anyone looking at it. The column and a digest of the result's
+// own words are therefore part of the identity. They are stable across a re-import of the same result and
+// differ between results a reviewer would read differently.
+//
+// Every component is escaped before it is joined, so a rule id containing the separator cannot forge the
+// identity of a different result.
+func (f ImportedFinding) BindingExternalIdentity() string {
+	if fingerprint := strings.TrimSpace(f.Fingerprint); fingerprint != "" {
+		return boundBindingIdentity("fingerprint:" + escapeIdentityPart(fingerprint))
+	}
+	rule := strings.TrimSpace(f.Provenance.RuleID)
+	location := strings.TrimSpace(f.Location.Path)
+	if location == "" {
+		location = strings.TrimSpace(f.Location.LogicalName)
+	}
+	if rule == "" || location == "" {
+		// A result with no rule, or with no location at all, has nothing that distinguishes it from the
+		// next result of its kind. Binding it would attach a decision to a key that other results share.
+		return ""
+	}
+	digest := sha256.Sum256([]byte(strings.TrimSpace(f.Title) + "\x00" + strings.TrimSpace(f.Message)))
+	return boundBindingIdentity("rule:" + escapeIdentityPart(rule) +
+		"@" + escapeIdentityPart(location) +
+		":" + strconv.Itoa(f.Location.StartLine) +
+		":" + strconv.Itoa(f.Location.StartColumn) +
+		"#" + hex.EncodeToString(digest[:6]))
+}
+
+// escapeIdentityPart makes a component unambiguous inside a joined identity by percent-encoding the
+// separators and the escape character itself. Without it `rule:"A@B"` at `c.go` and `rule:"A"` at
+// `B@c.go` produce one string, so a decision about one result would address the other.
+func escapeIdentityPart(part string) string {
+	if !strings.ContainsAny(part, "%@:#") {
+		return part
+	}
+	var b strings.Builder
+	b.Grow(len(part) + 8)
+	for i := 0; i < len(part); i++ {
+		switch c := part[i]; c {
+		case '%':
+			b.WriteString("%25")
+		case '@':
+			b.WriteString("%40")
+		case ':':
+			b.WriteString("%3A")
+		case '#':
+			b.WriteString("%23")
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// boundBindingIdentity keeps an identity inside MaxBindingIdentityBytes, replacing an over-long one with
+// a digest of itself. The digest is derived from the escaped form, so it is as unique as what it replaces.
+func boundBindingIdentity(identity string) string {
+	if len(identity) <= MaxBindingIdentityBytes {
+		return identity
+	}
+	sum := sha256.Sum256([]byte(identity))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // External reports that this finding came from another tool. It exists so every surface that renders a

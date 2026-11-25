@@ -2092,6 +2092,63 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/imported-findings/{observationId}/binding:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    - name: observationId
+      in: path
+      required: true
+      schema: {type: string}
+      description: The imported finding the decision is made on.
+    post:
+      tags: [findings]
+      summary: Approve an imported observation onto a canonical finding
+      description: >-
+        Records that a person decided this external observation and the canonical finding describe one
+        issue. The deduplicator's match on file and line is a candidate, not a decision, and the
+        imported-finding read reports it as such until this route is called. Re-posting the same finding
+        is idempotent. Naming a different finding while one is bound is 409 unless expected_version names
+        the version being replaced, and a stale expected_version is 409 too.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [finding_id, reason]
+              properties:
+                finding_id: {type: string}
+                reason:
+                  type: string
+                  maxLength: 2000
+                  description: Why these two describe one issue. Stored with the decision; it cannot be rewritten later.
+                expected_version:
+                  type: integer
+                  description: The version being replaced. Omit for a first adoption.
+      responses:
+        "200": {description: The binding now in force}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /api/v1/engagements/{id}/observation-bindings:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    get:
+      tags: [findings]
+      summary: List approved observation-to-finding bindings
+      description: >-
+        Every version, newest decision first. Superseded versions are kept on purpose: a decision that
+        turned out to be wrong is only auditable against the one it replaced. The version in force has
+        current true and no superseded_at.
+      responses:
+        "200": {description: Binding versions}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/engagements/{id}/export/sarif:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
