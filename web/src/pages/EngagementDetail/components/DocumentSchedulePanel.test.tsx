@@ -1,20 +1,20 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DocumentSchedulePanel } from './DocumentSchedulePanel'
+import type { Integration } from '../../../lib/types'
 
-vi.mock('../../../lib/api/integrations', () => ({ integrationsApi: { listIntegrations: vi.fn() } }))
 vi.mock('../../../lib/api/document-schedules', () => ({ documentSchedulesApi: { list: vi.fn(), runs: vi.fn(), save: vi.fn(), disable: vi.fn(), emailDestinations: vi.fn() } }))
 vi.mock('../../../components/synapse/ConfirmDialog', () => ({ ConfirmDialog: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) => open ? <button onClick={onConfirm}>Confirm disable</button> : null }))
 
-import { integrationsApi } from '../../../lib/api/integrations'
 import { documentSchedulesApi } from '../../../lib/api/document-schedules'
 
+const publishableIntegrations = [{ id: 'confluence-1', name: 'Confluence', provider: 'confluence-cloud' }] as Integration[]
+const refreshIntegrations = async () => {}
 const sources = [{ kind: 'engagement_report' as const, sourceRef: 'engagement:eng-1', label: 'Engagement report' }]
 
 function ready() {
   vi.mocked(documentSchedulesApi.list).mockResolvedValue([])
 	vi.mocked(documentSchedulesApi.runs).mockResolvedValue([])
-  vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([{ id: 'confluence-1', name: 'Confluence', provider: 'confluence-cloud', enabled: true, archived: false, credentialConfigured: true }] as never)
   vi.mocked(documentSchedulesApi.emailDestinations).mockResolvedValue([{ id: 'mail-1', name: 'Security recipients', recipientCount: 2 }])
 }
 
@@ -25,7 +25,7 @@ describe('DocumentSchedulePanel', () => {
     ready()
     vi.mocked(documentSchedulesApi.list).mockResolvedValue([{ id: 'disabled-schedule', enabled: false, frequency: 'weekly', weekday: 1, hour: 9, minute: 0, destination: 'email', timezone: 'UTC', nextDueAt: '2026-10-20T00:00:00Z', version: 2 }] as never)
     vi.mocked(documentSchedulesApi.runs).mockResolvedValue([{ id: 'run', dueAt: '2026-10-19T00:00:00Z', state: 'done', contentHash: 'a'.repeat(64), remoteVersion: 0, deliveredCount: 2, uncertainCount: 0, failedCount: 0, updatedAt: '2026-10-19T00:01:00Z' }])
-    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} canManage />)
+    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} refreshIntegrations={refreshIntegrations} publishableIntegrations={publishableIntegrations} canManage />)
     expect(await screen.findByText(/Disabled · v2/)).toBeInTheDocument()
     expect(screen.getByText(/delivered 2, uncertain 0, failed 0/)).toBeInTheDocument()
     expect(screen.queryByText(/Next due:/)).not.toBeInTheDocument()
@@ -35,7 +35,7 @@ describe('DocumentSchedulePanel', () => {
   it('creates an engagement schedule from derived source and configured destination only', async () => {
     ready()
     vi.mocked(documentSchedulesApi.save).mockResolvedValue({} as never)
-    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} canManage />)
+    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} refreshIntegrations={refreshIntegrations} publishableIntegrations={publishableIntegrations} canManage />)
     fireEvent.change(await screen.findByLabelText('Schedule destination type'), { target: { value: 'email' } })
     fireEvent.change(screen.getByLabelText('Schedule frequency'), { target: { value: 'monthly' } })
     fireEvent.change(screen.getByLabelText('Schedule day'), { target: { value: '31' } })
@@ -46,29 +46,52 @@ describe('DocumentSchedulePanel', () => {
     expect(screen.queryByLabelText(/recipient/i)).not.toBeInTheDocument()
   })
 
-  it('offers each enabled document publishing profile while retaining the legacy schedule value', async () => {
+  it('uses publishable connections and excludes manual Notion publishing', async () => {
     ready()
-    vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([
-      { id: 'drive-1', name: 'Restricted Drive', provider: 'google-drive', enabled: true, archived: false, credentialConfigured: true },
-      { id: 'sharepoint-1', name: 'Restricted SharePoint', provider: 'sharepoint', enabled: true, archived: false, credentialConfigured: true },
-      { id: 'unsupported-documents-1', name: 'Unsupported documents', provider: 'unsupported-documents', enabled: true, archived: false, credentialConfigured: true },
-    ] as never)
+    const connections = [
+      { id: 'drive-1', name: 'Restricted Drive', provider: 'google-drive' },
+      { id: 'sharepoint-1', name: 'Restricted SharePoint', provider: 'sharepoint' },
+      { id: 'notion-1', name: 'Manual Notion', provider: 'notion' },
+    ] as Integration[]
     vi.mocked(documentSchedulesApi.save).mockResolvedValue({} as never)
-    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} canManage />)
+    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} refreshIntegrations={refreshIntegrations} publishableIntegrations={connections} canManage />)
     expect(await screen.findByRole('option', { name: 'Restricted Drive' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Restricted SharePoint' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'Unsupported documents' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Document publishing' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Manual Notion' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Schedule delivery' }))
     await waitFor(() => expect(documentSchedulesApi.save).toHaveBeenCalledWith(expect.objectContaining({ destination: 'confluence', integrationId: 'drive-1' })))
+  })
+
+  it('keeps the selected email channel after saving and requires a replacement if it disappears', async () => {
+    ready()
+    const channels = [{ id: 'mail-1', name: 'Security recipients', recipientCount: 2 }, { id: 'mail-2', name: 'Operations recipients', recipientCount: 3 }]
+    vi.mocked(documentSchedulesApi.emailDestinations)
+      .mockResolvedValueOnce(channels)
+      .mockResolvedValueOnce(channels.map((item) => ({ ...item })))
+      .mockResolvedValueOnce(channels.slice(0, 1))
+    vi.mocked(documentSchedulesApi.save).mockResolvedValue({} as never)
+    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} refreshIntegrations={refreshIntegrations} publishableIntegrations={publishableIntegrations} canManage />)
+    fireEvent.change(await screen.findByLabelText('Schedule destination type'), { target: { value: 'email' } })
+    const destination = screen.getByLabelText('Schedule destination')
+    const save = screen.getByRole('button', { name: 'Schedule delivery' })
+    fireEvent.change(destination, { target: { value: 'mail-2' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(save).toBeEnabled())
+    expect(destination).toHaveValue('mail-2')
+    fireEvent.click(save)
+    await waitFor(() => expect(screen.queryByRole('option', { name: /Operations recipients/ })).not.toBeInTheDocument())
+    expect(destination).toHaveValue('')
+    expect(save).toBeDisabled()
+    expect(documentSchedulesApi.save).toHaveBeenNthCalledWith(2, expect.objectContaining({ emailChannelId: 'mail-2' }))
+    fireEvent.change(destination, { target: { value: 'mail-1' } })
+    expect(save).toBeEnabled()
   })
 
   it('does not let a stale scope response replace a newer scope', async () => {
     let resolveFirst: (value: any) => void = () => {}
     vi.mocked(documentSchedulesApi.list).mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }) as never).mockResolvedValueOnce([])
-    vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([] as never)
-    const { rerender } = render(<DocumentSchedulePanel scope="engagement" scopeID="eng-old" sources={sources} canManage={false} />)
-    rerender(<DocumentSchedulePanel scope="engagement" scopeID="eng-new" sources={sources} canManage={false} />)
+    const { rerender } = render(<DocumentSchedulePanel scope="engagement" scopeID="eng-old" sources={sources} refreshIntegrations={refreshIntegrations} publishableIntegrations={publishableIntegrations} canManage={false} />)
+    rerender(<DocumentSchedulePanel scope="engagement" scopeID="eng-new" sources={sources} refreshIntegrations={refreshIntegrations} publishableIntegrations={publishableIntegrations} canManage={false} />)
     resolveFirst([{ id: 'old', frequency: 'weekly', weekday: 1, hour: 9, minute: 0, destination: 'email', timezone: 'UTC', nextDueAt: '2026-10-20T00:00:00Z', version: 1 }])
     await screen.findByText('No scheduled delivery')
     expect(screen.queryByText(/Monday at/)).not.toBeInTheDocument()
@@ -77,7 +100,7 @@ describe('DocumentSchedulePanel', () => {
 	it('shows aggregate run state without exposing recipient or raw delivery errors', async () => {
 		vi.mocked(documentSchedulesApi.list).mockResolvedValue([{ id: 'schedule-1', frequency: 'weekly', weekday: 1, hour: 9, minute: 0, destination: 'confluence', timezone: 'UTC', nextDueAt: '2026-10-20T00:00:00Z', version: 3 }] as never)
 		vi.mocked(documentSchedulesApi.runs).mockResolvedValue([{ id: 'run-1', dueAt: '2026-10-19T00:00:00Z', state: 'uncertain', contentHash: 'a'.repeat(64), remotePageId: 'page-1', remoteVersion: 4, deliveredCount: 1, uncertainCount: 1, failedCount: 0, updatedAt: '2026-10-19T00:01:00Z' }])
-		render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} canManage={false} />)
+		render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} refreshIntegrations={refreshIntegrations} publishableIntegrations={publishableIntegrations} canManage={false} />)
 		expect((await screen.findAllByText(/uncertain/)).length).toBeGreaterThan(0)
 		expect(screen.getByText(/delivered 1, uncertain 1, failed 0/)).toBeInTheDocument()
 		expect(screen.getByText(/page page-1 v4/)).toBeInTheDocument()

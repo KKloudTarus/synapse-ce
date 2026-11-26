@@ -90,6 +90,31 @@ describe('Integrations settings', () => {
     vi.mocked(api.listIntegrationExternalRuns).mockResolvedValue([])
   })
 
+  it('keeps the new connection details when an earlier operation poll finishes late', async () => {
+    const second = { ...integration, id: 'integration-2', name: 'Backup Jenkins' }
+    let finishPoll!: (value: IntegrationOperation) => void
+    let finishDetail!: (value: Integration) => void
+    vi.mocked(api.listIntegrations).mockResolvedValue([integration, second])
+    vi.mocked(api.getIntegration).mockImplementation((id) => id === second.id
+      ? new Promise((resolve) => { finishDetail = resolve })
+      : Promise.resolve(integration))
+    vi.mocked(api.listIntegrationOperations).mockImplementation(async (id) =>
+      id === integration.id ? [{ ...successfulTest, state: 'queued' }] : [])
+    vi.mocked(api.getIntegrationOperation).mockReturnValue(new Promise((resolve) => { finishPoll = resolve }))
+
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    await waitFor(() => expect(api.getIntegrationOperation).toHaveBeenCalledWith(successfulTest.id), { timeout: 2500 })
+    fireEvent.click(screen.getByRole('button', { name: /Backup Jenkins/ }))
+    expect(screen.getByText('Loading integration details…')).toBeInTheDocument()
+
+    await act(async () => { finishPoll(successfulTest) })
+    expect(api.getIntegration).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText('Connection test succeeded.')).not.toBeInTheDocument()
+    await act(async () => { finishDetail(second) })
+    expect(screen.queryByText('Loading integration details…')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Backup Jenkins/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('uses external integration copy so documentation links do not land on a CI/CD-only editor', async () => {
     vi.mocked(api.listIntegrations).mockResolvedValue([])
     render(<MemoryRouter><Integrations /></MemoryRouter>)

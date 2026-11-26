@@ -4,29 +4,18 @@ import {
   CheckDone01,
   Dataflow01,
   GitBranch01,
-  Lock01,
   RefreshCw01,
   Send01,
   ShieldTick,
 } from '@untitledui/icons'
 import { useCallback, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Button, EmptyState, ErrorState, InfoNote, Pill, Spinner, cn } from '../../components/ui'
+import { Badge } from '../../components/base/badges/badges'
+import { Button, ErrorState, InfoNote, Pill, Spinner, cn } from '../../components/ui'
 import { api, ApiError, type Connector, type NotificationChannel, type NotificationDelivery } from '../../lib/api'
 import { capabilityHint, disabledCapability, loadCapabilities, type CapabilityIndex } from '../../lib/capabilities'
 import type { Capability, Integration, IntegrationOperation, IntegrationProviderDescriptor } from '../../lib/types'
 import { canManageIntegrations } from '../../lib/roles'
-
-/**
- * Settings → Integrations: one place for every integration, grouped by capability (EPIC #1327 WS9,
- * issue #1463). The hub reads only existing APIs. Configuration stays on the detail pages it links to
- * (external integrations, Connectors, Alerting); a field an API does not expose is shown as "Not reported" instead of
- * being guessed.
- *
- * Gating follows the rest of the console: a capability the deployment reports as disabled renders
- * "off" with the switch that turns it on, a `planned` capability renders "not available in this build
- * yet", and a deployment that does not report capabilities is assumed on.
- */
 
 export type HealthTone = 'good' | 'warning' | 'danger' | 'neutral'
 export interface Health {
@@ -45,12 +34,39 @@ type Fact = CardFact | 'unavailable'
 
 const UNAVAILABLE = 'Not reported by this integration'
 
+type ProviderCategory = 'ci' | 'documentation' | 'tickets'
+type ProviderConnection = { integration: Integration; provider: IntegrationProviderDescriptor | undefined }
+type ProviderInventory =
+  | { state: 'ready'; connections: Record<ProviderCategory, ProviderConnection[]> }
+  | { state: 'off' }
+  | { state: 'error'; error: string }
+
+async function loadProviderInventory(): Promise<ProviderInventory> {
+  try {
+    const [providers, integrations] = await Promise.all([api.listIntegrationProviders(), api.listIntegrations()])
+    const descriptors = new Map(providers.map((provider) => [provider.provider, provider]))
+    const connections: Record<ProviderCategory, ProviderConnection[]> = { ci: [], documentation: [], tickets: [] }
+    for (const integration of integrations) {
+      if (integration.archived) continue
+      const provider = descriptors.get(integration.provider)
+      const category = provider?.capabilities.includes('tickets') ? 'tickets'
+        : provider?.capabilities.includes('documents') ? 'documentation' : 'ci'
+      connections[category].push({ integration, provider })
+    }
+    return { state: 'ready', connections }
+  } catch (caught) {
+    return caught instanceof ApiError && caught.status === 404 ? { state: 'off' } : { state: 'error', error: message(caught) }
+  }
+}
 
 export function IntegrationsHub() {
   const [capabilities, setCapabilities] = useState<CapabilityIndex | undefined>(undefined)
   const [role, setRole] = useState<string | undefined>(undefined)
   const [meError, setMeError] = useState<string | null>(null)
   const [generation, setGeneration] = useState(0)
+  const [loaded, setLoaded] = useState<{ generation: number; inventory: ProviderInventory }>()
+  const ready = !meError && capabilities !== undefined && role !== undefined
+  const inventory = loaded?.generation === generation ? loaded.inventory : undefined
 
   useEffect(() => {
     let live = true
@@ -70,19 +86,27 @@ export function IntegrationsHub() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!ready) return
+    let live = true
+    void loadProviderInventory().then((inventory) => {
+      if (live) setLoaded({ generation, inventory })
+    })
+    return () => { live = false }
+  }, [ready, generation])
+
   if (meError) return <ErrorState message={`Could not load your permissions: ${meError}`} />
   if (capabilities === undefined || role === undefined) return <Spinner label="Loading integrations…" />
 
-  // Everything the hub reads or tests needs manage_integrations (#1358), which admin and
-  // integration_admin hold; adding or re-pointing a destination happens on the detail pages.
   const canAdmin = canManageIntegrations(role)
+  const documentation = capabilities?.get('docpublish')
+  const documentationOff = documentation && !documentation.enabled && !documentation.planned
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-3xl text-sm text-secondary">
-          Every external system Synapse talks to, grouped by what it is for. Each card shows the health, last
-          success and last error its API reports; configure an integration on its detail page.
+          Manage connections by category. Cards show health and history when the provider reports them.
         </p>
         <Button variant="secondary" onClick={() => setGeneration((value) => value + 1)}>
           <RefreshCw01 className="size-4" /> Refresh
@@ -93,19 +117,20 @@ export function IntegrationsHub() {
           You can view external integrations. Source control, messaging, SIEM and test actions need a tenant administrator or an integration administrator.
         </p>
       )}
-      <ProviderIntegrationGroup key={`ci-${generation}`} category="ci" canAdmin={canAdmin} />
+      <ProviderIntegrationGroup key={`ci-${generation}`} category="ci" canAdmin={canAdmin} inventory={inventory} />
       <SourceControlGroup key={`scm-${generation}`} canAdmin={canAdmin} />
       <MessagingGroup key={`msg-${generation}`} canAdmin={canAdmin} capabilities={capabilities} />
-      <TicketingGroup key={`tickets-${generation}`} canAdmin={canAdmin} capability={capabilities?.get('ticketing') ?? null} />
-      {capabilities?.get('docpublish')?.enabled ? (
-        <ProviderIntegrationGroup key={`documentation-${generation}`} category="documentation" canAdmin={canAdmin} />
+      <TicketingGroup key={`tickets-${generation}`} canAdmin={canAdmin} capability={capabilities?.get('ticketing') ?? null} inventory={inventory} />
+      {documentation?.enabled ? (
+        <ProviderIntegrationGroup key={`documentation-${generation}`} category="documentation" canAdmin={canAdmin} inventory={inventory} />
       ) : (
-        <UnavailableGroup
-          title="Documentation"
-          icon={BookOpen01}
-          info="Publish engagement and assessment reports to Confluence and other documentation spaces."
-          capability={capabilities?.get('docpublish') ?? null}
-        />
+        <Group title="Documentation" icon={BookOpen01} info={PROVIDER_GROUP.documentation.info} status={documentationOff ? 'off' : 'planned'}>
+          {documentationOff ? (
+            <GroupMessage title="Documentation is off" hint={documentation.switch ? capabilityHint(documentation) : 'This deployment needs durable PostgreSQL persistence before documentation publishing is available.'} />
+          ) : (
+            <GroupMessage title="Documentation is not available in this build yet" />
+          )}
+        </Group>
       )}
       <SIEMGroup key={`siem-${generation}`} canAdmin={canAdmin} />
     </div>
@@ -116,13 +141,13 @@ export function IntegrationsHub() {
 
 type GroupStatus = 'on' | 'off' | 'planned' | 'restricted' | 'unknown' | 'available'
 
-const GROUP_STATUS: Record<GroupStatus, { label: string; className: string }> = {
-  on: { label: 'On', className: 'bg-low/10 text-low' },
-  off: { label: 'Off', className: 'text-tertiary' },
-  planned: { label: 'Not available yet', className: 'text-tertiary' },
-  restricted: { label: 'Admin only', className: 'text-tertiary' },
-  unknown: { label: 'Unknown', className: 'text-tertiary' },
-  available: { label: 'Available', className: 'bg-low/10 text-low' },
+const GROUP_STATUS: Record<GroupStatus, string> = {
+  on: 'On',
+  off: 'Off',
+  planned: 'Not available yet',
+  restricted: 'Admin only',
+  unknown: 'Unknown',
+  available: 'Available',
 }
 
 function Group({
@@ -153,7 +178,7 @@ function Group({
           </div>
           <h2 id={headingId} className="text-base font-semibold text-primary">{title}</h2>
           <InfoNote label={`About ${title}`}>{info}</InfoNote>
-          <Pill className={GROUP_STATUS[status].className}>{GROUP_STATUS[status].label}</Pill>
+          <Badge size="sm" color={status === 'on' || status === 'available' ? 'success' : 'gray'}>{GROUP_STATUS[status]}</Badge>
         </div>
         {(manage || links.length > 0) && (
           <div className="flex flex-wrap items-center gap-4">
@@ -170,9 +195,18 @@ function Group({
   )
 }
 
+function GroupMessage({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-secondary px-4 py-3 text-sm">
+      <p className="font-medium text-primary">{title}</p>
+      {hint && <p className="mt-1 text-tertiary">{hint}</p>}
+    </div>
+  )
+}
+
 function Notice({ tone = 'neutral', children }: { tone?: 'neutral' | 'success'; children: ReactNode }) {
   return (
-    <p role="status" className={cn('text-sm', tone === 'success' ? 'text-success-primary' : 'text-tertiary')}>
+    <p role="status" className={cn('text-sm', tone === 'success' ? 'text-utility-green-700' : 'text-tertiary')}>
       {children}
     </p>
   )
@@ -180,12 +214,7 @@ function Notice({ tone = 'neutral', children }: { tone?: 'neutral' | 'success'; 
 
 // ---- Integration card ----
 
-const TONE: Record<HealthTone, string> = {
-  good: 'bg-low/10 text-low',
-  warning: 'bg-medium/10 text-medium',
-  danger: 'bg-high/10 text-high',
-  neutral: '',
-}
+const TONE = { good: 'success', warning: 'warning', danger: 'error', neutral: 'gray' } as const
 
 function IntegrationCard({
   name,
@@ -215,7 +244,7 @@ function IntegrationCard({
       </div>
       <dl className="grid gap-3 text-sm">
         <Row label="Health">
-          {health === 'unavailable' ? <Unavailable /> : <Pill className={TONE[health.tone]}>{health.label}</Pill>}
+          {health === 'unavailable' ? <Unavailable /> : <Badge size="sm" color={TONE[health.tone]}>{health.label}</Badge>}
         </Row>
         <Row label="Last success"><FactValue fact={lastSuccess} /></Row>
         <Row label="Last error"><FactValue fact={lastError} error /></Row>
@@ -244,7 +273,7 @@ function FactValue({ fact, error }: { fact: Fact; error?: boolean }) {
   return (
     <span className="block min-w-0">
       <span>{formatDate(fact.at)}</span>
-      {fact.detail && <span className={cn('block break-words text-xs', error ? 'text-high' : 'text-tertiary')}>{fact.detail}</span>}
+      {fact.detail && <span className={cn('block break-words text-xs', error ? 'text-utility-red-700' : 'text-tertiary')}>{fact.detail}</span>}
     </span>
   )
 }
@@ -323,24 +352,11 @@ function operationLabel(type: IntegrationOperation['type']) {
   return type === 'test' ? 'Connection test' : type === 'discover' ? 'Discovery' : 'Poll'
 }
 
-interface ProviderItem {
-  integration: Integration
-  provider: IntegrationProviderDescriptor | undefined
-  /** null when the operation history could not be read. */
+type ProviderItem = ProviderConnection & {
   operations: IntegrationOperation[] | null
 }
 
-type ProviderCategory = 'ci' | 'documentation'
-
-const JIRA_PROVIDERS = new Set(['jira-cloud', 'jira-dc', 'github-issues', 'gitlab-issues', 'azure-boards', 'servicenow', 'linear'])
-const DOCUMENTATION_PROVIDERS = new Set(['confluence-cloud', 'confluence-dc', 'sharepoint', 'onedrive', 'google-drive', 's3-compatible'])
-
-function belongsToProviderCategory(provider: string, category: ProviderCategory) {
-  if (category === 'documentation') return DOCUMENTATION_PROVIDERS.has(provider)
-  return !JIRA_PROVIDERS.has(provider) && !DOCUMENTATION_PROVIDERS.has(provider)
-}
-
-const PROVIDER_GROUP: Record<ProviderCategory, {
+const PROVIDER_GROUP: Record<Exclude<ProviderCategory, 'tickets'>, {
   title: string
   icon: ComponentType<{ className?: string }>
   info: string
@@ -355,54 +371,41 @@ const PROVIDER_GROUP: Record<ProviderCategory, {
     info: 'CI/CD and inbound SCM integrations. Poll-capable providers link external runs to Project analyses; inbound-only providers receive authenticated events.',
     manageLabel: 'Manage CI/CD', loadingLabel: 'Loading CI/CD integrations…',
     disabledTitle: 'CI/CD integrations are not enabled on this deployment', emptyTitle: 'No CI/CD integrations yet',
-    emptyHint: (canAdmin) => canAdmin ? 'Add one from Manage CI/CD.' : 'A tenant administrator can add one.',
+    emptyHint: (canAdmin) => canAdmin ? 'Add a CI/CD or inbound repository connection.' : 'A tenant administrator can add one.',
   },
   documentation: {
     title: 'Documentation', icon: BookOpen01,
     info: 'Publish engagement and assessment reports to Confluence and other documentation spaces.',
     manageLabel: 'Manage documentation', loadingLabel: 'Loading documentation integrations…',
     disabledTitle: 'Documentation integrations are not enabled on this deployment', emptyTitle: 'No documentation integrations yet',
-    emptyHint: (canAdmin) => canAdmin ? 'Add Confluence from Manage documentation.' : 'A tenant administrator can add one.',
+    emptyHint: (canAdmin) => canAdmin ? 'Add a report publishing destination.' : 'A tenant administrator can add one.',
   },
 }
 
-function ProviderIntegrationGroup({ category, canAdmin }: { category: ProviderCategory; canAdmin: boolean }) {
+function loadOperations(integrationId: string) {
+  return api.listIntegrationOperations(integrationId).then(
+    (list) => [...list].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
+    () => null,
+  )
+}
+
+function ProviderIntegrationGroup({ category, canAdmin, inventory }: { category: Exclude<ProviderCategory, 'tickets'>; canAdmin: boolean; inventory?: ProviderInventory }) {
   const copy = PROVIDER_GROUP[category]
   const [items, setItems] = useState<ProviderItem[] | undefined>(undefined)
-  const [unsupported, setUnsupported] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const loadOperations = (integrationId: string) =>
-    api.listIntegrationOperations(integrationId).then(
-      (list) => [...list].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
-      () => null,
-    )
-
   useEffect(() => {
+    if (inventory?.state !== 'ready') return
     let live = true
-    ;(async () => {
-      try {
-        const [providers, integrations] = await Promise.all([api.listIntegrationProviders(), api.listIntegrations()])
-        const active = integrations.filter((item) => !item.archived && belongsToProviderCategory(item.provider, category))
-        const operations = await Promise.all(active.map((item) => loadOperations(item.id)))
-        if (!live) return
-        setItems(active.map((integration, index) => ({
-          integration,
-          provider: providers.find((item) => item.provider === integration.provider),
-          operations: operations[index],
-        })))
-      } catch (caught) {
-        if (!live) return
-        if (caught instanceof ApiError && caught.status === 404) setUnsupported(true)
-        else setError(message(caught))
-        setItems([])
-      }
-    })()
-    return () => {
-      live = false
-    }
-  }, [category])
+    void Promise.all(inventory.connections[category].map(async (connection) => ({
+      ...connection,
+      operations: await loadOperations(connection.integration.id),
+    }))).then((items) => {
+      if (live) setItems(items)
+    })
+    return () => { live = false }
+  }, [category, inventory])
 
   async function test(item: ProviderItem) {
     setNotice(null)
@@ -422,17 +425,19 @@ function ProviderIntegrationGroup({ category, canAdmin }: { category: ProviderCa
       title={copy.title}
       icon={copy.icon}
       info={copy.info}
-      status={unsupported ? 'off' : 'on'}
-      manage={unsupported ? undefined : { to: '/settings/integrations/ci', label: copy.manageLabel }}
+      status={inventory?.state === 'off' ? 'off' : inventory?.state === 'ready' ? 'on' : 'unknown'}
+      manage={inventory?.state === 'off' ? undefined : { to: '/settings/integrations/ci', label: copy.manageLabel }}
     >
       {notice && <Notice tone="success">{notice}</Notice>}
       {error && <ErrorState message={error} />}
-      {items === undefined ? (
+      {inventory?.state === 'off' ? (
+        <GroupMessage title={copy.disabledTitle} hint="The server was started without the integrations framework." />
+      ) : inventory?.state === 'error' ? (
+        <ErrorState message={inventory.error} />
+      ) : items === undefined ? (
         <Spinner label={copy.loadingLabel} />
-      ) : unsupported ? (
-        <EmptyState icon={copy.icon} title={copy.disabledTitle} hint="The server was started without the integrations framework." />
-      ) : items.length === 0 && !error ? (
-        <EmptyState icon={copy.icon} title={copy.emptyTitle} hint={copy.emptyHint(canAdmin)} />
+      ) : items.length === 0 ? (
+        <GroupMessage title={copy.emptyTitle} hint={copy.emptyHint(canAdmin)} />
       ) : (
         <CardGrid>
           {items.map((item) => {
@@ -500,16 +505,16 @@ function SourceControlGroup({ canAdmin }: { canAdmin: boolean }) {
       manage={canAdmin && connectors !== null ? { to: '/settings/connectors', label: 'Manage connectors' } : undefined}
     >
       {!canAdmin ? (
-        <EmptyState icon={Lock01} title="Administrator access required" hint="Only tenant administrators and integration administrators can see source-control connectors." />
+        <GroupMessage title="Administrator access required" hint="Only tenant administrators and integration administrators can see source-control connectors." />
       ) : connectors === undefined ? (
         <Spinner label="Loading connectors…" />
       ) : connectors === null ? (
-        <EmptyState icon={GitBranch01} title="Connectors are not enabled on this deployment" hint="The server was built or configured without the connector store." />
+        <GroupMessage title="Connectors are not enabled on this deployment" hint="The server was built or configured without the connector store." />
       ) : (
         <>
           {error && <ErrorState message={error} />}
           {connectors.length === 0 && !error ? (
-            <EmptyState icon={GitBranch01} title="No source-control connectors yet" hint="Add one from Manage connectors." />
+            <GroupMessage title="No source-control connectors yet" hint="Add one from Manage connectors." />
           ) : (
             <CardGrid>
               {connectors.map((connector) => (
@@ -532,23 +537,50 @@ function SourceControlGroup({ canAdmin }: { canAdmin: boolean }) {
   )
 }
 
-function TicketingGroup({ canAdmin, capability }: { canAdmin: boolean; capability: Capability | null }) {
-  const [integrations, setIntegrations] = useState<Integration[] | undefined>(undefined)
-  const [error, setError] = useState<string | null>(null)
+function TicketingGroup({ canAdmin, capability, inventory }: { canAdmin: boolean; capability: Capability | null; inventory?: ProviderInventory }) {
   const available = capability?.enabled === true
-  useEffect(() => {
-    if (!available || !canAdmin) return
-    let live = true
-    Promise.all([api.listIntegrationProviders(), api.listIntegrations()]).then(([providers, values]) => {
-      if (!live) return
-      const jira = new Set(providers.filter((provider) => provider.capabilities.includes('tickets') || provider.provider === 'jira-cloud' || provider.provider === 'jira-dc').map((provider) => provider.provider))
-      setIntegrations(values.filter((integration) => jira.has(integration.provider) && !integration.archived))
-    }, (cause) => { if (live) { setError(message(cause)); setIntegrations([]) } })
-    return () => { live = false }
-  }, [available, canAdmin])
-  return <Group title="Ticketing" icon={CheckDone01} info="Create provider tickets with a required preview, durable intent, and a recoverable uncertain-create state." status={!available ? (capability?.planned || capability === null ? 'planned' : 'off') : !canAdmin ? 'restricted' : 'on'} manage={available && canAdmin ? { to: '/settings/integrations/tickets', label: 'Manage tickets' } : undefined}>
-    {!available ? <EmptyState icon={CheckDone01} title={capability?.switch ? 'Ticketing is off' : 'Ticketing is not available in this build yet'} hint={capability?.switch ? `Set ${capability.switch}=true, then refresh.` : 'Ticketing is not available in this build yet.'} /> : !canAdmin ? <EmptyState icon={Lock01} title="Administrator access required" hint="Only tenant administrators and integration administrators can view ticket connections." /> : integrations === undefined ? <Spinner label="Loading ticket connections…" /> : error ? <ErrorState message={error} /> : integrations.length === 0 ? <EmptyState icon={CheckDone01} title="No ticket connections yet" hint="Connect a supported ticket provider to create finding tickets." /> : <CardGrid>{integrations.map((integration) => <IntegrationCard key={integration.id} name={integration.name} kind={integration.provider} detail={integration.endpoint} health={integration.enabled ? { label: 'Configured', tone: 'good' } : { label: 'Disabled', tone: 'neutral' }} lastSuccess="unavailable" lastError="unavailable" test={<p className="text-xs text-tertiary">Preview a finding before creating a ticket.</p>} />)}</CardGrid>}
-  </Group>
+  const off = inventory?.state === 'off'
+  const status: GroupStatus = !available ? (capability?.planned || !capability ? 'planned' : 'off')
+    : !canAdmin ? 'restricted' : off ? 'off' : inventory?.state === 'ready' ? 'on' : 'unknown'
+
+  return (
+    <Group
+      title="Ticketing"
+      icon={CheckDone01}
+      info="Create tickets from findings. Preview each ticket before sending it."
+      status={status}
+      manage={available && canAdmin && !off ? { to: '/settings/integrations/tickets', label: 'Manage tickets' } : undefined}
+    >
+      {!available ? (
+        <GroupMessage title={capability?.switch ? 'Ticketing is off' : 'Ticketing is not available in this build yet'} hint={capability?.switch ? capabilityHint(capability) : undefined} />
+      ) : !canAdmin ? (
+        <GroupMessage title="Administrator access required" hint="Only tenant administrators and integration administrators can view ticket connections." />
+      ) : !inventory ? (
+        <Spinner label="Loading ticket connections…" />
+      ) : inventory.state === 'off' ? (
+        <GroupMessage title="Ticket connections are not enabled on this deployment" />
+      ) : inventory.state === 'error' ? (
+        <ErrorState message={inventory.error} />
+      ) : inventory.connections.tickets.length === 0 ? (
+        <GroupMessage title="No ticket connections yet" hint="Connect a supported ticket provider to create finding tickets." />
+      ) : (
+        <CardGrid>
+          {inventory.connections.tickets.map(({ integration, provider }) => (
+            <IntegrationCard
+              key={integration.id}
+              name={integration.name}
+              kind={provider?.name ?? integration.provider}
+              detail={integration.endpoint}
+              health={integration.enabled ? { label: 'Configured', tone: 'good' } : { label: 'Disabled', tone: 'neutral' }}
+              lastSuccess="unavailable"
+              lastError="unavailable"
+              test={<p className="text-xs text-tertiary">Preview a finding before creating a ticket.</p>}
+            />
+          ))}
+        </CardGrid>
+      )}
+    </Group>
+  )
 }
 
 // ---- Messaging ----
@@ -647,16 +679,16 @@ function MessagingGroup({ canAdmin, capabilities }: { canAdmin: boolean; capabil
     >
       {notice && <Notice tone="success">{notice}</Notice>}
       {off ? (
-        <EmptyState icon={BellRinging01} title="Notifications are off" hint={capabilityHint(off)} />
+        <GroupMessage title="Notifications are off" hint={capabilityHint(off)} />
       ) : !canAdmin ? (
-        <EmptyState icon={Lock01} title="Administrator access required" hint="Only tenant administrators and integration administrators can see notification channels and their deliveries." />
+        <GroupMessage title="Administrator access required" hint="Only tenant administrators and integration administrators can see notification channels and their deliveries." />
       ) : items === undefined ? (
         <Spinner label="Loading notification channels…" />
       ) : (
         <>
           {error && <ErrorState message={error} />}
           {items.length === 0 && !error ? (
-            <EmptyState icon={BellRinging01} title="No notification channels yet" hint="Add one from Manage channels." />
+            <GroupMessage title="No notification channels yet" hint="Add one from Manage channels." />
           ) : (
             <CardGrid>
               {items.map((item) => (
@@ -712,45 +744,16 @@ function SIEMGroup({ canAdmin }: { canAdmin: boolean }) {
       manage={canAdmin && count !== null && count !== undefined ? { to: '/settings/siem', label: 'Manage SIEM streams' } : undefined}
     >
       {!canAdmin ? (
-        <EmptyState icon={Lock01} title="Administrator access required" hint="Only tenant administrators and integration administrators can see SIEM destinations and their status." />
+        <GroupMessage title="Administrator access required" hint="Only tenant administrators and integration administrators can see SIEM destinations and their status." />
       ) : error ? (
         <ErrorState message={error} />
       ) : count === undefined ? (
         <Spinner label="Loading SIEM streams…" />
       ) : count === null ? (
-        <EmptyState icon={ShieldTick} title="SIEM streams are not enabled" hint="This server has no SIEM sink API." />
+        <GroupMessage title="SIEM streams are not enabled" hint="This server has no SIEM sink API." />
       ) : (
-        <EmptyState icon={ShieldTick} title={count === 0 ? 'No SIEM destinations yet' : `${count} SIEM destination${count === 1 ? '' : 's'} configured`} hint="Manage destinations, stream status and connection tests on the SIEM settings page." />
+        <GroupMessage title={count === 0 ? 'No SIEM destinations yet' : `${count} SIEM destination${count === 1 ? '' : 's'} configured`} hint="Manage destinations, stream status and connection tests on the SIEM settings page." />
       )}
-    </Group>
-  )
-}
-
-// ---- Groups with no console integration in this build ----
-
-function UnavailableGroup({
-  title,
-  icon,
-  info,
-  capability,
-}: {
-  title: string
-  icon: ComponentType<{ className?: string }>
-  info: string
-  capability: Capability | null
-}) {
-  // A capability switched off either names an operator switch or depends on wiring the deployment
-  // does not have. Planned or unreported both mean there is nothing to configure in this build. A
-  // server that reports it on is ahead of this console, so say that.
-  const off = capability && !capability.enabled && !capability.planned ? capability : null
-  const onServer = !!capability?.enabled && !capability.planned
-  return (
-    <Group title={title} icon={icon} info={info} status={off ? 'off' : 'planned'}>
-      <EmptyState
-        icon={icon}
-        title={off ? `${title} is off` : onServer ? `${title} is on, but this console cannot show it yet` : `${title} is not available in this build yet`}
-        hint={off ? (off.switch ? capabilityHint(off) : 'This deployment needs durable PostgreSQL persistence before documentation publishing is available.') : undefined}
-      />
     </Group>
   )
 }

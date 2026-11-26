@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { Settings } from './Settings'
@@ -69,5 +69,21 @@ describe('Settings Layout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Light theme' }))
     expect(document.documentElement.dataset.theme).toBe('light')
     expect(document.documentElement.classList.contains('dark-mode')).toBe(false)
+  })
+})
+
+describe('Settings navigation', () => {
+  it.each([
+    ['/settings', 'Audit'],
+    ['/settings/integrations', 'Integrations'],
+    ['/settings/integrations/ci', 'Connections'],
+    ['/settings/integrations/jira', 'Jira'],
+    ['/settings/integrations/tickets', 'Tickets'],
+    ['/settings/templates/email', 'Templates'],
+  ])('marks exactly one section current at %s', (path, label) => {
+    render(<MemoryRouter initialEntries={[path]}><Settings /></MemoryRouter>)
+    const nav = within(screen.getByRole('navigation', { name: 'Settings sections' }))
+    expect(nav.getAllByRole('link', { current: 'page' })).toEqual([nav.getByRole('link', { name: label })])
+    expect(nav.getByRole('combobox', { name: 'Settings section' })).toHaveTextContent(label)
   })
 })

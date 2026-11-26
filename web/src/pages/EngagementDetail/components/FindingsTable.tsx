@@ -210,7 +210,7 @@ export function FindingsTable({
     )
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="@container w-full overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead>
           <tr className="border-b border-secondary bg-secondary text-[11px] font-bold uppercase tracking-wider text-secondary">
@@ -300,15 +300,16 @@ export function FindingsTable({
                 </tr>
                 {isOpen && (
                   <tr className="bg-secondary border-t border-secondary">
-                    <td />
-                    <td colSpan={5} className="p-4">
-                      <FindingDetail
-                        finding={f}
-                        vuln={v}
-                        engagementId={engagementId}
-                        onUpdated={onUpdated}
-                        onReload={onReload}
-                      />
+                    <td colSpan={6} className="p-0">
+                      <div className="sticky left-0 w-[100cqw] p-3 sm:p-4">
+                        <FindingDetail
+                          finding={f}
+                          vuln={v}
+                          engagementId={engagementId}
+                          onUpdated={onUpdated}
+                          onReload={onReload}
+                        />
+                      </div>
                     </td>
                   </tr>
                 )}

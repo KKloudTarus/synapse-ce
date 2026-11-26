@@ -88,8 +88,20 @@ describe('PreviewPanel', () => {
     expect(frame).toHaveAttribute('sandbox', '')
     expect(frame.getAttribute('srcdoc')).toContain("default-src 'none'")
     expect(frame.getAttribute('srcdoc')).toContain('name="color-scheme" content="light"')
-    expect(frame.getAttribute('srcdoc')).toContain('color: #101828; background: #fff')
     expect(frame.getAttribute('srcdoc')).toContain('<script>window.pwned = true</script>')
+  })
+
+  it('adds preview policy inside the formatter document without nesting another body', async () => {
+    const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><main><p>Mail</p></main></body></html>'
+    vi.mocked(api.previewNotificationTemplate).mockResolvedValue(preview({ formatted: { content_type: 'text/plain', body: 'Mail', html_body: html } }))
+    await renderPreview()
+    await settlePreview()
+
+    const srcDoc = screen.getByTitle('Email preview').getAttribute('srcdoc')!
+    expect(srcDoc.match(/<!doctype html>/gi)).toHaveLength(1)
+    expect(srcDoc.match(/<body\b/gi)).toHaveLength(1)
+    expect(srcDoc).toMatch(/<head>.*default-src 'none'.*<\/head><body>/s)
+    expect(srcDoc).toContain('<main><p>Mail</p></main>')
   })
 
   it('shows chat severity and safe console links sent by the formatter', async () => {

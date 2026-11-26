@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DocumentPublishingPanel } from './DocumentPublishingPanel'
 
@@ -10,6 +10,7 @@ vi.mock('../../../components/synapse/ConfirmDialog', () => ({ ConfirmDialog: ({ 
 import { api } from '../../../lib/api'
 import { integrationsApi } from '../../../lib/api/integrations'
 import { documentsApi } from '../../../lib/api/documents'
+import { documentSchedulesApi } from '../../../lib/api/document-schedules'
 
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); vi.useRealTimers(); window.sessionStorage.clear() })
 function ready(role = 'reviewer', identity: Record<string, unknown> = {}) { vi.mocked(api.me).mockResolvedValue({ role, ...identity } as never); vi.mocked(api.listAssessmentCycles).mockResolvedValue({ items: [], nextCursor: '' } as never); vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([{ id: 'confluence', name: 'Confluence', provider: 'confluence-cloud', enabled: true, archived: false, credentialConfigured: true }] as never); vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([]); vi.mocked(documentsApi.listProjectDocuments).mockResolvedValue([]); vi.mocked(documentsApi.listSnapshots).mockResolvedValue([]) }
@@ -372,15 +373,32 @@ describe('DocumentPublishingPanel', () => {
   })
 })
 
-it('admits restricted document profiles while excluding unsupported destinations', async () => {
- ready()
- vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([
-  { id: 'drive', name: 'Restricted Drive', provider: 'google-drive', enabled: true, archived: false, credentialConfigured: true },
-  { id: 'unsupported-documents', name: 'Unsupported documents', provider: 'unsupported-documents', enabled: true, archived: false, credentialConfigured: true },
-  { id: 'graph', name: 'Restricted SharePoint', provider: 'sharepoint', enabled: true, archived: false, credentialConfigured: true },
- ] as never)
- render(<DocumentPublishingPanel engagementId="eng-1" />)
- expect(await screen.findByRole('option', { name: 'Restricted Drive' })).toBeInTheDocument()
- expect(screen.queryByRole('option', { name: 'Unsupported documents' })).not.toBeInTheDocument()
- expect(screen.getByRole('option', { name: 'Restricted SharePoint' })).toBeInTheDocument()
+it('shares document connections with scheduling and requires a new selection when a connection disappears', async () => {
+  ready()
+  const drive = { id: 'drive', name: 'Restricted Drive', provider: 'google-drive', enabled: true, archived: false, credentialConfigured: true }
+  const graph = { ...drive, id: 'graph', name: 'Restricted SharePoint', provider: 'sharepoint' }
+  vi.mocked(integrationsApi.listIntegrations)
+    .mockResolvedValueOnce([drive, graph, { ...drive, id: 'unsupported-documents', name: 'Unsupported documents', provider: 'unsupported-documents' }] as never)
+    .mockResolvedValueOnce([drive] as never)
+  vi.spyOn(documentSchedulesApi, 'list').mockResolvedValue([])
+  vi.spyOn(documentSchedulesApi, 'emailDestinations').mockResolvedValue([])
+  const saveSchedule = vi.spyOn(documentSchedulesApi, 'save').mockResolvedValue({} as never)
+
+  render(<DocumentPublishingPanel engagementId="eng-1" />)
+  const publishChoices = within(await screen.findByLabelText('Document connection'))
+  const schedule = await screen.findByLabelText('Schedule destination')
+  expect(publishChoices.getByRole('option', { name: 'Restricted SharePoint' })).toBeInTheDocument()
+  expect(publishChoices.queryByRole('option', { name: 'Unsupported documents' })).not.toBeInTheDocument()
+  expect(schedule).toHaveValue('drive')
+  expect(integrationsApi.listIntegrations).toHaveBeenCalledTimes(1)
+
+  fireEvent.change(schedule, { target: { value: 'graph' } })
+  const save = screen.getByRole('button', { name: 'Schedule delivery' })
+  fireEvent.click(save)
+  expect(saveSchedule).toHaveBeenCalledWith(expect.objectContaining({ integrationId: 'graph' }))
+  expect(await screen.findByText('The selected destination is no longer available.')).toBeInTheDocument()
+  expect(schedule).toHaveValue('')
+  expect(save).toBeDisabled()
+  fireEvent.change(schedule, { target: { value: 'drive' } })
+  expect(save).toBeEnabled()
 })

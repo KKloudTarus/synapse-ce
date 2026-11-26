@@ -15,11 +15,16 @@ const preview = (fields: Record<string, unknown>, description = 'Fallback descri
 
 describe('TicketPreviewView', () => {
   it('shows only the snapshot-bound destination and blocks an undisclosed legacy response', () => {
-    const { rerender } = render(<TicketPreviewView preview={{ ...preview({ project: { key: 'owner/repo' }, issuetype: { id: 'issue' } }), provider: 'gitlab-issues', endpoint: 'https://bound.gitlab.example' }} />)
+    const fields = { project: { key: 'owner/repo' }, issuetype: { id: 'issue' } }
+    const { rerender } = render(<TicketPreviewView preview={{ ...preview(fields), wire: fields, provider: 'gitlab-issues', endpoint: 'https://bound.gitlab.example' }} />)
     expect(screen.getByLabelText('Authoritative ticket destination')).toHaveTextContent('gitlab-issues')
     expect(screen.getByLabelText('Authoritative ticket destination')).toHaveTextContent('https://bound.gitlab.example')
+    expect(screen.getByLabelText('Authoritative ticket destination')).toHaveTextContent('owner/repo')
+    expect(screen.queryByText('project', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByText('issuetype', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByText(JSON.stringify(fields, null, 2), { normalizer: (text) => text })).toBeInTheDocument()
     rerender(<TicketPreviewView preview={preview({})} />)
-    expect(screen.getByRole('alert')).toHaveTextContent('does not disclose a destination bound to its digest')
+    expect(screen.getByRole('alert')).toHaveTextContent('The preview has no confirmed destination')
   })
 
   it('renders the provider-ready Cloud ADF without exposing escaped formatter input', () => {

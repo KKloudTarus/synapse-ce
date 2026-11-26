@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../lib/api'
+import { newIdempotencyKey } from '../../../lib/api/client'
 import { TicketsPanel } from './TicketsPanel'
 
 vi.mock('../../../lib/api', () => ({ api: { findingTickets: vi.fn(), projectSourceFindingTickets: vi.fn(), ticketObservations: vi.fn(), projectSourceFindingTicketObservations: vi.fn(), me: vi.fn(), listIntegrations: vi.fn(), listIntegrationProviders: vi.fn(), previewTicket: vi.fn(), previewProjectSourceFindingTicket: vi.fn(), submitTicket: vi.fn(), submitProjectSourceFindingTicket: vi.fn(), linkTicket: vi.fn(), linkProjectSourceFindingTicket: vi.fn(), unlinkTicket: vi.fn(), unlinkProjectSourceFindingTicket: vi.fn(), reconcileTicketIntent: vi.fn(), retryTicketIntent: vi.fn() } }))
-vi.mock('../../../lib/api/client', () => ({ newIdempotencyKey: () => 'request-key' }))
+vi.mock('../../../lib/api/client', () => ({ newIdempotencyKey: vi.fn() }))
 
 const ticketData = (over: Record<string, unknown> = {}) => ({
   links: [], intents: [], mappings: [{ id: 'mapping-1', integrationId: 'jira-1', scope: 'engagement' as const, scopeId: 'eng-1', projectKey: 'SEC', issueType: 'Bug', component: '', labels: [], priorityMap: {}, securityLevel: '', waiverReason: '', dataClass: 'summary' as const, locale: 'en' as const, summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '', statusTransitions: {}, groupingMode: 'finding' as const, autoPushEnabled: false, autoPushMinSeverity: 'high' as const, version: 1 }], ...over,
@@ -13,6 +14,7 @@ const ticketData = (over: Record<string, unknown> = {}) => ({
 describe('TicketsPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    vi.mocked(newIdempotencyKey).mockReturnValue('request-key')
     vi.mocked(api.findingTickets).mockResolvedValue(ticketData())
     vi.mocked(api.ticketObservations).mockResolvedValue({ observations: [], proposals: [], comments: [] })
     vi.mocked(api.projectSourceFindingTickets).mockResolvedValue(ticketData())
@@ -36,6 +38,50 @@ describe('TicketsPanel', () => {
     await waitFor(() => expect(api.submitTicket).toHaveBeenCalledWith('eng-1', 'finding-1', 'mapping-1', 'digest-1', 'request-key'))
     expect(api.submitTicket).toHaveBeenCalledTimes(1)
     expect(await screen.findByText(/Ticket request recorded/)).toBeInTheDocument()
+  })
+
+  it('recovers from a failed initial load without showing an empty or denied state', async () => {
+    vi.mocked(api.findingTickets).mockRejectedValueOnce(new Error('Ticket list unavailable'))
+    render(<TicketsPanel engagementId="eng-1" findingId="finding-1" />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ticket list unavailable')
+    expect(screen.queryAllByText(/no linked tickets|no ticket mapping|must preview or submit/i)).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh tickets' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview ticket' })).toBeEnabled())
+  })
+
+  it('requires a fresh preview when a refresh replaces the mapping', async () => {
+    vi.mocked(api.previewTicket).mockResolvedValue({ fields: {}, summary: 'Old mapping preview', description: '', dataClass: 'summary', digest: 'digest-1', mappingVersion: 1, provider: 'github-issues', endpoint: 'https://github.example' })
+    render(<TicketsPanel engagementId="eng-1" findingId="finding-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview ticket' }))
+    expect(await screen.findByRole('button', { name: 'Submit ticket' })).toBeEnabled()
+
+    vi.mocked(api.findingTickets).mockResolvedValue(ticketData({ mappings: [{ ...ticketData().mappings[0], id: 'mapping-2' }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh tickets' }))
+    expect(await screen.findByLabelText('Ticket mapping')).toHaveValue('mapping-2')
+    expect(screen.queryByText('Old mapping preview')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Submit ticket' })).not.toBeInTheDocument()
+    expect(api.submitTicket).not.toHaveBeenCalled()
+  })
+
+  it('reuses an unconfirmed submission key when a refreshed preview matches', async () => {
+    vi.mocked(newIdempotencyKey).mockReturnValueOnce('first-key').mockReturnValue('new-key')
+    vi.mocked(api.previewTicket).mockResolvedValue({ fields: {}, summary: 'Same mapping preview', description: '', dataClass: 'summary', digest: 'same-digest', mappingVersion: 1, provider: 'github-issues', endpoint: 'https://github.example' })
+    const intent = { id: 'intent-1', state: 'queued', errorCode: '', version: 1, createdAt: '' }
+    vi.mocked(api.submitTicket).mockRejectedValueOnce(new Error('Response timed out')).mockResolvedValueOnce(intent)
+    render(<TicketsPanel engagementId="eng-1" findingId="finding-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview ticket' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit ticket' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Response timed out')
+
+    vi.mocked(api.findingTickets).mockResolvedValue(ticketData({ intents: [intent] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh tickets' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview ticket' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit ticket' }))
+    expect(await screen.findByText(/Ticket request recorded/)).toBeInTheDocument()
+    expect(api.submitTicket).toHaveBeenCalledTimes(2)
+    expect(api.submitTicket).toHaveBeenNthCalledWith(2, 'eng-1', 'finding-1', 'mapping-1', 'same-digest', 'first-key')
+    expect(screen.getAllByText('queued')).toHaveLength(1)
   })
 
   it('distinguishes colliding forge mappings and shows the snapshot-bound preview destination', async () => {

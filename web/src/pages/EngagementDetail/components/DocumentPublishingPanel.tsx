@@ -141,6 +141,18 @@ export function DocumentPublishingPanel({ engagementId, project }: DocumentPubli
   const isCurrentIntentOperation = (current: number, storageKey: string | null, generation: number) =>
     current === epoch.current && storageKey === pendingStorageKeyRef.current && generation === intentGeneration.current
 
+  const updateIntegrations = (items: Integration[]) => {
+    const available = items.filter(isPublishableDocumentIntegration)
+    setIntegrations(items)
+    setSelectedIntegration((old) => available.some((item) => item.id === old) ? old : available[0]?.id ?? '')
+  }
+
+  const refreshIntegrations = async () => {
+    const current = epoch.current
+    const items = await integrationsApi.listIntegrations()
+    if (current === epoch.current) updateIntegrations(items)
+  }
+
   const refresh = async (current = epoch.current) => {
     try {
       const linksRequest = project ? documentsApi.listProjectDocuments(project.key) : documentsApi.listEngagementDocuments(engagementId ?? '')
@@ -150,7 +162,6 @@ export function DocumentPublishingPanel({ engagementId, project }: DocumentPubli
         ? await currentProjectCycles(project.id)
         : { items: [] as AssessmentCycleSummary[], incomplete: false }
       if (current !== epoch.current) return
-      const available = nextIntegrations.filter(isPublishableDocumentIntegration)
       const nextSources = project ? projectSources(project, cycleResult.items) : baseSources
       const nextPendingStorageKey = intentStorageKey(me?.tenantId, me?.id, isProject ? 'project' : 'engagement', scopeID)
       if (pendingStorageKeyRef.current !== nextPendingStorageKey) {
@@ -162,10 +173,9 @@ export function DocumentPublishingPanel({ engagementId, project }: DocumentPubli
       pendingStorageKeyRef.current = nextPendingStorageKey
       setPendingStorageKey(nextPendingStorageKey)
       setLinks(nextLinks)
-      setIntegrations(nextIntegrations)
+      updateIntegrations(nextIntegrations)
       setSources(nextSources)
       setCyclesIncomplete(cycleResult.incomplete)
-      setSelectedIntegration((old) => available.some((item) => item.id === old) ? old : available[0]?.id ?? '')
       setSelectedSourceRef((old) => nextSources.some((item) => item.sourceRef === old) ? old : nextSources[0]?.sourceRef ?? '')
       setCanPublish(me?.role === 'reviewer' || isAdminRole(me?.role))
       setError(null)
@@ -367,7 +377,14 @@ export function DocumentPublishingPanel({ engagementId, project }: DocumentPubli
       {links.length ? <ul className="space-y-2">{links.map((link) => <li key={link.id} className="rounded-md border border-secondary px-3 py-2 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><div className="min-w-0"><div className="flex items-center gap-1.5 font-medium text-primary">{!link.retiredAt && (link.restrictionStatus === 'restriction_lost' || link.restrictionStatus === 'unverifiable') ? <AlertTriangle className="size-4 text-warning-primary" /> : <CheckCircle className="size-4 text-success" />}{link.retiredAt ? link.removalKind === 'trash' ? 'Moved to destination trash' : 'Unpublished' : isDestinationManagedSnapshot(link) && (link.restrictionStatus === 'restriction_lost' || link.restrictionStatus === 'unverifiable') ? <span role="status">Destination observation failed</span> : isDestinationManagedSnapshot(link) ? <span role="status">Destination-managed snapshot</span> : link.restrictionStatus === 'restriction_lost' ? <span role="status">Restricted sharing lost</span> : link.restrictionStatus === 'unverifiable' ? <span role="status">Sharing could not be verified</span> : 'Published'} · {link.remoteRevisionKind === 'opaque' ? `revision ${link.revision}` : `v${link.remoteVersion}`}</div>{!link.retiredAt && link.restrictionCheckedAt ? <p className="mt-1 text-tertiary">Last {isDestinationManagedSnapshot(link) ? 'destination' : 'sharing'} check: {new Date(link.restrictionCheckedAt).toLocaleString()}</p> : null}{isDestinationManagedSnapshot(link) ? <p role="note" className="mt-1 text-tertiary">Destination owner controls workspace, inherited, guest, and anonymous-link access. Synapse cannot verify the effective ACL; a missing public URL does not prove privacy.</p> : null}<p className="mt-1 truncate font-mono text-tertiary" title={link.contentHash}>{shortHash(link.contentHash)}</p></div><div className="flex flex-wrap items-center gap-1.5">{!link.retiredAt && link.remoteUrl ? <a className="inline-flex items-center gap-1 text-brand-secondary underline" href={link.remoteUrl} target="_blank" rel="noreferrer"><LinkExternal02 className="size-3" />Open</a> : null}{isDestinationManagedSnapshot(link) ? <Button variant="secondary" className="px-2 py-1 text-xs" onClick={() => toggleSnapshots(link)} disabled={historyLoading !== null}>{history?.link.id === link.id ? 'Hide publication history' : 'Publication history'}</Button> : null}{canPublish && !link.retiredAt ? <Button variant="secondary" className="px-2 py-1 text-xs" onClick={() => setPurge(link)} disabled={busy}><Trash01 className="size-3.5" />Unpublish</Button> : null}</div></div>{isDestinationManagedSnapshot(link) && history?.link.id === link.id ? <div className="mt-3 border-t border-secondary pt-2" aria-label={`Publication history for ${link.id}`}>{historyLoading === link.id ? <Spinner label="Loading publication history…" /> : historyError ? <ErrorState message={historyError} /> : history.snapshots.length ? <ul className="space-y-1 text-tertiary">{history.snapshots.map((snapshot) => <li key={snapshot.id}>{snapshot.remoteUrl ? <a className="text-brand-secondary underline" href={snapshot.remoteUrl} target="_blank" rel="noreferrer">Snapshot</a> : 'Snapshot'} · {new Date(snapshot.updatedAt || snapshot.createdAt).toLocaleString()} · {snapshot.contentHash ? shortHash(snapshot.contentHash) : 'digest unavailable'}{snapshot.remoteUrl === link.remoteUrl && snapshot.contentHash === link.contentHash ? ' · Current snapshot' : ''}</li>)}</ul> : <p className="text-tertiary">No retained snapshot history is available.</p>}</div> : null}</li>)}</ul> : <EmptyState icon={File06} title="No published report" hint="Choose a configured document connection to request publication." />}
       {cyclesIncomplete ? <p className="text-xs text-warning-primary">Only the first {maxCyclePages * cyclePageLimit} project cycles were checked. Use the cycle view before publishing a closure report if it is not listed.</p> : null}
       {!canPublish ? <p className="text-xs text-tertiary">A reviewer or administrator can request publication and unpublish a report.</p> : availableIntegrations.length === 0 ? <p className="text-xs text-tertiary">No enabled document connection with credentials is available.</p> : <div className="flex flex-wrap items-end gap-2">{isProject && sources.length > 1 ? <label className="grid gap-1 text-xs font-medium text-secondary">Report source<select aria-label="Report source" className="rounded-md border border-secondary bg-primary px-2 py-1.5 text-sm text-primary" value={selectedSourceRef} onChange={(event) => setSelectedSourceRef(event.target.value)} disabled={busy}>{sources.map((item) => <option key={item.sourceRef} value={item.sourceRef}>{item.label}</option>)}</select></label> : null}<label className="grid gap-1 text-xs font-medium text-secondary">Connection<select aria-label="Document connection" className="rounded-md border border-secondary bg-primary px-2 py-1.5 text-sm text-primary" value={selectedIntegration} onChange={(event) => setSelectedIntegration(event.target.value)} disabled={busy}>{availableIntegrations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><Button className="px-3 py-1.5 text-xs" loading={busy} onClick={() => void publish()} disabled={!selectedIntegration || !selectedSourceRef || busy}><File06 className="size-4" />Publish report</Button></div>}
-      <DocumentSchedulePanel scope={isProject ? 'project' : 'engagement'} scopeID={scopeID} sources={sources} canManage={canPublish} />
+      <DocumentSchedulePanel
+        scope={isProject ? 'project' : 'engagement'}
+        scopeID={scopeID}
+        sources={sources}
+        canManage={canPublish}
+        publishableIntegrations={availableIntegrations}
+        refreshIntegrations={refreshIntegrations}
+      />
       <ConfirmDialog open={purge !== null} title={purge && isDestinationManagedSnapshot(purge) ? 'Move current snapshot to trash' : 'Unpublish report'} description={purge && isDestinationManagedSnapshot(purge) ? 'Moves the current Notion snapshot to its recoverable Trash. Files may persist, older snapshots remain, and Synapse does not claim permanent purge.' : 'This permanently removes the page, its attachments, and its version history from the destination.'} confirmLabel={purge && isDestinationManagedSnapshot(purge) ? 'Move current snapshot to Trash' : 'Unpublish permanently'} busy={busy} error={error} onCancel={() => { if (!busy) setPurge(null) }} onConfirm={() => void unpublish()} />
     </section>
   )
