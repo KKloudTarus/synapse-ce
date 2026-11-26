@@ -94,11 +94,12 @@ export function Alerting() {
   const [editingRule, setEditingRule] = useState<NotificationRule | undefined>()
   const [historyVersion, setHistoryVersion] = useState(0)
   const [rules, setRules] = useState<NotificationRule[]>([])
+  const [rulesError, setRulesError] = useState<string | null>(null)
   const [eventTypes, setEventTypes] = useState<NotificationEventSpec[]>()
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [disabled, setDisabled] = useState<Capability | null>(null)
   const [channelTypes, setChannelTypes] = useState<string[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [channelsError, setChannelsError] = useState<string | null>(null)
   // The catalog loads on its own so a failure there leaves channels and rules usable.
   const loadCatalog = useCallback(async () => {
     setCatalogError(null)
@@ -110,8 +111,17 @@ export function Alerting() {
       )
     }
   }, [])
+  const loadRules = useCallback(async () => {
+    setRulesError(null)
+    try {
+      setRules(await api.listNotificationRules())
+    } catch (e) {
+      setRules([])
+      setRulesError(e instanceof Error ? e.message : 'Could not load routing rules')
+    }
+  }, [])
   const load = useCallback(async () => {
-    setError(null)
+    setChannelsError(null)
     // The capability catalog says whether the framework is on. A deployment that does not report
     // capabilities is assumed on, so a working framework is never hidden.
     const capabilities = await loadCapabilities()
@@ -127,21 +137,25 @@ export function Alerting() {
     // report it gets every known type.
     const types = capabilities?.get('notifications.channel_types')
     setChannelTypes(types?.enabled ? (types.values ?? []) : null)
+    void loadCatalog()
+    const rulesRequest = loadRules()
     try {
       setChannels(await api.listNotificationChannels())
-      void loadCatalog()
-      setRules(await api.listNotificationRules())
       setHistoryVersion((v) => v + 1)
     } catch (e) {
-      setChannels([])
-      setError(
-        e instanceof Error ? e.message : 'Failed to load notification settings',
+      setChannels(null)
+      setChannelsError(
+        e instanceof Error ? e.message : 'Could not load notification channels',
       )
     }
-  }, [loadCatalog])
+    await rulesRequest
+  }, [loadCatalog, loadRules])
   useEffect(() => {
     if (canManage) void load()
   }, [load, canManage])
+  const hasChannels = channels != null && channels.length > 0
+  const hasRoutableEvents = eventTypes !== undefined && eventTypes.some((event) => !event.operator_only)
+  const ruleEditorReady = hasChannels && hasRoutableEvents
   return (
     <div className="space-y-6">
       <LegacyAlertTest canAdmin={canManage} />
@@ -172,8 +186,14 @@ export function Alerting() {
               void load()
             }}
           />
-          {error && <ErrorState message={error} />}{' '}
-          {channels === undefined && (
+          {channelsError ? (
+            <Card title="Channels">
+              <ErrorState message={channelsError} />
+              <Button variant="secondary" className="mt-3" onClick={() => void load()}>
+                Retry channels
+              </Button>
+            </Card>
+          ) : !channels && (
             <Spinner label="Loading notification settings…" />
           )}
           {channels && (
@@ -186,7 +206,7 @@ export function Alerting() {
               onEdit={setEditingChannel}
             />
           )}
-          {channels && channels.length > 0 && catalogError && (
+          {hasChannels && catalogError && (
             <Card title="Add routing rule">
               <ErrorState message={catalogError} />
               <div className="mt-3">
@@ -196,25 +216,16 @@ export function Alerting() {
               </div>
             </Card>
           )}
-          {channels &&
-            channels.length > 0 &&
-            !eventTypes &&
-            !catalogError &&
-            !error && <Spinner label="Loading event types…" />}
-          {channels &&
-            channels.length > 0 &&
-            eventTypes &&
-            !eventTypes.some((e) => !e.operator_only) && (
+          {hasChannels && !eventTypes &&
+            !catalogError && <Spinner label="Loading event types…" />}
+          {hasChannels && eventTypes && !hasRoutableEvents && (
               <EmptyState
                 icon={BellRinging01}
                 title="No routable event types"
                 hint="This deployment declares no event types that routing rules can match."
               />
             )}
-          {channels &&
-            channels.length > 0 &&
-            eventTypes &&
-            eventTypes.some((e) => !e.operator_only) && (
+          {ruleEditorReady && (
             <RuleCreate
               channels={channels}
               eventTypes={eventTypes}
@@ -227,14 +238,23 @@ export function Alerting() {
               }}
             />
           )}
-          <RuleList
-            onEdit={setEditingRule}
-            rules={rules}
-            channels={channels ?? []}
-            eventTypes={eventTypes ?? []}
-            canAdmin={canManage}
-            refresh={load}
-          />
+          {rulesError ? (
+            <Card title="Routing rules">
+              <ErrorState message={rulesError} />
+              <Button variant="secondary" className="mt-3" onClick={() => void loadRules()}>
+                Retry routing rules
+              </Button>
+            </Card>
+          ) : (
+            <RuleList
+              onEdit={ruleEditorReady ? setEditingRule : undefined}
+              rules={rules}
+              channels={channels ?? []}
+              eventTypes={eventTypes ?? []}
+              canAdmin={canManage}
+              refresh={load}
+            />
+          )}
           {canManage && channels !== undefined && (
             <PersonalDelivery canManage={canManage} eventTypes={eventTypes ?? []} />
           )}
@@ -1673,7 +1693,7 @@ function RuleList({
   canAdmin,
   refresh,
 }: {
-  onEdit: (rule: NotificationRule) => void
+  onEdit?: (rule: NotificationRule) => void
   rules: NotificationRule[]
   channels: NotificationChannel[]
   eventTypes: NotificationEventSpec[]
@@ -1744,8 +1764,8 @@ function RuleList({
             </Button>
             <Button
               variant="secondary"
-              disabled={!canAdmin}
-              onClick={() => onEdit(r)}
+              disabled={!canAdmin || !onEdit}
+              onClick={() => onEdit?.(r)}
             >
               Edit rule
             </Button>

@@ -31,9 +31,12 @@ function errorCopy(error: unknown): string {
 }
 
 function emailDocument(html: string): string {
-  // The iframe is additionally sandboxed without allow-scripts. The policy stops remote content
-  // from loading even if an upstream formatter accidentally emits a URL-bearing element.
-  return `<!doctype html><meta name="color-scheme" content="light"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><body style="color: #101828; background: #fff">${html}</body>`
+  const previewHead = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="color-scheme" content="light"><style>body{margin:12px;color:#101828;background:#fff;font:14px/1.5 system-ui,sans-serif;overflow-wrap:anywhere}</style>`
+  // Apply the policy before any formatter content, including when the API returns a fragment.
+  const documentStart = /^\s*<!doctype html>\s*<html(?:\s+lang="[a-z0-9-]+")?>\s*<head>/i
+  return documentStart.test(html)
+    ? html.replace(documentStart, (head) => head + previewHead)
+    : `<!doctype html><html><head>${previewHead}</head><body>${html}</body></html>`
 }
 
 function eventOption(event: NotificationTemplatePreviewEvent): string {
@@ -267,7 +270,7 @@ function RenderedPreview({ preview }: { preview: NotificationTemplatePreview }) 
     return (
       <div className="space-y-2" aria-label="Email preview">
         {preview.formatted?.subject && <p className="font-semibold text-primary">{preview.formatted.subject}</p>}
-        <iframe title="Email preview" sandbox="" srcDoc={emailDocument(emailHTML)} className="min-h-64 w-full rounded-lg border border-secondary bg-white" />
+        <iframe title="Email preview" sandbox="" srcDoc={emailDocument(emailHTML)} className="block h-36 w-full rounded-lg border border-secondary bg-white" />
       </div>
     )
   }

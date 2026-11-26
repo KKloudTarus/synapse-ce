@@ -103,7 +103,7 @@ describe('Setup scenarios and honest outputs', () => {
   })
   it('retains the synthetic Jira destination alongside SCM providers and requires a successful test before enable', async () => {
     const providers = await ok('/integration-providers')
-    expect(providers.find((provider: { provider: string }) => provider.provider === 'jira-cloud')).toMatchObject({ name: 'Demo Jira Cloud', capabilities: ['test_connection'] })
+    expect(providers.find((provider: { provider: string }) => provider.provider === 'jira-cloud')).toMatchObject({ name: 'Demo Jira Cloud', capabilities: ['test_connection', 'tickets'] })
     const jira = (await ok('/integrations')).find((connection: { id: string }) => connection.id === 'demo-jira-cloud')
     expect(jira).toMatchObject({ provider: 'jira-cloud', credential_configured: true, enabled: false })
     expect((await call(`/integrations/${jira.id}/enable`, 'POST', {})).status).toBe(409)

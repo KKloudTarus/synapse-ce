@@ -80,7 +80,7 @@ export function Integrations() {
   }, [])
 
   const loadDetail = useCallback(async (integrationId: string, quiet = false) => {
-    if (!integrationId) return
+    if (!integrationId || selectedIdRef.current !== integrationId) return
     const generation = ++detailGeneration.current
     if (!quiet) setDetailLoading(true)
     try {
@@ -112,25 +112,34 @@ export function Integrations() {
     void loadDetail(selectedId)
   }, [loadDetail, selectedId])
 
-  const activeOperation = operations.find((operation) => !TERMINAL_STATES.has(operation.state))
+  const activeOperation = operations.find((operation) => operation.integrationId === selectedId && !TERMINAL_STATES.has(operation.state))
+  const activeOperationId = activeOperation?.id
   useEffect(() => {
-    if (!activeOperation || !selectedId) return
-    const timer = window.setInterval(async () => {
+    if (!activeOperationId || !selectedId) return
+    let live = true
+    const isCurrent = () => live && selectedIdRef.current === selectedId
+    const poll = async () => {
       try {
-        const current = await api.getIntegrationOperation(activeOperation.id)
+        const current = await api.getIntegrationOperation(activeOperationId)
+        if (!isCurrent()) return
         setOperations((items) => items.map((item) => item.id === current.id ? current : item))
         if (TERMINAL_STATES.has(current.state)) {
-          window.clearInterval(timer)
-          await loadDetail(selectedId, true)
+          void loadDetail(selectedId, true)
           setNotice(`${operationLabel(current.type)} ${current.state}.`)
+        } else {
+          timer = window.setTimeout(poll, 1000)
         }
       } catch (caught) {
-        window.clearInterval(timer)
-        setError(message(caught))
+        if (isCurrent()) setError(message(caught))
       }
-    }, 1000)
-    return () => window.clearInterval(timer)
-  }, [activeOperation, loadDetail, selectedId])
+    }
+    let timer = window.setTimeout(poll, 1000)
+
+    return () => {
+      live = false
+      window.clearTimeout(timer)
+    }
+  }, [activeOperationId, loadDetail, selectedId])
 
   async function operate(key: string, action: () => Promise<void>, success: string) {
     setBusy(key)
@@ -225,7 +234,7 @@ export function Integrations() {
       </div>
 
       {error && <ErrorState message={error} />}
-      {notice && <div role="status" className="rounded-lg border border-low/30 bg-low/10 px-4 py-3 text-sm text-low">{notice}</div>}
+      {notice && <div role="status" className="rounded-lg border border-secondary bg-secondary px-4 py-3 text-sm text-primary">{notice}</div>}
 
       {showCreateForm && (
         <IntegrationForm

@@ -1,6 +1,6 @@
-import { CheckDone01, Link01, LinkExternal02, RefreshCw01, Send01, Trash01 } from '@untitledui/icons'
+import { Link01, LinkExternal02, RefreshCw01, Send01, Trash01 } from '@untitledui/icons'
 import { useEffect, useId, useRef, useState } from 'react'
-import { Button, EmptyState, ErrorState, Input, Spinner } from '../../../components/ui'
+import { Button, ErrorState, Input, Spinner } from '../../../components/ui'
 import { api, type FindingTickets, type TicketIntent, type TicketPreview } from '../../../lib/api'
 import { newIdempotencyKey } from '../../../lib/api/client'
 import { ticketDestination, ticketDestinationLabel } from '../../../lib/ticket-destinations'
@@ -19,7 +19,7 @@ export function TicketsPanel({ findingId, ...scope }: TicketFindingScope & { fin
   const [mappingId, setMappingId] = useState(''); const [preview, setPreview] = useState<TicketPreview | null>(null); const [url, setURL] = useState('')
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null)
   const [destinations, setDestinations] = useState<{ integrations: Integration[]; providers: IntegrationProviderDescriptor[]; error: string | null; loading: boolean }>({ integrations: [], providers: [], error: null, loading: true })
-  const requestKey = useRef('')
+  const submission = useRef<{ mappingId: string; digest: string; key: string } | null>(null)
   const generation = useRef(0)
   const destinationLoad = useRef(0)
   const identity = useRef({ scopeKey, findingId })
@@ -30,14 +30,53 @@ export function TicketsPanel({ findingId, ...scope }: TicketFindingScope & { fin
   async function load() {
     const current = ++generation.current
     const destinationCurrent = ++destinationLoad.current
-    setLoading(true); setError(null); setDestinations({ integrations: [], providers: [], error: null, loading: true })
+    setLoading(true); setError(null); setPreview(null); setDestinations({ integrations: [], providers: [], error: null, loading: true })
     const destinationRequest = Promise.all([api.listIntegrations(), api.listIntegrationProviders()])
     void destinationRequest.then(([integrations, providers]) => { if (destinationCurrent === destinationLoad.current && identity.current.scopeKey === scopeKey && identity.current.findingId === findingId) setDestinations({ integrations, providers, error: null, loading: false }) }, (cause) => { if (destinationCurrent === destinationLoad.current && identity.current.scopeKey === scopeKey && identity.current.findingId === findingId) setDestinations({ integrations: [], providers: [], error: message(cause), loading: false }) })
     try { const ticketRequest = isProjectTicketScope(scope) ? api.projectSourceFindingTickets(scope.projectKey, findingId) : api.findingTickets(scope.engagementId, findingId); const [tickets, me] = await Promise.all([ticketRequest, api.me()]); if (!isCurrent(current)) return; setData(tickets); setRole(me?.role ?? ''); setMappingId((value) => tickets.mappings.some((mapping) => mapping.id === value) ? value : tickets.mappings[0]?.id ?? '') } catch (cause) { if (isCurrent(current)) setError(message(cause)) } finally { if (isCurrent(current)) setLoading(false) }
   }
-  useEffect(() => { setData(null); setRole(''); setMappingId(''); setPreview(null); setURL(''); setLoading(true); setBusy(false); setError(null); setNotice(null); requestKey.current = ''; void load() }, [scopeKey, findingId])
-  async function previewTicket() { if (!mappingId) return; const current = generation.current; const selectedMapping = mappingId; setBusy(true); setError(null); setNotice(null); try { const next = isProjectTicketScope(scope) ? await api.previewProjectSourceFindingTicket(scope.projectKey, findingId, selectedMapping) : await api.previewTicket(scope.engagementId, findingId, selectedMapping); if (!isCurrent(current) || selectedMapping !== mappingId) return; setPreview(next); requestKey.current = newIdempotencyKey() } catch (cause) { if (isCurrent(current)) setError(message(cause)) } finally { if (isCurrent(current)) setBusy(false) } }
-  async function submit() { if (!preview || !mappingId || !allowed) return; const current = generation.current; const selectedMapping = mappingId; const submittedPreview = preview; setBusy(true); setError(null); try { const intent = isProjectTicketScope(scope) ? await api.submitProjectSourceFindingTicket(scope.projectKey, findingId, selectedMapping, submittedPreview.digest, requestKey.current || newIdempotencyKey()) : await api.submitTicket(scope.engagementId, findingId, selectedMapping, submittedPreview.digest, requestKey.current || newIdempotencyKey()); if (!isCurrent(current) || selectedMapping !== mappingId) return; setData((value) => value ? { ...value, intents: [intent, ...value.intents] } : value); setNotice('Ticket request recorded. Its durable intent will complete or remain recoverable.'); setPreview(null); requestKey.current = '' } catch (cause) { if (isCurrent(current)) setError(message(cause)) } finally { if (isCurrent(current)) setBusy(false) } }
+  useEffect(() => { setData(null); setRole(''); setMappingId(''); setURL(''); setBusy(false); setNotice(null); submission.current = null; void load() }, [scopeKey, findingId])
+
+  async function previewTicket() {
+    if (!mappingId) return
+    const current = generation.current
+    setBusy(true); setError(null); setNotice(null); setPreview(null)
+    try {
+      const next = isProjectTicketScope(scope)
+        ? await api.previewProjectSourceFindingTicket(scope.projectKey, findingId, mappingId)
+        : await api.previewTicket(scope.engagementId, findingId, mappingId)
+      if (isCurrent(current)) setPreview(next)
+    } catch (cause) {
+      if (isCurrent(current)) setError(message(cause))
+    } finally {
+      if (isCurrent(current)) setBusy(false)
+    }
+  }
+
+  async function submit() {
+    if (!preview?.provider || !preview.endpoint || !mappingId || !allowed || busy) return
+    const current = generation.current
+    const { digest } = preview
+    const previous = submission.current
+    const key = previous?.mappingId === mappingId && previous.digest === digest ? previous.key : newIdempotencyKey()
+    submission.current = { mappingId, digest, key }
+    setBusy(true); setError(null)
+    try {
+      const intent = isProjectTicketScope(scope)
+        ? await api.submitProjectSourceFindingTicket(scope.projectKey, findingId, mappingId, digest, key)
+        : await api.submitTicket(scope.engagementId, findingId, mappingId, digest, key)
+      if (!isCurrent(current)) return
+      setData((value) => value ? { ...value, intents: [intent, ...value.intents.filter((item) => item.id !== intent.id)] } : value)
+      setNotice('Ticket request recorded. Its durable intent will complete or remain recoverable.')
+      setPreview(null)
+      submission.current = null
+    } catch (cause) {
+      if (isCurrent(current)) setError(message(cause))
+    } finally {
+      if (isCurrent(current)) setBusy(false)
+    }
+  }
+
   async function addLink() { if (!url.trim()) return; const current = generation.current; setBusy(true); setError(null); try { const link = isProjectTicketScope(scope) ? await api.linkProjectSourceFindingTicket(scope.projectKey, findingId, url.trim()) : await api.linkTicket(scope.engagementId, findingId, url.trim()); if (!isCurrent(current)) return; setData((value) => value ? { ...value, links: [link, ...value.links.filter((existing) => existing.id !== link.id)] } : value); setURL(''); setNotice('Ticket link added.') } catch (cause) { if (isCurrent(current)) setError(message(cause)) } finally { if (isCurrent(current)) setBusy(false) } }
   async function unlink(linkId: string) { const current = generation.current; setBusy(true); setError(null); try { if (isProjectTicketScope(scope)) await api.unlinkProjectSourceFindingTicket(scope.projectKey, findingId, linkId); else await api.unlinkTicket(scope.engagementId, findingId, linkId); if (!isCurrent(current)) return; setData((value) => value ? { ...value, links: value.links.filter((link) => link.id !== linkId) } : value); setNotice('Ticket link removed.') } catch (cause) { if (isCurrent(current)) setError(message(cause)) } finally { if (isCurrent(current)) setBusy(false) } }
   async function replacedIntent(intent: TicketIntent, kind: 'reconcile' | 'retry', reason = '') { const current = generation.current; const currentIdentity = { scopeKey, findingId }; setBusy(true); setError(null); try { const next = kind === 'reconcile' ? await api.reconcileTicketIntent(intent) : await api.retryTicketIntent(intent, reason); if (!isCurrent(current)) return; setData((value) => value ? { ...value, intents: value.intents.map((item) => item.id === next.id ? next : item) } : value); setNotice(kind === 'reconcile' ? 'Reconciliation completed.' : 'Retry queued with duplicate-risk acknowledgement.'); if (kind === 'reconcile' && next.state === 'done') { await load(); if (identity.current.scopeKey === currentIdentity.scopeKey && identity.current.findingId === currentIdentity.findingId) setBusy(false); return } } catch (cause) { if (isCurrent(current)) setError(message(cause)) } finally { if (isCurrent(current)) setBusy(false) } }
@@ -45,15 +84,54 @@ export function TicketsPanel({ findingId, ...scope }: TicketFindingScope & { fin
   const selectedMapping = data?.mappings.find((mapping) => mapping.id === mappingId)
   const selectedDestination = selectedMapping ? ticketDestination(selectedMapping, destinations.integrations, destinations.providers) : null
   const destinationReady = !destinations.loading && !destinations.error && Boolean(selectedDestination)
-  return <section aria-labelledby={headingId} className="space-y-3 rounded-lg border border-secondary bg-primary p-3.5 shadow-2xs"><div className="flex items-center justify-between gap-2"><h3 id={headingId} className="text-xs font-bold uppercase tracking-wider text-secondary">Tickets</h3><Button variant="ghost" className="px-2 py-1" aria-label="Refresh tickets" disabled={busy} onClick={() => void load()}><RefreshCw01 className="size-4" /></Button></div>{error && <ErrorState message={error} />}{notice && <p role="status" className="text-xs text-success-primary">{notice}</p>}
-    {!allowed && <p className="text-xs text-tertiary">Ticket links are visible. A consultant, reviewer, or administrator must preview or submit a ticket.</p>}
-    <Links links={data?.links ?? []} busy={busy} canEdit={allowed} onUnlink={unlink} />
-    <div className="space-y-2 border-t border-secondary pt-3"><label htmlFor={`ticket-link-${findingId}`} className="text-xs font-medium text-secondary">Add an existing ticket link</label><div className="flex gap-2"><Input id={`ticket-link-${findingId}`} type="url" value={url} disabled={!allowed} placeholder="https://jira.example/browse/SEC-123" onChange={(event) => setURL(event.target.value)} /><Button variant="secondary" disabled={!allowed || busy || !url.trim()} onClick={() => void addLink()}><Link01 className="size-4" /> Link</Button></div></div>
-    <div className="space-y-2 border-t border-secondary pt-3">{data?.mappings.length ? <><label htmlFor={`ticket-mapping-${findingId}`} className="text-xs font-medium text-secondary">Ticket mapping</label><select id={`ticket-mapping-${findingId}`} value={mappingId} disabled={busy} onChange={(event) => { generation.current++; setMappingId(event.target.value); setPreview(null); requestKey.current = '' }} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary">{data.mappings.map((mapping) => <option key={mapping.id} value={mapping.id}>{ticketDestinationLabel(mapping, destinations.integrations, destinations.providers)}</option>)}</select>{destinations.loading ? <p role="status" className="text-xs text-tertiary">Loading ticket destination details…</p> : destinations.error ? <p role="alert" className="text-xs text-error-primary">Ticket destination details are unavailable. Refresh before previewing.</p> : !selectedDestination ? <p role="alert" className="text-xs text-error-primary">The selected mapping no longer resolves to a provider connection. Previewing is disabled.</p> : <p className="text-xs text-secondary">Destination: {selectedDestination.provider} · {selectedDestination.connection} · {selectedDestination.endpoint}</p>}<Button variant="secondary" disabled={busy || !allowed || !destinationReady} onClick={() => void previewTicket()}>Preview ticket</Button></> : <EmptyState icon={CheckDone01} title="No ticket mapping for this scope" hint="An administrator can add one in Settings → Ticket providers (or Settings → Jira for Jira connections)." />}
-      {preview && <div className="space-y-2"><TicketPreviewView preview={preview} /><Button disabled={busy || !allowed || !preview.provider || !preview.endpoint} onClick={() => void submit()}><Send01 className="size-4" /> Submit ticket</Button></div>}</div>
-    <Intents intents={data?.intents ?? []} busy={busy} allowed={allowed} canRetry={canRetry} onAction={replacedIntent} />
-    {data && <TicketObservations key={`${scopeKey}:${findingId}`} {...scope} findingId={findingId} />}
-  </section>
+  return (
+    <section aria-labelledby={headingId} className="min-w-0 space-y-3 rounded-lg border border-secondary bg-primary p-3.5 shadow-2xs">
+      <div className="flex items-center justify-between gap-2">
+        <h3 id={headingId} className="text-xs font-bold uppercase tracking-wider text-secondary">Tickets</h3>
+        <Button variant="ghost" className="px-2 py-1" aria-label="Refresh tickets" disabled={busy} onClick={() => { setNotice(null); void load() }}>
+          <RefreshCw01 className="size-4" />
+        </Button>
+      </div>
+      {error && <ErrorState message={error} />}
+      {notice && <p role="status" className="text-xs text-success-primary">{notice}</p>}
+      {data && <>
+        {!allowed && <p className="text-xs text-tertiary">Ticket links are visible. Someone with triage access must preview or submit a ticket.</p>}
+        <Links links={data.links} busy={busy} canEdit={allowed} onUnlink={unlink} />
+        <div className="space-y-2 border-t border-secondary pt-3">
+          <label htmlFor={`ticket-link-${findingId}`} className="text-xs font-medium text-secondary">Add an existing ticket link</label>
+          <div className="flex gap-2">
+            <Input id={`ticket-link-${findingId}`} type="url" className="min-w-0" value={url} disabled={!allowed} placeholder="https://jira.example/browse/SEC-123" onChange={(event) => setURL(event.target.value)} />
+            <Button variant="secondary" disabled={!allowed || busy || !url.trim()} onClick={() => void addLink()}><Link01 className="size-4" /> Link</Button>
+          </div>
+        </div>
+        <div className="space-y-2 border-t border-secondary pt-3">
+          {data.mappings.length ? <>
+            <label htmlFor={`ticket-mapping-${findingId}`} className="text-xs font-medium text-secondary">Ticket mapping</label>
+            <select
+              id={`ticket-mapping-${findingId}`}
+              value={mappingId}
+              disabled={busy}
+              onChange={(event) => { generation.current++; setMappingId(event.target.value); setPreview(null); setError(null); setNotice(null) }}
+              className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"
+            >
+              {data.mappings.map((mapping) => <option key={mapping.id} value={mapping.id}>{ticketDestinationLabel(mapping, destinations.integrations, destinations.providers)}</option>)}
+            </select>
+            {destinations.loading ? <p role="status" className="text-xs text-tertiary">Loading ticket destination details…</p>
+              : destinations.error ? <p role="alert" className="text-xs text-error-primary">Ticket destination details are unavailable. Refresh before previewing.</p>
+              : !selectedDestination ? <p role="alert" className="text-xs text-error-primary">The selected mapping no longer resolves to a provider connection. Previewing is disabled.</p>
+              : !preview && <p className="wrap-anywhere text-xs text-secondary">Destination: {selectedDestination.provider} · {selectedDestination.connection} · {selectedDestination.endpoint}</p>}
+            <Button variant="secondary" disabled={busy || !allowed || !destinationReady} onClick={() => void previewTicket()}>Preview ticket</Button>
+          </> : <p className="text-xs text-tertiary">No ticket mapping for this scope. An administrator can add one in Settings → Ticket providers or Jira.</p>}
+          {preview && <div className="space-y-2">
+            <TicketPreviewView preview={preview} />
+            <Button disabled={busy || !allowed || !preview.provider || !preview.endpoint} onClick={() => void submit()}><Send01 className="size-4" /> Submit ticket</Button>
+          </div>}
+        </div>
+        <Intents intents={data.intents} busy={busy} allowed={allowed} canRetry={canRetry} onAction={replacedIntent} />
+        <TicketObservations key={`${scopeKey}:${findingId}`} {...scope} findingId={findingId} />
+      </>}
+    </section>
+  )
 }
 
 function Links({ links, busy, canEdit, onUnlink }: { links: FindingTickets['links']; busy: boolean; canEdit: boolean; onUnlink: (id: string) => void }) {

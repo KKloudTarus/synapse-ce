@@ -4,7 +4,6 @@ import type { TicketPreview } from '../../../lib/api'
 
 type RecordValue = Record<string, unknown>
 
-const entries = (fields: Record<string, unknown>) => Object.entries(fields).filter(([key]) => key !== 'summary' && key !== 'description')
 const value = (field: unknown) => typeof field === 'string' ? field : JSON.stringify(field)
 const isRecord = (value: unknown): value is RecordValue => typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -146,14 +145,25 @@ function renderedDescription(preview: TicketPreview) {
 export function TicketPreviewView({ preview, findingId }: { preview: TicketPreview; findingId?: string }) {
   const description = renderedDescription(preview)
   const destinationReady = Boolean(preview.provider && preview.endpoint)
-  return <div className="space-y-2 rounded-lg border border-secondary bg-secondary/40 p-3">
-    <p className="text-xs font-semibold text-primary">{findingId ? `Preview · ${findingId} · ` : 'Preview · '}{preview.dataClass}</p>
-    {destinationReady ? <dl aria-label="Authoritative ticket destination" className="grid gap-1 rounded border border-secondary bg-primary/60 p-2 text-xs text-secondary"><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Provider</dt><dd>{preview.provider}</dd></div><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Endpoint</dt><dd className="break-all">{preview.endpoint}</dd></div><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Project / type</dt><dd className="break-all">{value(preview.fields.project)} · {value(preview.fields.issuetype)}</dd></div></dl> : <p role="alert" className="text-xs text-error-primary">This preview does not disclose a destination bound to its digest. It cannot be submitted.</p>}
-    <p className="text-sm font-medium text-primary">{preview.summary}</p>
+  const projectAndType = [preview.fields.project, preview.fields.issuetype].map(value).filter(Boolean).join(' · ')
+  const fields = Object.entries(preview.fields).filter(([key]) =>
+    key !== 'summary' && key !== 'description' && (!destinationReady || (key !== 'project' && key !== 'issuetype')),
+  )
+  const fieldRow = 'grid grid-cols-[minmax(4rem,auto)_minmax(0,1fr)] gap-2'
+  return <div className="min-w-0 space-y-2 rounded-lg border border-secondary bg-secondary/40 p-3">
+    <p className="wrap-anywhere text-xs font-semibold text-primary">{findingId ? `Preview · ${findingId} · ` : 'Preview · '}{preview.dataClass}</p>
+    {destinationReady ? <dl aria-label="Authoritative ticket destination" className="grid gap-1 rounded border border-secondary bg-primary/60 p-2 text-xs text-secondary">
+      <div className={fieldRow}><dt className="font-medium text-primary">Provider</dt><dd className="wrap-anywhere">{preview.provider}</dd></div>
+      <div className={fieldRow}><dt className="font-medium text-primary">Endpoint</dt><dd className="wrap-anywhere">{preview.endpoint}</dd></div>
+      {projectAndType && <div className={fieldRow}><dt className="font-medium text-primary">Project / type</dt><dd className="wrap-anywhere">{projectAndType}</dd></div>}
+    </dl> : <p role="alert" className="text-xs text-error-primary">The preview has no confirmed destination. Refresh and preview the ticket again before submitting.</p>}
+    <p className="wrap-anywhere text-sm font-medium text-primary">{preview.summary}</p>
     {preview.securityWaived && <p className="text-xs text-warning-primary">No Jira security level is set; this preview uses the recorded administrator waiver.</p>}
-    {entries(preview.fields).length > 0 && <dl className="grid gap-1 text-xs text-secondary">{entries(preview.fields).map(([key, field]) => <div key={key} className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">{key}</dt><dd className="break-all">{value(field)}</dd></div>)}</dl>}
+    {fields.length > 0 && <dl className="grid gap-1 text-xs text-secondary">{fields.map(([key, field]) =>
+      <div key={key} className={fieldRow}><dt className="wrap-anywhere font-medium text-primary">{key}</dt><dd className="wrap-anywhere">{value(field)}</dd></div>,
+    )}</dl>}
     {description.body}
-    {preview.wire !== undefined && preview.wire !== null && <details><summary className="cursor-pointer text-xs font-medium text-secondary">Exact provider request</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border border-secondary p-2 text-xs text-secondary">{JSON.stringify(preview.wire, null, 2)}</pre></details>}
+    {preview.wire !== undefined && preview.wire !== null && <details><summary className="cursor-pointer text-xs font-medium text-secondary">Exact provider request</summary><pre className="mt-2 max-h-80 overflow-auto wrap-anywhere whitespace-pre-wrap rounded border border-secondary p-2 text-xs text-secondary">{JSON.stringify(preview.wire, null, 2)}</pre></details>}
     {!description.providerReady && preview.links?.length ? <ul className="space-y-1 text-xs">{preview.links.map((link) => {
       const href = trustedURL(link.url, preview.links)
       return href ? <li key={href}><a className="text-brand-secondary hover:underline" href={href} target="_blank" rel="noreferrer">{link.label}</a></li> : null

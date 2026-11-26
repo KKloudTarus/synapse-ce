@@ -108,18 +108,25 @@ describe('IntegrationsHub', () => {
     expect(screen.getByRole('link', { name: 'Manage SIEM streams' })).toHaveAttribute('href', '/settings/siem')
   })
 
-  it('shows Confluence connections only in Documentation and keeps Jira out of CI/CD', async () => {
+  it('groups connections by the provider catalog and reads the inventory once per refresh', async () => {
     const confluenceProvider: IntegrationProviderDescriptor = {
-      provider: 'confluence-cloud', name: 'Confluence Cloud', description: '', capabilities: ['test_connection'], configFields: [], secretFields: [],
+      provider: 'confluence-cloud', name: 'Confluence Cloud', description: '', capabilities: ['test_connection', 'documents'], configFields: [], secretFields: [],
     }
     const jiraProvider: IntegrationProviderDescriptor = {
-      provider: 'jira-cloud', name: 'Jira Cloud', description: '', capabilities: ['test_connection'], configFields: [], secretFields: [],
+      provider: 'jira-cloud', name: 'Jira Cloud', description: '', capabilities: ['test_connection', 'tickets'], configFields: [], secretFields: [],
     }
     const confluence = { ...integration, id: 'confluence-1', name: 'Reports', provider: 'confluence-cloud', endpoint: 'https://example.atlassian.net/wiki' }
+    const notion = { ...confluence, id: 'notion-1', provider: 'notion', name: 'Notion workspace' }
+    const inbound = { ...integration, id: 'gitlab-1', provider: 'gitlab', name: 'GitLab webhook' }
+    const orphan = { ...integration, id: 'orphan-1', provider: 'unregistered', name: 'Unregistered connection' }
     const jira = { ...integration, id: 'jira-1', name: 'Tickets', provider: 'jira-cloud', endpoint: 'https://example.atlassian.net' }
     vi.mocked(api.listCapabilities).mockResolvedValue([capability({ key: 'docpublish', name: 'Documentation publishing' }), capability({ key: 'ticketing', name: 'Ticketing' })])
-    vi.mocked(api.listIntegrationProviders).mockResolvedValue([provider, confluenceProvider, jiraProvider])
-    vi.mocked(api.listIntegrations).mockResolvedValue([integration, confluence, jira])
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([
+      provider, confluenceProvider, jiraProvider,
+      { ...confluenceProvider, provider: 'notion', name: 'Notion' },
+      { ...provider, provider: 'gitlab', capabilities: [] },
+    ])
+    vi.mocked(api.listIntegrations).mockResolvedValue([integration, confluence, notion, jira, inbound, orphan])
     renderHub()
 
     const documentation = await group('Documentation')
@@ -130,9 +137,22 @@ describe('IntegrationsHub', () => {
     expect(documentation.getByRole('link', { name: 'Manage documentation' })).toHaveAttribute('href', '/settings/integrations/ci')
     const ci = await group('CI/CD')
     expect(await ci.findByRole('listitem', { name: 'Production Jenkins' })).toBeInTheDocument()
+    expect(documentation.getByRole('listitem', { name: 'Notion workspace' })).toBeInTheDocument()
+    expect(ci.getByRole('listitem', { name: 'GitLab webhook' })).toBeInTheDocument()
+    expect(ci.getByRole('listitem', { name: 'Unregistered connection' })).toBeInTheDocument()
     expect(ci.queryByRole('listitem', { name: 'Reports' })).not.toBeInTheDocument()
+    expect(ci.queryByRole('listitem', { name: 'Notion workspace' })).not.toBeInTheDocument()
     expect(ci.queryByRole('listitem', { name: 'Tickets' })).not.toBeInTheDocument()
     expect((await group('Ticketing')).getByRole('listitem', { name: 'Tickets' })).toBeInTheDocument()
+    expect(api.listIntegrationProviders).toHaveBeenCalledTimes(1)
+    expect(api.listIntegrations).toHaveBeenCalledTimes(1)
+
+    vi.mocked(api.listIntegrations).mockResolvedValue([notion])
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(await (await group('CI/CD')).findByText('No CI/CD integrations yet')).toBeInTheDocument()
+    expect(await (await group('Documentation')).findByRole('listitem', { name: 'Notion workspace' })).toBeInTheDocument()
+    expect(api.listIntegrationProviders).toHaveBeenCalledTimes(2)
+    expect(api.listIntegrations).toHaveBeenCalledTimes(2)
   })
 
   it('renders a CI/CD card from the integration and its operation history, and tests it', async () => {

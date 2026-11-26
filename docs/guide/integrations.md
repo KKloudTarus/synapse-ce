@@ -75,7 +75,7 @@ Command leases and intent/progress revisions fence stale workers and concurrent
 republish or unpublish operations.
 Contract tests cover the profile boundaries. Selected personal Drive lifecycle cases
 have native evidence; Microsoft and broader failure acceptance remain open in the
-[acceptance ledger](../evidence/remaining-providers/live/README.md).
+[acceptance ledger](https://github.com/KKloudTarus/synapse-ce/blob/4c851d90902a7db8925351d1f579b70064258fa3/docs/evidence/remaining-providers/live/README.md).
 
 ## Ticket provider connections
 
@@ -186,7 +186,7 @@ still active.
 
 Connection credentials, URLs with query data,
 and provider response bodies are not retained in ticket audit records. Selected
-personal ticket sandbox cases have [native evidence](../evidence/remaining-providers/live/README.md);
+personal ticket sandbox cases have [native evidence](https://github.com/KKloudTarus/synapse-ce/blob/4c851d90902a7db8925351d1f579b70064258fa3/docs/evidence/remaining-providers/live/README.md);
 remaining acceptance is listed separately and is not represented as passed.
 
 ## Architecture

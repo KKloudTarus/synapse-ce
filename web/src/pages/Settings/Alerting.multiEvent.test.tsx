@@ -79,6 +79,42 @@ describe('multi-event routing rules', () => {
     vi.mocked(api.updateNotificationRule).mockResolvedValue(rule())
   })
 
+  it('keeps channels and delivery history usable while routing rules are unavailable', async () => {
+    vi.mocked(api.listNotificationRules)
+      .mockRejectedValueOnce(new Error('Rules service unavailable'))
+      .mockResolvedValue([rule()])
+    render(<Alerting />)
+
+    expect(await screen.findByText('Rules service unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Security chat', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit channel' })).toBeEnabled()
+    expect(screen.queryByText('No notification channels')).not.toBeInTheDocument()
+    expect(screen.getByText('Delivery history')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry routing rules' }))
+    expect(await screen.findByText('Security lifecycle')).toBeInTheDocument()
+    expect(screen.queryByText('Rules service unavailable')).not.toBeInTheDocument()
+    expect(api.listNotificationChannels).toHaveBeenCalledTimes(1)
+  })
+
+  it('enables rule editing again when channel loading recovers', async () => {
+    vi.mocked(api.listNotificationChannels)
+      .mockRejectedValueOnce(new Error('Channels service unavailable'))
+      .mockResolvedValue([channel])
+    vi.mocked(api.listNotificationRules).mockResolvedValue([rule()])
+    render(<Alerting />)
+
+    const edit = await screen.findByRole('button', { name: 'Edit rule' })
+    expect(edit).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Disable' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Delete rule Security lifecycle' })).toBeEnabled()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry channels' }))
+    await waitFor(() => expect(edit).toBeEnabled())
+    fireEvent.click(edit)
+    expect(await screen.findByRole('button', { name: 'Save rule' })).toBeInTheDocument()
+  })
+
   it('adds an event after the primary and retains that explicit order on save', async () => {
     const save = await openRule(rule())
     fireEvent.click(screen.getByRole('button', { name: 'No additional events' }))

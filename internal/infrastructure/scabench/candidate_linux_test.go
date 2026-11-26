@@ -92,7 +92,7 @@ func TestRunCandidateRetainsFailedTwentyFourCellDiagnostic(t *testing.T) {
 
 	result, runErr := RunCandidate(context.Background(), CandidateInput{
 		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: offlineRoot,
-		EvidenceRoot: t.TempDir(), ImplementationCommit: commit, RunKey: "candidate/matrix",
+		EvidenceRoot: candidateEvidenceDir(t), ImplementationCommit: commit, RunKey: "candidate/matrix",
 	}, runnerFactory)
 	if runErr == nil || !strings.Contains(runErr.Error(), "candidate gate failed") {
 		t.Fatalf("RunCandidate() error = %v; want retained candidate numeric failure (evidence %q)", runErr, result.EvidencePath)
@@ -174,7 +174,7 @@ func TestRunCandidateRetainsFailedTwentyFourCellDiagnostic(t *testing.T) {
 	}
 	partial, partialErr := RunCandidate(context.Background(), CandidateInput{
 		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: offlineRoot,
-		EvidenceRoot: t.TempDir(), ImplementationCommit: commit, RunKey: "candidate/partial",
+		EvidenceRoot: candidateEvidenceDir(t), ImplementationCommit: commit, RunKey: "candidate/partial",
 	}, partialFactory)
 	if partialErr == nil || !strings.Contains(partialErr.Error(), "simulated runner-factory failure") {
 		t.Fatalf("partial RunCandidate() error = %v; want planned mid-cycle failure", partialErr)

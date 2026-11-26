@@ -7,9 +7,8 @@ This guide covers operator controls and tenant-managed delivery settings. Enable
 `synapse-worker`, and provide the same stable `SYNAPSE_VAULT_MASTER_KEY` to both
 processes before enabling a tenant channel.
 
-The provider-client acceptance matrix is still pending. The acceptance ledger below
-distinguishes local contracts, real client captures and the remaining end-to-end
-checks.
+See the [notification event ledger](notification-events-e2e.md) for source-to-client
+receipts and the remaining provider prerequisites.
 
 ## Operator controls
 
@@ -265,50 +264,14 @@ channel, which pins new deliveries to the resulting secret version.
 
 ## Acceptance evidence
 
-The local acceptance environment contains synthetic data only. Provider credentials
-stay in private local files outside the tracked tree. A successful provider response
-does not establish that the full event producer, recipient policy and console link
-flow passed.
+The [historical channel ledger](https://github.com/KKloudTarus/synapse-ce/blob/4c851d90902a7db8925351d1f579b70064258fa3/docs/guide/notification-channels.md#acceptance-evidence)
+records the original captures, provider retests, rollback rehearsals and limits. The
+[provider retest receipt](assets/ui/notification-channels/live/provider-retest-receipt.json)
+and [follow-up receipt](assets/ui/notification-channels/live/ready-review-receipt.json)
+keep the tested revisions and fixture boundaries.
 
-| Surface | Evidence obtained | Remaining acceptance |
-| --- | --- | --- |
-| Mattermost and Rocket.Chat | Reconciled commit `eae4c40c` delivered ten built-in RenderMessage → formatter → Sender messages per Docker client across five scenarios and EN/VI. Native captures include Rocket.Chat light/dark desktop. | Real console navigation, metadata-to-color mapping, live failure cases and remaining client/device coverage. Local webhook routing uses an explicit HTTP fixture transport; it does not establish public webhook TLS. |
-| Slack | Reconciled commit `eae4c40c` delivered ten built-in messages and four incident replies to the dedicated test channel. A separate probe kept two concurrent replies on their parent. | Slack accepted a send after deletion of its own synthetic root; this did not exercise the explicit missing-parent fallback. Remaining live retry/failure and client/device coverage; no history-read permission added. |
-| SMTP | Reconciled commit `eae4c40c` sent ten built-in EN/VI messages to each real Docker relay: verified STARTTLS 587 and implicit TLS 465. Stored MIME checks covered Date, Message-ID, UTF-8 multipart, scan deltas and escaped hostile HTML. | Representative relay rollout and real email client/device matrix. Mailpit is a test client; fixture console links are inert. |
-| Gmail | Historical commits `a8e2d1b9` and `993fc712` retain ten SMTP self-mails and the later UI-only defanging check. The [restored SMTP receipt](assets/ui/notification-events/live/gmail-smtp-live.json) adds four current self-mail deliveries, real finding EN/VI MIME parity, native inspection, a console click after sign-in and worker restart. | Representative source proof; not every event/device. Bare domains and URLs split across HTML formatting nodes retain their documented limits. The new Testing grant has a recorded expiry. |
-| Microsoft SMTP | Local client-credentials and XOAUTH2 contracts pass. Controlled work-account preflight found Entra access errors and insufficient Exchange administration. | Live testing deferred; an authorized test mailbox and Entra/Exchange setup are still needed. No coworker mailbox or tenant policy was changed. |
-| Teams personal delivery | Bot, one-time link-code/contact flow and personal delivery are present from merged PR #1571. Local contracts do not establish a real Teams delivery. | A dedicated Microsoft 365 test tenant/Azure Bot is not available yet. Capture the real 1:1 link flow, verified Synapse contact, personal notification and correlated delivery history, then follow Open in Synapse to its expected console destination. Record the tested commit/environment and have the reviewer inspect the evidence before closing #1420. Mobile and an exhaustive theme/locale matrix are not required by the updated reviewer criterion. |
-| PagerDuty | Local trigger/paired-resolve, HMAC dedup and signal-only contracts pass. | Live testing deferred at the operator's request and tracked in #1385, WS3 #1331 and EPIC #1327. A dedicated test service/key and trusted closure producer are still required. |
-| JSM | Commit `993fc712` created twelve real synthetic alerts with fourteen POSTs/GET resumes and closed all twelve with twelve POSTs/GETs. Native UI shows P1–P5 and the complete VI scan delta/count summary. Scan pager templates use `@v2`; notifications stayed suppressed. | No live delayed-404, producer/queue/crash recovery or key-version replacement proof. Signal-only built-ins omit hostile finding titles; two literal probes are labeled separately. Deployed HTTPS console navigation remains pending. |
-| Migrations | The historical reconciliation with main `1c2e55f2` passed 68 PostgreSQL 17 assertions through `227→228→229→230→231→232→233→229→233→227→233`, preserving the Teams contact, conversation and personal preference on B02 rollback. The complete PostgreSQL run took 1279.158 seconds; seven old migration tests exceeded their database-cleanup deadlines on Docker disk. Those seven tests passed unchanged on an isolated tmpfs PostgreSQL instance in 24.390 seconds, with default fsync settings. | Representative lock/latency budgets and production rollout/rollback rehearsal remain pending. Hosted CI currently has a shorter default timeout than the local PostgreSQL run. Local transaction tests and tmpfs cleanup do not establish crash durability or production timing. |
-| Recipient policy | Same-tenant active verified contacts, exact DNS-proven domains, send-time revocation and five tests/channel/hour have memory and PostgreSQL coverage. | Live operator DNS/domain workflow and representative production history/RLS latency. |
-
-Prepare disposable Telegram and Google Chat destinations, a dedicated PagerDuty
-test service when resumed, and a configured HTTPS console containing synthetic subjects
-before completing the remaining external matrix. Store credentials through private
-local configuration or the vault; do not put them in issue comments or PR bodies.
-
-The provider screenshots under `assets/ui/notification-channels/live/` supplement
-the console state captures. The PR table identifies the client, locale, theme and
-device actually shown. Fixture color glyphs are test inputs and do not prove automatic
-severity-to-color mapping in the production event flow.
-
-The current provider retest is recorded in [the evidence receipt](assets/ui/notification-channels/live/provider-retest-receipt.json). JSM and Gmail used source tree `498f50b9ef10d576bc38011b723d87a95df7bdec`, now commit `a8e2d1b9`; chat and relay captures used `eae4c40c`. New screenshots are native captures, with Gmail body-only crops labeled explicitly. The initial JSM batch was closed separately before the fixed-source replay. JSM configuration remains recoverable but disabled; its local key was removed. Teams evidence is deferred in #1420 and WS4 #1332; reviewer inspection remains required before closing the issue.
-
-After main `ad218ef8` added ticketing migration `0230`, B02's four SQL files were
-renumbered without changing their contents. A new PostgreSQL 17 rehearsal passed
-71 assertions through `227→228→229→230→231→232→233→234→230→234→227→234`.
-Rollback to `230` preserved a populated ticket link, Teams contact, conversation and
-personal preference. The combined notification/ticketing PostgreSQL tests passed in
-86.191 seconds; full Go build/vet, affected lint and ticketing/memory tests also passed.
-This supplemental evidence supersedes the old numbering, not its production timing
-limitations. Earlier unpublished B02 databases still require an isolated rebuild.
-
-The review-readiness follow-up is recorded in [the final evidence receipt](assets/ui/notification-channels/live/ready-review-receipt.json) against commit `993fc712`.
-Native local console clicks opened the expected finding, scan, engagement and incident routes; the scan link selects its run after loading and ignores stale comparison responses.
-These route checks use synthetic MSW data and a labeled localhost-origin fixture. They do not establish provider-to-deployed-console navigation.
-
-GitHub Actions is disabled at repository level. The current local Go and Node 22 checks passed; hosted CI is not reported as passing or silently enabled.
-The PR is ready for code review with the stated external acceptance deferred. Teams/PagerDuty remain deferred and issues stay open until reviewers inspect the evidence.
-
-After the final replay, the temporary JSM integration was permanently removed with operator approval; the empty integrations page confirms cleanup. All synthetic alerts were closed first and the local credential file was deleted.
+For later source operations, including the restored Gmail run, see the
+[functional follow-up](notification-events-e2e.md#functional-follow-up).
+The [delivery acceptance ledger](notification-delivery-acceptance.md) links
+template, digest and personal delivery evidence. Track the remaining provider
+setups in [#1576](https://github.com/KKloudTarus/synapse-ce/issues/1576).

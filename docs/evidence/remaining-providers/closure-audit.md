@@ -1,11 +1,15 @@
 # Leaf closure audit
 
-This audit uses the current bodies and comments of the seven assigned issues,
-EPIC decisions D1–D8, and the implementation plan, refreshed on 20 October 2026.
-Dependencies #1429 and #1444 are closed. PR #1599 is ready for review and remains
-unmerged. Ready-for-review status does not establish that the implementation has
-landed; the EPIC requires the implementation, UI, documentation and tests to land
-together. Issues must not be manually closed to skip that prerequisite.
+This review snapshot records the seven leaf issues as of 20 October 2026,
+before [#1599](https://github.com/KKloudTarus/synapse-ce/pull/1599) merged.
+The table and notes below retain the evidence and proposed dispositions as of
+that review.
+
+Since then, #1599 merged and [#1622](https://github.com/KKloudTarus/synapse-ce/pull/1622)
+recorded representative Azure Boards acceptance. The
+[EPIC closure](https://github.com/KKloudTarus/synapse-ce/issues/1327#issuecomment-7122553225)
+leaves the native SharePoint/OneDrive Business evidence with
+[#1576](https://github.com/KKloudTarus/synapse-ce/issues/1576).
 
 | Leaf | Explicit acceptance evidence | Closing disposition |
 | --- | --- | --- |

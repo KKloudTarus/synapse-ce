@@ -179,7 +179,7 @@ eligible. Creating or enabling a rule after activation can warn immediately for 
 acceptance already within its lead-time window, provided that threshold was not
 suppressed at activation. The rule's creation time is not a new activation boundary.
 Instants are stored in UTC; human-readable templates use the tenant's time
-zone, including daylight-saving offsets. See the [event capture design](../architecture/notification-events.md)
+zone, including daylight-saving offsets. See the [event capture design](https://github.com/KKloudTarus/synapse-ce/blob/4c851d90902a7db8925351d1f579b70064258fa3/docs/architecture/notification-events.md)
 for transaction, recovery and rollback behavior.
 
 An incident carries the engagement its fleet correlation was scoped to. Incidents recorded
