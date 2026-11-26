@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -27,15 +28,16 @@ type PyPI struct {
 }
 
 // NewPyPI returns a PyPI-registry license enricher. baseURL defaults to https://pypi.org (override for
-// tests/mirrors); client defaults to a 15s timeout.
+// tests/mirrors). A nil client gets a 15s safehttp client: public addresses only for pypi.org,
+// safehttp.OperatorPolicy for a mirror.
 func NewPyPI(baseURL string, client *http.Client) *PyPI {
+	if client == nil {
+		client = safehttp.NewClient(15*time.Second, safehttp.EndpointPolicy(baseURL))
+	}
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://pypi.org"
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
 	return &PyPI{baseURL: baseURL, client: client}
 }
 

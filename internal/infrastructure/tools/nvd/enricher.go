@@ -20,6 +20,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -44,13 +45,14 @@ type Enricher struct {
 var _ ports.SeverityEnricher = (*Enricher)(nil)
 
 // New returns an NVD severity enricher. Empty baseURL uses the public NVD API; apiKey is the
-// optional NVD API key (raises the rate limit, never logged). nil client gets a sane default.
+// optional NVD API key (raises the rate limit, never logged). A nil client gets a 10s safehttp
+// client: public addresses only for the public API, safehttp.OperatorPolicy for an operator's mirror.
 func New(baseURL, apiKey string, client *http.Client) *Enricher {
+	if client == nil {
+		client = safehttp.NewClient(10*time.Second, safehttp.EndpointPolicy(baseURL))
+	}
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultBaseURL
-	}
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	interval := rateNoKey
 	if strings.TrimSpace(apiKey) != "" {

@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+func TestEndpointPolicy(t *testing.T) {
+	for _, configured := range [][]string{nil, {""}, {" ", ""}} {
+		policy := EndpointPolicy(configured...)
+		for _, address := range []string{"127.0.0.1", "10.0.0.1", "169.254.169.254"} {
+			if policy.AllowsAddress(netip.MustParseAddr(address)) {
+				t.Errorf("EndpointPolicy(%q) admits %s; default endpoints are public", configured, address)
+			}
+		}
+		if !policy.AllowsAddress(netip.MustParseAddr("8.8.8.8")) {
+			t.Errorf("EndpointPolicy(%q) refuses a public address", configured)
+		}
+	}
+	policy := EndpointPolicy("", "https://mirror.internal/kev.json")
+	for address, want := range map[string]bool{
+		"127.0.0.1": true, "10.0.0.1": true, "fd12:3456::1": true,
+		"169.254.169.254": false, "100.100.100.200": false, "fd00:ec2::254": false,
+	} {
+		if got := policy.AllowsAddress(netip.MustParseAddr(address)); got != want {
+			t.Errorf("EndpointPolicy with a configured mirror: %s admitted = %v, want %v", address, got, want)
+		}
+	}
+}
+
 func TestPolicyPermits(t *testing.T) {
 	public := Policy{}
 	private := Policy{AllowPrivate: true}

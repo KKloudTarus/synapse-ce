@@ -14,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilitysource"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -34,14 +35,16 @@ type GitLabFeed struct {
 	client *http.Client
 }
 
-// NewGitLabFeed returns a feed over the gemnasium-db archive. url defaults to the public repository archive;
-// client defaults to a 10-minute, no-redirect, SSRF-guarded client (the archive is tens of MB).
+// NewGitLabFeed returns a feed over the gemnasium-db archive. url defaults to the public repository archive.
+// A nil client gets a 10-minute safehttp client that admits only public addresses (the archive is tens of
+// MB): no operator setting names another archive, and a source row's endpoint reaches a private address only
+// through NewGitLabProvider and the source's allow_private_network option.
 func NewGitLabFeed(url string, client *http.Client) *GitLabFeed {
 	if strings.TrimSpace(url) == "" {
 		url = defaultGemnasiumURL
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Minute, CheckRedirect: noRedirect, Transport: safeTransport()}
+		client = safehttp.New(10*time.Minute, false)
 	} else if client.CheckRedirect == nil {
 		client.CheckRedirect = noRedirect
 	}
@@ -176,12 +179,14 @@ func (f *GitLabFeed) download(ctx context.Context, url string, w io.Writer) erro
 }
 
 // NewGitLabProvider wraps the gemnasium archive feed as a provider for a gitlab-typed source. It reuses the
-// shared feed-provider pipeline (observations -> materializer), like the OSV remote provider.
+// shared feed-provider pipeline (observations -> materializer), like the OSV remote provider, and like it
+// reaches a private address only when the source sets allow_private_network.
 func NewGitLabProvider(source vulnerabilitysource.Source) (*FeedProvider, error) {
 	if source.AdapterType != vulnerabilitysource.AdapterGitLab {
 		return nil, fmt.Errorf("%w: gitlab advisory provider does not support %q", shared.ErrValidation, source.AdapterType)
 	}
-	return NewFeedProvider(string(source.AdapterType), source.ID, NewGitLabFeed(source.Endpoint, nil))
+	client := safehttp.New(10*time.Minute, source.AllowPrivateNetwork())
+	return NewFeedProvider(string(source.AdapterType), source.ID, NewGitLabFeed(source.Endpoint, client))
 }
 
 var _ ports.AdvisoryFeed = (*GitLabFeed)(nil)

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -43,16 +44,18 @@ type Enricher struct {
 	kevAt      time.Time
 }
 
-// New returns an enricher. URLs default to CISA / FIRST.org; client defaults to 30s.
+// New returns an enricher. URLs default to CISA / FIRST.org. A nil client gets a 30s safehttp
+// client: public addresses only for the default endpoints, safehttp.OperatorPolicy once the
+// operator configures a mirror; no redirects, no proxy.
 func New(kevURL, epssURL string, client *http.Client) *Enricher {
+	if client == nil {
+		client = safehttp.NewClient(30*time.Second, safehttp.EndpointPolicy(kevURL, epssURL))
+	}
 	if strings.TrimSpace(kevURL) == "" {
 		kevURL = defaultKEVURL
 	}
 	if strings.TrimSpace(epssURL) == "" {
 		epssURL = defaultEPSSURL
-	}
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	return &Enricher{
 		kevURL:  strings.TrimRight(kevURL, "/"),

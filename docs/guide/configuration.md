@@ -849,6 +849,19 @@ allowlist; an empty or overly broad allowlist must not become an implicit networ
 | `SYNAPSE_JARHASH_BASE_URL` | empty | Approved jar-hash service or mirror URL. |
 | `SYNAPSE_JARHASH_DB_PATH` | empty | Offline jar-hash database path. |
 
+The reference-feed clients connect through the same destination guard as the integrations: KEV and
+EPSS, NVD, the deps.dev and PyPI license lookups, the jar-hash resolver, and the OSV bulk and Alpine
+secdb feeds. So do the endpoints in `SYNAPSE_TSA_URL`, `SYNAPSE_LLM_BASE_URL` and
+`SYNAPSE_VERIFIER_BASE_URL`.
+
+- A feed left at its public default connects only to globally reachable addresses.
+- A URL an operator sets may resolve to a private-use or loopback address, so a mirror on the host or
+  an internal network works. Cloud metadata endpoints and the other IANA special-purpose ranges stay
+  refused, including shared address space (`100.64.0.0/10`).
+- Redirects are not followed, so set the final URL.
+- `HTTP_PROXY` and `HTTPS_PROXY` are not used: the guard checks the address it dials, and a proxy
+  would connect somewhere it never checked.
+
 Tool binary overrides use `SYNAPSE_AST_BIN`, `SYNAPSE_GOVULNCHECK_BIN`, `SYNAPSE_GO_BIN`,
 `SYNAPSE_MVN_BIN`, `SYNAPSE_GRADLE_BIN`, `SYNAPSE_NPM_BIN`, `SYNAPSE_COMPOSER_BIN`,
 `SYNAPSE_BUNDLE_BIN`, `SYNAPSE_POETRY_BIN`, and `SYNAPSE_TAINT_CALLGRAPH_BIN`. Defaults are the
@@ -890,7 +903,7 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_FLEET_URL` | empty | Fleet API base URL. HTTPS is required except for loopback development. |
+| `SYNAPSE_FLEET_URL` | empty | Fleet API base URL. HTTPS is required except for loopback development. The agent connects directly: it follows no redirect, does not use `HTTPS_PROXY`, and refuses cloud metadata and shared address space (`100.64.0.0/10`). |
 | `SYNAPSE_FLEET_ENROL_TOKEN` | empty | One-time enrollment token. Environment use is supported, but a token file is preferred; the equivalent command-line flag is visible in process listings and shell history. |
 | `SYNAPSE_FLEET_ENROL_TOKEN_FILE` | empty | Preferred file containing the one-time token. Remove it after successful enrollment. |
 | `SYNAPSE_AGENT_STATE_DIR` | platform default | Credential and offline-buffer directory; `/var/lib/synapse-cluster-agent` for the cluster agent. Protect it from other users. |
