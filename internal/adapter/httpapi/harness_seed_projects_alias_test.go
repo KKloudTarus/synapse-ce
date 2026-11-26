@@ -43,6 +43,18 @@ func (a *projectIDAlias) HotspotHistory(ctx context.Context, tenantID, projectID
 	return a.ProjectAnalysisStore.HotspotHistory(ctx, tenantID, projectID, a.resolve(hotspotID, a.hotspotID))
 }
 
+// The write sweep addresses the same hotspot and issue by the same literal when it moves them, so a
+// transition is rewritten the same way and still runs against the caller's own tenant and project.
+func (a *projectIDAlias) TransitionHotspot(ctx context.Context, cmd hotspot.TransitionCommand) (hotspot.Hotspot, hotspot.ReviewEvent, error) {
+	cmd.HotspotID = a.resolve(cmd.HotspotID, a.hotspotID)
+	return a.ProjectAnalysisStore.TransitionHotspot(ctx, cmd)
+}
+
+func (a *projectIDAlias) TransitionIssue(ctx context.Context, cmd issue.TransitionCommand) (issue.Issue, issue.ReviewEvent, error) {
+	cmd.IssueID = a.resolve(cmd.IssueID, a.issueID)
+	return a.ProjectAnalysisStore.TransitionIssue(ctx, cmd)
+}
+
 func (a *projectIDAlias) GetIssue(ctx context.Context, tenantID, projectID, issueID shared.ID) (issue.Issue, error) {
 	return a.ProjectAnalysisStore.GetIssue(ctx, tenantID, projectID, a.resolve(issueID, a.issueID))
 }

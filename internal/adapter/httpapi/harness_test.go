@@ -614,6 +614,10 @@ func TestHostileHarness(t *testing.T) {
 		t.Fatalf("host vulnerability service: %v", err)
 	}
 	rt.SetHostVulnerabilities(hostVulns)
+	// The host-asset check the process report and re-baseline routes run before writing, wired over
+	// the fixture's asset store as cmd/synapse-api wires it over the real one. Without it those
+	// routes store a report under the caller's tenant for any asset id, even one it does not have.
+	rt.SetHostAssetVerifier(attackAssets)
 	rt.SetFleetRolloutAdmin(harnessRollout{})
 	rt.SetAssessmentCycles(lifecycleAPI, true, func(string) bool { return true })
 	rt.SetAssessmentLifecycleRollout(func(string) bool { return true }, func(string) bool { return true })
@@ -1384,6 +1388,9 @@ func TestHostileHarness(t *testing.T) {
 		t.Logf("routes the sweep cannot address (%d):\n  %s", len(unaddressable), strings.Join(unaddressable, "\n  "))
 		t.Logf("harnessKnownUnaddressable lists %d routes (%d without a value, %d reaching no tenantA record)", len(harnessKnownUnaddressable), len(unaddressable), len(unproven))
 	})
+	// The write sweep (harness_write_sweep_test.go) changes tenantA's data with tenantA's own
+	// requests, so it runs last, after every read and hand-written case above.
+	t.Run("cross-tenant write sweep", func(t *testing.T) { runHostileWriteSweep(t, mux) })
 }
 
 // harnessGlobalReferencePaths are the path prefixes whose parameter names data every tenant shares.
