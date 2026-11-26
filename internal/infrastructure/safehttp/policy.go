@@ -1,6 +1,9 @@
 package safehttp
 
-import "net/netip"
+import (
+	"net/netip"
+	"strings"
+)
 
 // Policy decides which destinations an outbound connection may reach. The zero value admits only
 // globally reachable addresses. Every field widens or narrows that default explicitly; nothing a
@@ -29,6 +32,21 @@ func (p Policy) AllowsAddress(address netip.Addr) bool { return p.permits(addres
 // network, and still refuses cloud metadata and every other special-purpose range.
 func OperatorPolicy() Policy {
 	return Policy{AllowPrivate: true, AllowLoopback: true}
+}
+
+// EndpointPolicy is for a client whose endpoints default to public services and which an operator
+// may point elsewhere, such as a feed mirror or a local model server. Pass the configured values
+// before any default is filled in. While every one is empty, only globally reachable addresses are
+// admitted; once the operator sets one, it is OperatorPolicy, so a mirror on the host or an internal
+// network keeps working. Only operator configuration may be passed: a destination a tenant can set
+// needs a policy of its own.
+func EndpointPolicy(configured ...string) Policy {
+	for _, endpoint := range configured {
+		if strings.TrimSpace(endpoint) != "" {
+			return OperatorPolicy()
+		}
+	}
+	return Policy{}
 }
 
 // permitsHost reports whether the policy admits host and port before resolution.

@@ -21,6 +21,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -95,7 +96,10 @@ func NewWithEnrollmentURL(baseURL, enrollmentURL string, timeout time.Duration) 
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &Client{baseURL: baseURL, enrollmentURL: enrollmentURL, http: &http.Client{Timeout: timeout}}
+	// The control plane is the agent operator's configuration and often sits on an internal network,
+	// or on loopback in development, but the client never follows a redirect or reaches a metadata
+	// endpoint. ActivateCredential clones this transport, so the mTLS client keeps the same dialer.
+	return &Client{baseURL: baseURL, enrollmentURL: enrollmentURL, http: safehttp.NewClient(timeout, safehttp.OperatorPolicy())}
 }
 
 // ActivateCredential installs the enrolled agent's client certificate on the HTTP transport. A

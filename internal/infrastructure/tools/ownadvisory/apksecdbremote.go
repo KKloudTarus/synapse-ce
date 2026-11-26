@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -48,21 +49,17 @@ type RemoteSecdbFeed struct {
 
 var _ ports.AdvisoryFeed = (*RemoteSecdbFeed)(nil)
 
-// NewRemoteSecdbFeed returns a feed over baseURL, defaulting to Alpine's published secdb. The client defaults
-// to a bounded, redirect-refusing client over the same hardened transport the OSV bulk feed uses, so a
-// redirect cannot bounce the fetch to another host and a name cannot resolve to a private address.
+// NewRemoteSecdbFeed returns a feed over baseURL, defaulting to Alpine's published secdb. A nil client gets a
+// bounded safehttp client, so a redirect cannot bounce the fetch to another host: public addresses only for
+// Alpine's secdb, safehttp.OperatorPolicy for a mirror set with SYNAPSE_ALPINE_SECDB_URL.
 func NewRemoteSecdbFeed(baseURL string, client *http.Client) *RemoteSecdbFeed {
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = defaultAlpineSecdbURL
-	}
 	if client == nil {
-		client = &http.Client{
-			Timeout:       2 * time.Minute, // each document is tens of kilobytes
-			CheckRedirect: noRedirect,
-			Transport:     safeTransport(),
-		}
+		client = safehttp.NewClient(2*time.Minute, safehttp.EndpointPolicy(baseURL)) // each document is tens of kilobytes
 	} else if client.CheckRedirect == nil {
 		client.CheckRedirect = noRedirect
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = defaultAlpineSecdbURL
 	}
 	return &RemoteSecdbFeed{baseURL: strings.TrimRight(baseURL, "/"), client: client}
 }

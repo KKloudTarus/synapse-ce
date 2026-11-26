@@ -25,6 +25,7 @@ import (
 	rfc3161 "github.com/digitorus/timestamp"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -53,7 +54,9 @@ func NewClient(url string, timeout time.Duration) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	return &Client{url: url, httpClient: &http.Client{Timeout: timeout}}, nil
+	// The TSA is operator configuration, so it may run on the host or an internal network, but the
+	// client never follows a redirect or reaches a metadata endpoint.
+	return &Client{url: url, httpClient: safehttp.NewClient(timeout, safehttp.OperatorPolicy())}, nil
 }
 
 // Timestamp requests an RFC-3161 token over digest (a chain head's bytes). The TSA's

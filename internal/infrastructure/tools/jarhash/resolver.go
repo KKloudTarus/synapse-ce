@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -48,13 +49,14 @@ type Resolver struct {
 
 type coord struct{ group, artifact, version string }
 
-// New returns a resolver hitting Maven Central's SHA-1 search API. baseURL/client default sensibly.
+// New returns a resolver hitting Maven Central's SHA-1 search API. A nil client gets a safehttp
+// client: public addresses only for Maven Central, safehttp.OperatorPolicy for an operator's service.
 func New(baseURL string, client *http.Client) *Resolver {
+	if client == nil {
+		client = safehttp.NewClient(reqTimeout, safehttp.EndpointPolicy(baseURL))
+	}
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultBaseURL
-	}
-	if client == nil {
-		client = &http.Client{Timeout: reqTimeout}
 	}
 	return &Resolver{
 		baseURL:     strings.TrimRight(baseURL, "/"),

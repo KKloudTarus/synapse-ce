@@ -46,6 +46,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   now writes the path relative to the scanned directory (`svc/pom.xml`), as secret and SAST results already
   were; a manifest outside the scanned directory gets no location rather than an absolute path. An image
   scan's locations are unchanged.
+- **Feed, timestamp, model and fleet clients go through the outbound destination guard (#1698).**
+  The KEV, EPSS, NVD, deps.dev, PyPI and jar-hash clients, the RFC-3161 timestamp client, the
+  OpenAI-compatible model client and the agent's fleet client used Go's default client. It follows up
+  to ten redirects, honours `HTTP_PROXY` and dials any address, so an upstream answering
+  `302 Location: http://169.254.169.254/...` was followed. They now use `safehttp`: no redirect, no
+  proxy, and no cloud metadata or other special-purpose address. A feed left at its public default
+  reaches only public addresses, and a URL the operator sets may still be on the host or an internal
+  network. The OSV bulk, Alpine secdb and GitLab advisory feeds drop a hand-rolled guard that let
+  through the metadata endpoints in shared (`100.100.100.200`), unique-local (`fd00:ec2::254`) and
+  NAT64 space. A GitLab vulnerability source now reaches a private address only with
+  `allow_private_network`, as an OSV source already did. A deployment that reaches these services
+  only through an egress proxy, or at a `100.64.0.0/10` address, can no longer reach them.
 
 - **Restore verification no longer reports every healthy multi-tenant database as tampered.**
   Since migration 0085 each tenant's audit entries form their own hash chain, enforced by

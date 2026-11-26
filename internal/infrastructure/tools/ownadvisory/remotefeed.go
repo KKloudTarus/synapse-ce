@@ -9,7 +9,6 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -102,59 +102,23 @@ func (f *RemoteFeed) Test(ctx context.Context) error {
 }
 
 // NewRemoteFeed returns a feed over the OSV bulk bucket. baseURL defaults to the public bucket; ecosystems
-// defaults to the covered set; client defaults to a 10-minute, no-redirect client (the zips are large).
+// defaults to the covered set. A nil client gets a 10-minute safehttp client (the zips are large): public
+// addresses only for the public bucket, safehttp.OperatorPolicy for a mirror set with SYNAPSE_OSV_BULK_URL.
+// A source row's endpoint is not operator configuration, so NewRemoteProvider passes its own client.
 func NewRemoteFeed(baseURL string, ecosystems []string, client *http.Client) *RemoteFeed {
+	if client == nil {
+		client = safehttp.NewClient(10*time.Minute, safehttp.EndpointPolicy(baseURL))
+	} else if client.CheckRedirect == nil {
+		client.CheckRedirect = noRedirect // defense-in-depth: a stock injected client must not follow redirects either
+	}
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultOSVBulkURL
 	}
 	if len(ecosystems) == 0 {
 		ecosystems = defaultBulkEcosystems
 	}
-	if client == nil {
-		client = &http.Client{
-			Timeout:       10 * time.Minute, // a per-ecosystem all.zip is large
-			CheckRedirect: noRedirect,
-			Transport:     safeTransport(),
-		}
-	} else if client.CheckRedirect == nil {
-		client.CheckRedirect = noRedirect // defense-in-depth: a stock injected client must not follow redirects either
-	}
 	base := strings.TrimRight(baseURL, "/")
 	return &RemoteFeed{baseURL: base, ecosystems: ecosystems, client: client, requireDigest: isGCSHost(base)}
-}
-
-func safeTransport() http.RoundTripper {
-	return &http.Transport{
-		Proxy: nil,
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, err
-			}
-			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
-			if err != nil {
-				return nil, err
-			}
-			dialer := net.Dialer{Timeout: 30 * time.Second}
-			var lastErr error
-			for _, ip := range ips {
-				if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-					lastErr = fmt.Errorf("%w: source endpoint resolves to a loopback/link-local address", shared.ErrValidation)
-					continue
-				}
-				conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-				if dialErr == nil {
-					return conn, nil
-				}
-				lastErr = dialErr
-			}
-			if lastErr != nil {
-				return nil, lastErr
-			}
-			return nil, fmt.Errorf("source endpoint has no usable address")
-		},
-		ForceAttemptHTTP2: true,
-	}
 }
 
 var _ ports.AdvisoryFeed = (*RemoteFeed)(nil)

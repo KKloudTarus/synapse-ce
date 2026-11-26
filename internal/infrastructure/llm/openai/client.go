@@ -20,6 +20,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -68,7 +69,28 @@ func New(base, key, model string, timeout time.Duration) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	return &Client{base: base, key: strings.TrimSpace(key), model: strings.TrimSpace(model), http: &http.Client{Timeout: timeout}}, nil
+	return &Client{base: base, key: strings.TrimSpace(key), model: strings.TrimSpace(model), http: newHTTPClient(timeout)}, nil
+}
+
+// newHTTPClient returns the client for an operator-configured model endpoint. Every connection goes
+// through safehttp's dialer under OperatorPolicy, so a local or internal gateway works while cloud
+// metadata and the other special-purpose ranges stay refused, and no redirect or proxy is followed.
+// It starts from net/http's default transport rather than safehttp.NewClient because triage may run
+// up to 32 calls against one gateway (SYNAPSE_FP_TRIAGE_CONCURRENCY), and safehttp caps a host at 8
+// connections, which would queue calls inside their own timeout.
+func newHTTPClient(timeout time.Duration) *http.Client {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
+	transport.Proxy = nil
+	transport.DialContext = safehttp.NewDialer(safehttp.OperatorPolicy(), 0).DialContext
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 }
 
 // BaseURL is the configured endpoint (safe to log – never returns the key).

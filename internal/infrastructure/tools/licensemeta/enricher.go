@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -37,13 +38,14 @@ type Enricher struct {
 	client  *http.Client
 }
 
-// New returns an enricher. baseURL defaults to deps.dev; client defaults to 15s.
+// New returns an enricher. baseURL defaults to deps.dev. A nil client gets a 15s safehttp client:
+// public addresses only for deps.dev, safehttp.OperatorPolicy for an operator's mirror.
 func New(baseURL string, client *http.Client) *Enricher {
+	if client == nil {
+		client = safehttp.NewClient(15*time.Second, safehttp.EndpointPolicy(baseURL))
+	}
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultBaseURL
-	}
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
 	}
 	return &Enricher{baseURL: strings.TrimRight(baseURL, "/"), client: client}
 }
