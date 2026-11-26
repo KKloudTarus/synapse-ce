@@ -98,6 +98,37 @@ jobs:
           print(f"{len(rules)} rules, all carrying a link, a description and a fix")
           PY
 
+      - name: Every SARIF result is identifiable and points into the repository
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import collections, json, sys
+
+          with open("synapse.sarif") as fh:
+              results = json.load(fh)["runs"][0]["results"]
+          if not results:
+              sys.exit("the SARIF carries no results, so this job proves nothing")
+
+          # An importer de-duplicates across runs on the fingerprint and takes it as the tool's word that two
+          # results are one, so none may be missing and none may be shared (#1665).
+          fingerprints = [(r.get("partialFingerprints") or {}).get("synapseFindingKey/v1") for r in results]
+          missing = [r["ruleId"] for r, fp in zip(results, fingerprints) if not fp]
+          if missing:
+              sys.exit(f"{len(missing)} result(s) carry no fingerprint: {missing[:5]}")
+          shared = [fp for fp, n in collections.Counter(fingerprints).items() if n > 1]
+          if shared:
+              sys.exit(f"{len(shared)} fingerprint(s) are shared by more than one result")
+
+          # A location names a file in the repository, never a path on this runner.
+          for r in results:
+              for loc in r.get("locations") or []:
+                  uri = ((loc.get("physicalLocation") or {}).get("artifactLocation") or {}).get("uri", "")
+                  if uri.startswith(("/", "..")) or "\\" in uri or ":" in uri.split("/")[0]:
+                      sys.exit(f"{r['ruleId']} points at {uri!r}, which is not a path in the repository")
+
+          print(f"{len(results)} results, each with its own fingerprint and a repository path")
+          PY
+
       - name: Upload the SARIF as an artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

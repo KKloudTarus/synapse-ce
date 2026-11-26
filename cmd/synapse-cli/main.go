@@ -2027,14 +2027,18 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		// --fail-on gate below still sets the exit code, so the same run both annotates and gates.
 		manifestByComp := map[string]string{}
 		if res.SBOM != nil {
-			for _, c := range res.SBOM.Components {
-				// SBOM Location is often workspace-rooted with a leading "/" (Syft's dir-scan convention);
-				// a code-scanning UI wants a repo-relative path, so drop any leading slash (a no-op when
-				// absent). If two components share name@version, last write wins – any declaring manifest
-				// is fine for the annotation.
-				if loc := strings.TrimPrefix(c.Location, "/"); loc != "" {
-					manifestByComp[c.Name+"@"+c.Version] = loc
+			if image {
+				for _, c := range res.SBOM.Components {
+					// An image's paths are inside the image, not in a repository; Syft roots them at "/", which
+					// is dropped. If two components share name@version, last write wins.
+					if loc := strings.TrimPrefix(c.Location, "/"); loc != "" {
+						manifestByComp[c.Name+"@"+c.Version] = loc
+					}
 				}
+			} else {
+				// A local directory is scanned in place, so a manifest's recorded path is placed relative to it,
+				// the way secret and SAST results already are (#1665).
+				manifestByComp = sarifManifestPaths(target, res.SBOM.Components)
 			}
 		}
 		manifestFor := func(f finding.Finding) string {

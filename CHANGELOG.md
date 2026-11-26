@@ -29,6 +29,23 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   `db-connection-string`. A high-entropy password in these positions is still reported by `generic-secret`
   as well, so its line carries two findings, as an AWS secret key line already does. Not covered: a nested
   YAML `datasource:` block and the default value in `${DB_PASSWORD:value}`.
+- **SARIF results carry a stable fingerprint, and a dependency result points at its manifest by a
+  repository path (#1665).** No result carried `partialFingerprints`, so an importer could not tell a
+  result it had seen in an earlier run from a new one. Every result now carries
+  `partialFingerprints["synapseFindingKey/v1"]`, the SHA-256 of the finding's dedup key: an advisory with
+  its component and version, or a rule with a repository-relative file and line. It holds no absolute
+  path, run id or time, so the same finding gets the same value in every run and on every runner; two
+  results that would share a value get none, because an importer takes a fingerprint as the tool's word
+  that two results are one. The SARIF ingest keys an approved observation binding on it, so a decision
+  recorded against a result that `synapse-cli scan --server --engagement` pushed follows that finding into
+  the next push from any runner; a pushed dependency result, which carries no location, could not be bound
+  at all before. A
+  dependency result took its manifest path from the SBOM with only a leading `/` dropped, and the owned
+  producer records an absolute path, so on Linux and macOS the result named `private/tmp/.../pom.xml`, and
+  on Windows the path failed validation and the result had no location at all. `synapse-cli scan --sarif`
+  now writes the path relative to the scanned directory (`svc/pom.xml`), as secret and SAST results already
+  were; a manifest outside the scanned directory gets no location rather than an absolute path. An image
+  scan's locations are unchanged.
 
 - **Restore verification no longer reports every healthy multi-tenant database as tampered.**
   Since migration 0085 each tenant's audit entries form their own hash chain, enforced by

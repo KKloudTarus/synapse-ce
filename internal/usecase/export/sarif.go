@@ -1,6 +1,8 @@
 package export
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -14,6 +16,13 @@ const (
 	sarifSchema  = "https://json.schemastore.org/sarif-2.1.0.json"
 	sarifVersion = "2.1.0"
 	infoURI      = "https://github.com/KKloudTarus/synapse-ce"
+
+	// sarifFingerprintKey is the partialFingerprints entry carrying a finding's identity: the hex SHA-256 of
+	// its dedup key, the key Synapse itself deduplicates findings on across scans. That key holds no absolute
+	// path, run id or time (an advisory with its component and version, or a rule with a repo-relative file and
+	// line), so the same finding gets the same value in every run and on every runner. A first-party finding
+	// that moves to another line becomes a new finding here, as it does in Synapse.
+	sarifFingerprintKey = "synapseFindingKey/v1"
 )
 
 // SARIF 2.1.0 subset (the fields Synapse emits).
@@ -82,13 +91,16 @@ type SARIFText struct {
 }
 
 type SARIFResult struct {
-	RuleID       string             `json:"ruleId"`
-	Level        string             `json:"level"`
-	Message      SARIFText          `json:"message"`
-	Locations    []SARIFLocation    `json:"locations,omitempty"`
-	CodeFlows    []SARIFCodeFlow    `json:"codeFlows,omitempty"`
-	Suppressions []SARIFSuppression `json:"suppressions,omitempty"`
-	Properties   map[string]any     `json:"properties,omitempty"`
+	RuleID    string          `json:"ruleId"`
+	Level     string          `json:"level"`
+	Message   SARIFText       `json:"message"`
+	Locations []SARIFLocation `json:"locations,omitempty"`
+	// PartialFingerprints names the finding a result reports, so a consumer can tell a result it has seen
+	// in an earlier run from a new one. See sarifFingerprintKey.
+	PartialFingerprints map[string]string  `json:"partialFingerprints,omitempty"`
+	CodeFlows           []SARIFCodeFlow    `json:"codeFlows,omitempty"`
+	Suppressions        []SARIFSuppression `json:"suppressions,omitempty"`
+	Properties          map[string]any     `json:"properties,omitempty"`
 }
 
 type SARIFSuppression struct {
@@ -311,10 +323,33 @@ func securitySeverity(sev shared.Severity) string {
 	}
 }
 
+// findingFingerprints maps each dedup key that names exactly one of these findings to its fingerprint. A
+// consumer treats a fingerprint as this tool's word that two results are the same one (this repository's
+// SARIF ingest keys an approved binding on it), so a decision recorded against one result would follow
+// every result sharing the value. A key that more than one finding carries therefore gets no fingerprint at
+// all: such a result is still valid, and is told apart by its rule and location instead.
+func findingFingerprints(findings []finding.Finding) map[string]string {
+	count := make(map[string]int, len(findings))
+	for _, f := range findings {
+		if key := strings.TrimSpace(f.DedupKey); key != "" {
+			count[key]++
+		}
+	}
+	out := make(map[string]string, len(count))
+	for key, n := range count {
+		if n == 1 {
+			sum := sha256.Sum256([]byte(key))
+			out[key] = hex.EncodeToString(sum[:])
+		}
+	}
+	return out
+}
+
 func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *SARIFLog {
 	rules := make([]SARIFRule, 0)
 	seen := map[string]bool{}
 	results := make([]SARIFResult, 0, len(findings))
+	fingerprints := findingFingerprints(findings)
 
 	for _, f := range findings {
 		p := parseDedup(f.DedupKey)
@@ -419,6 +454,9 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 				"status":    string(f.Status),
 			},
 			Locations: locations,
+		}
+		if fingerprint, ok := fingerprints[strings.TrimSpace(f.DedupKey)]; ok {
+			res.PartialFingerprints = map[string]string{sarifFingerprintKey: fingerprint}
 		}
 		if codeFlows := sarifDataFlows(f.DataFlow); len(codeFlows) > 0 {
 			res.CodeFlows = codeFlows
