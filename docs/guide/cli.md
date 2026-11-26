@@ -177,7 +177,7 @@ synapse-cli scan <path|image-ref> [flags]
 | `--min-confidence low\|medium\|high\|very_high` | Drop findings below this confidence. Findings that carry no confidence (SAST/misconfig) are kept. Useful to cut lower-signal secret matches. |
 | `--base <ref>` | Scope line-anchored findings (SAST, secret, misconfig) to code changed vs this git ref (Clean-as-You-Code), so a repo with a backlog gates the pipeline only on what a change introduces. Dependency/license findings are not line-attributable and are kept, baseline those with `.synapseignore`. Local git repos only (not `--image`). |
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
-| `--include-test` | Also gate on findings in test, fixture, and example paths. They are reported but gate-exempt by default. |
+| `--include-test` | Also gate on findings in test, fixture, and example paths, and on dependencies a manifest declares test-only (a Maven `<scope>test</scope>` dependency, a Gradle dependency used only by test configurations). They are reported but gate-exempt by default. |
 | `--verify-secrets` | Actively confirm each detected credential is live by making one minimal read-only API call to its provider's public host (GitHub, GitLab, OpenAI), stamping the finding verified/unverified/unknown. Opt-in and off by default, and IGNORED under `--offline` (which forbids network egress). It sends the raw leaked secret over the network to the public provider host, so use it only against credentials you are authorized to test; a self-managed-instance token is still sent to the public host and yields `unknown`. The secret is never logged or written to output; a verified live credential is raised to `very_high` confidence, and an unverified or unknown verdict never removes a finding. |
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. When the scan finishes, stderr gets a short engine-coverage summary (how many required engines completed, each one that did not with its execution and reason, and the engines excluded on purpose) followed by every source warning in full, so a partial scan is visible without reading the document. |
 | `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. |
@@ -325,8 +325,12 @@ stays in the report, it is only held back from the `--fail-on` gate).
 
 1. **Deterministic test scope.** Findings in test/fixture/example/benchmark/docs paths, including the
    `foo_test.go`, `test_foo.py`, `foo.test.ts`, `foo_spec.rb` file conventions where the test sits beside
-   its source, are classified as background scope and are exempt from the gate by default. Pass
-   `--include-test` to gate on them too. This alone removes the bulk of the noise.
+   its source, are classified as background scope and are exempt from the gate by default. So are
+   dependencies a manifest declares test-only: a Maven `<scope>test</scope>` dependency, and a Gradle
+   dependency that only test configurations use (`testImplementation`, `androidTestImplementation`,
+   custom suites such as `integrationTestImplementation`, or only test classpaths in a
+   `gradle.lockfile`). A dependency that any production declaration also names, in any module, stays
+   production. Pass `--include-test` to gate on them too. This alone removes the bulk of the noise.
 
 2. **AI critique (opt-in).** Set `SYNAPSE_FP_TRIAGE_ENABLED=true` with an LLM endpoint configured
    (`SYNAPSE_LLM_BASE_URL`, `SYNAPSE_LLM_API_KEY`, and `SYNAPSE_FP_TRIAGE_MODEL` or `SYNAPSE_LLM_MODEL`).

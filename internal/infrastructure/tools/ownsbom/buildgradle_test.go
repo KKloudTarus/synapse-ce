@@ -30,11 +30,11 @@ repositories {
 	got := map[string]string{}
 	for _, c := range comps {
 		got[c.Name] = c.Version
-		// testImplementation is a test-only declaration, so the junit-jupiter coordinate is development scope; the
-		// rest sit under implementation and stay production.
+		// testImplementation is a test-only declaration, so the junit-jupiter coordinate is test scope, as a Maven
+		// <scope>test</scope> dependency is; the rest sit under implementation and stay production.
 		wantScope := sbom.ScopeProduction
 		if c.Name == "org.junit.jupiter:junit-jupiter" {
-			wantScope = sbom.ScopeDevelopment
+			wantScope = sbom.ScopeTest
 		}
 		if c.PURL == "" || c.Scope != wantScope {
 			t.Errorf("component missing PURL or wrong scope (want %s): %+v", wantScope, c)
@@ -116,7 +116,7 @@ func scopesOf(comps []sbom.Component) map[string]string {
 func TestParseBuildGradleDepsScope(t *testing.T) {
 	const (
 		prod = sbom.ScopeProduction
-		test = sbom.ScopeDevelopment
+		test = sbom.ScopeTest
 	)
 	cases := []struct {
 		name string
@@ -376,7 +376,7 @@ func TestParseBuildGradleDepsConfigurationNames(t *testing.T) {
 		}
 	}
 	for _, config := range test {
-		t.Run(config, func(t *testing.T) { check(t, config, sbom.ScopeDevelopment) })
+		t.Run(config, func(t *testing.T) { check(t, config, sbom.ScopeTest) })
 	}
 	for _, config := range prod {
 		t.Run(config, func(t *testing.T) { check(t, config, sbom.ScopeProduction) })

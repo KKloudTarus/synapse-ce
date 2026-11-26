@@ -58,13 +58,15 @@ func TestGenerateMergedScopeDoesNotFollowWalkOrder(t *testing.T) {
 			map[string]string{"a/pom.xml": junitPOM("a", "test"), "b/pom.xml": junitPOM("b", "compile")}, sbom.ScopeProduction, "b/pom.xml"},
 		{"maven: compile-scope module walked first", "a/pom.xml", "b/pom.xml",
 			map[string]string{"a/pom.xml": junitPOM("a", "compile"), "b/pom.xml": junitPOM("b", "test")}, sbom.ScopeProduction, "a/pom.xml"},
-		// A background scope survives only when every copy is background: a pom.xml under an example directory
-		// (example scope) and a Gradle test configuration (development scope) together are development, which
-		// the gate counts.
+		// A background scope survives when every copy is background. A Gradle test configuration is test scope,
+		// as a Maven test-scope dependency is, so the two agree; with an example module (example scope) the copies
+		// are all background and the first one's label stands.
+		{"gradle test configuration and maven test scope agree", "a/build.gradle", "b/pom.xml",
+			map[string]string{"a/build.gradle": gradleTest, "b/pom.xml": junitPOM("b", "test")}, sbom.ScopeTest, "a/build.gradle"},
 		{"example module walked first, then a test configuration", "demo/pom.xml", "service/build.gradle",
-			map[string]string{"demo/pom.xml": junitPOM("demo", "compile"), "service/build.gradle": gradleTest}, sbom.ScopeDevelopment, "service/build.gradle"},
+			map[string]string{"demo/pom.xml": junitPOM("demo", "compile"), "service/build.gradle": gradleTest}, sbom.ScopeExample, "demo/pom.xml"},
 		{"test configuration walked first, then an example module", "app/build.gradle", "examples/pom.xml",
-			map[string]string{"app/build.gradle": gradleTest, "examples/pom.xml": junitPOM("examples", "compile")}, sbom.ScopeDevelopment, "app/build.gradle"},
+			map[string]string{"app/build.gradle": gradleTest, "examples/pom.xml": junitPOM("examples", "compile")}, sbom.ScopeTest, "app/build.gradle"},
 		{"two background copies stay background", "demo/pom.xml", "examples/pom.xml",
 			map[string]string{"demo/pom.xml": junitPOM("demo", "compile"), "examples/pom.xml": junitPOM("examples", "test")}, sbom.ScopeExample, "demo/pom.xml"},
 	}

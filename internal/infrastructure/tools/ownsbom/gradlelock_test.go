@@ -65,8 +65,8 @@ func TestGradleLockfileParse(t *testing.T) {
 				"commons-io:commons-io:2.8.0=compileClasspath,testCompileClasspath\n" +
 				"org.hamcrest:hamcrest:2.2=runtimeClasspath\n",
 			want: []want{
-				{"pkg:maven/org.junit.jupiter/junit-jupiter@5.8.2", sbom.ScopeDevelopment},
-				{"pkg:maven/org.mockito/mockito-core@4.0.0", sbom.ScopeDevelopment},
+				{"pkg:maven/org.junit.jupiter/junit-jupiter@5.8.2", sbom.ScopeTest},
+				{"pkg:maven/org.mockito/mockito-core@4.0.0", sbom.ScopeTest},
 				{"pkg:maven/commons-io/commons-io@2.8.0", sbom.ScopeProduction},
 				{"pkg:maven/org.hamcrest/hamcrest@2.2", sbom.ScopeProduction},
 			},
@@ -77,8 +77,8 @@ func TestGradleLockfileParse(t *testing.T) {
 				"junit:junit:4.13.2=debugUnitTestCompileClasspath,debugUnitTestRuntimeClasspath,releaseUnitTestRuntimeClasspath\n" +
 				"androidx.core:core:1.9.0=debugCompileClasspath,debugRuntimeClasspath,debugUnitTestRuntimeClasspath\n",
 			want: []want{
-				{"pkg:maven/androidx.test/runner@1.5.2", sbom.ScopeDevelopment},
-				{"pkg:maven/junit/junit@4.13.2", sbom.ScopeDevelopment},
+				{"pkg:maven/androidx.test/runner@1.5.2", sbom.ScopeTest},
+				{"pkg:maven/junit/junit@4.13.2", sbom.ScopeTest},
 				{"pkg:maven/androidx.core/core@1.9.0", sbom.ScopeProduction},
 			},
 		},
@@ -98,7 +98,7 @@ func TestGradleLockfileParse(t *testing.T) {
 			content: "g:a:1.0=testCompileClasspath\ng:a:1.0=runtimeClasspath\ng:b:2.0=testCompileClasspath\ng:b:2.0=testRuntimeClasspath\n",
 			want: []want{
 				{"pkg:maven/g/a@1.0", sbom.ScopeProduction},
-				{"pkg:maven/g/b@2.0", sbom.ScopeDevelopment},
+				{"pkg:maven/g/b@2.0", sbom.ScopeTest},
 			},
 		},
 		{

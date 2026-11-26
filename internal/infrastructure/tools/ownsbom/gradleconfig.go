@@ -7,10 +7,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// gradleTestScope is the scope both Gradle parsers give a dependency that only test configurations use: the
-// scope an npm devDependency gets. Development scope is not exempt from the gate, so classifying a dependency
-// this way never hides it from --fail-on.
-const gradleTestScope = sbom.ScopeDevelopment
+// gradleTestScope is the scope both Gradle parsers give a dependency that only test configurations use: test,
+// the scope the Maven parser gives <scope>test</scope> (#1692). A test dependency is not in the shipped artifact
+// in either build tool, and giving the two different scopes made the same test-only dependency fail the gate in
+// a Gradle build and pass it in a Maven one. Test scope is background, so the gate exempts it unless
+// --include-test is set; a dependency any production configuration also names stays production, because
+// sbom.MergeScope lets production win over every other scope.
+const gradleTestScope = sbom.ScopeTest
 
 // gradleTestConfiguration reports whether a Gradle configuration name is a test configuration. It is the one
 // rule both Gradle parsers use: the build-script parser asks it about a declaration name (testImplementation,

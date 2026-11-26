@@ -30,7 +30,9 @@ const (
 	// 0.10.0: a component named by several manifests takes the scope sbom.MergeScope picks, not the first
 	// manifest's, and a build script's custom test suite is a test configuration (#1692). An SBOM cached under
 	// 0.9.0 would keep the walk-order scope.
-	ownsbomVersion = "ownsbom/0.10.0"
+	// 0.11.0: a Gradle test-only dependency is test scope, not development (#1692). A cached SBOM would keep the
+	// development scope, and with it the old exit code.
+	ownsbomVersion = "ownsbom/0.11.0"
 	// maxManifestBytes caps a single manifest read so a hostile/corrupt repo cannot OOM the scan with an
 	// absurd file. Real manifests are KB–low-MB; exceeding this is malicious or wrong, so it fails loud.
 	maxManifestBytes = 64 << 20
