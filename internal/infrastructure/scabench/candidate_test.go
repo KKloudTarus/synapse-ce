@@ -17,7 +17,8 @@ import (
 )
 
 func TestValidateCandidateInputRejectsExistingEvidenceRun(t *testing.T) {
-	evidenceRoot := t.TempDir()
+	input := candidateValidationInput(t)
+	evidenceRoot := input.EvidenceRoot
 	if err := os.Mkdir(filepath.Join(evidenceRoot, "candidate"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -25,8 +26,6 @@ func TestValidateCandidateInputRejectsExistingEvidenceRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := candidateValidationInput(t)
-	input.EvidenceRoot = evidenceRoot
 	input.RunKey = "candidate/attempt"
 	err := validateCandidateInput(input)
 	if err == nil || !strings.Contains(err.Error(), "candidate evidence path already exists") {
@@ -62,7 +61,7 @@ func TestValidateCandidateInputRejectsOverlappingEvidenceRoots(t *testing.T) {
 				if err := os.Mkdir(corpus, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				evidence := t.TempDir()
+				evidence := candidateEvidenceDir(t)
 				offline := filepath.Join(evidence, "offline")
 				if err := os.Mkdir(offline, 0o700); err != nil {
 					t.Fatal(err)
@@ -520,7 +519,7 @@ func TestCandidateErrorPreservesEvidencePath(t *testing.T) {
 
 func TestRunCandidateRetainsEvidenceOnIncompleteOfflineInput(t *testing.T) {
 	sourceRoot, corpusRoot, commit := candidateTestSource(t)
-	evidenceRoot := t.TempDir()
+	evidenceRoot := candidateEvidenceDir(t)
 	result, err := RunCandidate(context.Background(), CandidateInput{
 		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: t.TempDir(), EvidenceRoot: evidenceRoot,
 		ImplementationCommit: commit, RunKey: "candidate/incomplete",
@@ -564,7 +563,7 @@ func TestRunCandidateRejectsOversizedOfflineSBOMBeforeSourceBuild(t *testing.T) 
 		t.Fatal(err)
 	}
 	result, err := RunCandidate(context.Background(), CandidateInput{
-		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: offlineRoot, EvidenceRoot: t.TempDir(),
+		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: offlineRoot, EvidenceRoot: candidateEvidenceDir(t),
 		ImplementationCommit: commit, RunKey: "candidate/oversized-input",
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "candidate offline input bounds") {
@@ -619,7 +618,7 @@ func TestRunCandidateSealsConsistentCandidateIdentityChain(t *testing.T) {
 		}
 	})
 	result, runErr := RunCandidate(context.Background(), CandidateInput{
-		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: offlineRoot, EvidenceRoot: t.TempDir(),
+		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: offlineRoot, EvidenceRoot: candidateEvidenceDir(t),
 		ImplementationCommit: commit, RunKey: "candidate/identity",
 	}, nil)
 	if runErr == nil {
@@ -690,7 +689,7 @@ func TestRunCandidateSealsConsistentCandidateIdentityChain(t *testing.T) {
 	replayed, replayErr := RunCandidate(context.Background(), CandidateInput{
 		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, InputBundleRoot: result.EvidencePath,
 		EnvironmentAttestationPath: filepath.Join(offlineRoot, filepath.FromSlash(trustedEnvironmentAttestationLocator)),
-		EvidenceRoot:               t.TempDir(), ImplementationCommit: commit, RunKey: "candidate/replayed-identity",
+		EvidenceRoot:               candidateEvidenceDir(t), ImplementationCommit: commit, RunKey: "candidate/replayed-identity",
 	}, nil)
 	if replayErr == nil || !replayed.Sealed || replayed.Seal == nil {
 		t.Fatalf("bundle replay did not reach a sealed candidate before scanner dispatch: result=%+v, error=%v", replayed, replayErr)
@@ -707,7 +706,7 @@ func TestRunCandidateSealsConsistentCandidateIdentityChain(t *testing.T) {
 	rebound, reboundErr := RunCandidate(context.Background(), CandidateInput{
 		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, InputBundleRoot: result.EvidencePath,
 		EnvironmentAttestationPath: newAttestation,
-		EvidenceRoot:               t.TempDir(), ImplementationCommit: commit, RunKey: "candidate/rebound-attestation",
+		EvidenceRoot:               candidateEvidenceDir(t), ImplementationCommit: commit, RunKey: "candidate/rebound-attestation",
 	}, nil)
 	if reboundErr == nil || !rebound.Sealed || rebound.Seal == nil {
 		t.Fatalf("attestation replay did not reach a sealed candidate before scanner dispatch: result=%+v, error=%v", rebound, reboundErr)
@@ -1063,6 +1062,15 @@ func candidateSnapshotCheckout(t *testing.T) (string, string) {
 	return root, strings.TrimSpace(string(output))
 }
 
+func candidateEvidenceDir(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "evidence")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func candidateValidationInput(t *testing.T) CandidateInput {
 	t.Helper()
 	sourceRoot := t.TempDir()
@@ -1071,7 +1079,7 @@ func candidateValidationInput(t *testing.T) CandidateInput {
 		t.Fatal(err)
 	}
 	return CandidateInput{
-		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: t.TempDir(), EvidenceRoot: t.TempDir(),
+		SourceRoot: sourceRoot, CorpusRoot: corpusRoot, OfflineInputRoot: t.TempDir(), EvidenceRoot: candidateEvidenceDir(t),
 		ImplementationCommit: strings.Repeat("a", 40), RunKey: "candidate/validation",
 	}
 }
