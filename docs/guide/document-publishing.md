@@ -71,7 +71,7 @@ off unless the tested compatibility path is needed. It is not a fallback after a
 REST error. View/Edit writes still require exact group-only REST readback before
 any report upload. See the
 [vendor workaround](https://jira.atlassian.com/browse/CONFSERVER-56405) and
-[restriction design](../evidence/jira-sync-report-publishing/restricted-publication-design.md).
+[restriction design](https://github.com/KKloudTarus/synapse-ce/blob/4c851d90902a7db8925351d1f579b70064258fa3/docs/evidence/jira-sync-report-publishing/restricted-publication-design.md).
 
 The first remote write is only a neutral recovery shell. Synapse applies the exact
 read ACL and verifies it, including the Cloud public-link proof, before it uploads
@@ -361,7 +361,7 @@ save currently rereads the immutable artifact once; the encoded artifact limit
 is 32MiB. Yield and throttle-deferral returns reuse their already locked command
 instead of reading it a second time. List and direct execution still perform
 fresh reads. These choices preserve fencing and cost memory/JSON decoding for
-large reports; [queue measurements](../evidence/remaining-providers/queue-cost.json)
+large reports; [queue measurements](https://github.com/KKloudTarus/synapse-ce/blob/4c851d90902a7db8925351d1f579b70064258fa3/docs/evidence/remaining-providers/queue-cost.json)
 record that bound and the remaining artifact-validation cost.
 
 The sweep reads the page identity and exact restricted-sharing proof using current
