@@ -1518,16 +1518,6 @@ var harnessKnownUnaddressable = map[string]string{
 	// Planted by the engagement-data seeds.
 	"GET /api/v1/engagements/{id}/observation-bindings": "the fixture's binding stand-in (harnessObservationBindings) answers every caller with no bindings",
 
-	// Notification rules, deliveries and templates (#1702). The notifications seed plants one
-	// engagement setting and one channel; the template routes are not even registered, because the
-	// fixture's notification service has no template store.
-	"GET /api/v1/notifications/rules/{nid}":                        "notification rule family not seeded yet (#1702)",
-	"GET /api/v1/notifications/deliveries/{nid}":                   "notification delivery family not seeded yet (#1702)",
-	"GET /api/v1/notifications/deliveries/{nid}/attempts":          "notification delivery family not seeded yet (#1702)",
-	"GET /api/v1/notifications/templates/{nid}":                    "notification template family not seeded yet (#1702)",
-	"GET /api/v1/notifications/templates/{nid}/versions":           "notification template family not seeded yet (#1702)",
-	"GET /api/v1/notifications/channels/{nid}/template-resolution": "notification template family not seeded yet (#1702)",
-
 	// Ticket metadata (#1702): the ticket workflow the engagement seed wires has no Jira integration.
 	"GET /api/v1/integrations/{integrationID}/jira-metadata":   "ticket metadata family not seeded yet (#1702)",
 	"GET /api/v1/integrations/{integrationID}/ticket-metadata": "ticket metadata family not seeded yet (#1702)",
@@ -1564,7 +1554,7 @@ var harnessKnownUnaddressable = map[string]string{
 
 // harnessUnaddressableCeiling is how many routes harnessKnownUnaddressable may list. It only goes
 // down: the seed that takes routes off the list lowers it by as many.
-const harnessUnaddressableCeiling = 24
+const harnessUnaddressableCeiling = 18
 
 // The real root Router keeps tenant resolution entirely on the endpoint ID.
 // The hostile harness exercises both directions with an otherwise valid MAC.

@@ -57,8 +57,10 @@ func init() {
 // lifecycleCycleMarker).
 func seedFB(w *harnessWorld) []string {
 	w.t.Helper()
-	service, repo := seedNotificationSettings(w)
+	service, repo, jobs := seedNotificationSettings(w)
 	seedNotificationChannel(w, service, repo)
+	// The notification records seed plants a rule, a delivery and a template over this same service.
+	w.state[harnessNotificationsKey] = harnessNotifications{service: service, repo: repo, jobs: jobs}
 	return []string{notificationsMarker, lifecycleCycleMarker, notificationChannelMarker}
 }
 
@@ -77,17 +79,21 @@ func (notificationsProtector) Open(ciphertext string, _ []byte) ([]byte, error) 
 // seedNotificationSettings stores tenantA's override for the engagement engA through the real
 // service, so the row takes the path a request takes, and wires that service into the router. Wiring
 // it also registers the other notification routes; the channel routes are planted by
-// seedNotificationChannel over the same service, and the rest are listed in
-// harnessKnownUnaddressable until a seed plants their rows.
+// seedNotificationChannel over the same service, and the rule, delivery and template routes by the
+// notification records seed.
 //
 // The repository keeps one registry of engagements per tenant, and a setting can only be read or
 // written for an engagement registered under the caller's tenant. That registry is the only thing
 // standing between tenantB and the row, because the route has no engagement guard of its own.
-func seedNotificationSettings(w *harnessWorld) (*notificationuc.Service, *memory.NotificationRepository) {
+//
+// The repository runs over a real job queue, as in production, because a delivery can only be
+// redriven once its worker job has failed: without a queue the redrive route refuses every caller.
+func seedNotificationSettings(w *harnessWorld) (*notificationuc.Service, *memory.NotificationRepository, *memory.JobQueue) {
 	t := w.t
 	t.Helper()
 	at := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
-	repo := memory.NewNotificationRepository(nil, func() time.Time { return at })
+	jobs := memory.NewJobQueue(&notificationsIDs{prefix: "notification-job"}, func() time.Time { return at })
+	repo := memory.NewNotificationRepository(jobs, func() time.Time { return at })
 	repo.AddEngagement("tenantA", notificationsEngagement)
 	service, err := notificationuc.NewService(repo, notificationsProtector{}, nil, &fakeAudit{}, fixedClock{t: at}, &notificationsIDs{})
 	if err != nil {
@@ -101,13 +107,22 @@ func seedNotificationSettings(w *harnessWorld) (*notificationuc.Service, *memory
 		t.Fatalf("seed engagement notification setting: %v", err)
 	}
 	w.rt.SetNotifications(service)
-	return service, repo
+	return service, repo, jobs
 }
 
 // notificationsIDs hands out distinct ids, so two rows planted through one use case never collide.
-type notificationsIDs struct{ n int }
+// The service's generator has no prefix and names its rows notifications-id-1, -2 and so on; the
+// job queue's has its own prefix, so a queued job never takes an id a route is addressed with.
+type notificationsIDs struct {
+	prefix string
+	n      int
+}
 
 func (g *notificationsIDs) NewID() shared.ID {
 	g.n++
-	return shared.ID(fmt.Sprintf("notifications-id-%d", g.n))
+	prefix := g.prefix
+	if prefix == "" {
+		prefix = "notifications-id"
+	}
+	return shared.ID(fmt.Sprintf("%s-%d", prefix, g.n))
 }

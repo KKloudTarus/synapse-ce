@@ -23,8 +23,8 @@ const notificationChannelMarker = "tenantA-notification-channel-marker"
 const notificationChannelID = shared.ID("notifications-id-1")
 
 // notificationChannelRoutes are the channel routes the notifications seed makes serve tenantA's
-// channel. The template-resolution route under the same path needs the template store, which this
-// fixture does not wire, so it stays with the other template routes in harnessKnownUnaddressable.
+// channel. The template-resolution route under the same path needs the template store, which the
+// notification records seed wires, so that seed serves it, for its own delivery channel.
 var notificationChannelRoutes = []string{
 	"GET /api/v1/notifications/channels/{nid}",
 	"GET /api/v1/notifications/channels/{nid}/health-events",
