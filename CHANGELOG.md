@@ -9,6 +9,27 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **A database password in a JDBC URL or a Spring datasource setting is now reported (#1665).**
+  The secret scanner read a database password only from the `scheme://user:password@host` form, so the
+  shapes Java applications use were reported by nothing unless the password happened to be 16
+  high-entropy characters: a JDBC connection property (`jdbc:sqlserver://…;password=…`,
+  `jdbc:postgresql://…?user=…&password=…`, the same in MySQL, MariaDB and DB2 URLs, and `PWD=`), Oracle's
+  `jdbc:oracle:thin:user/password@host`, and `spring.datasource.password` in a properties file, a flat YAML
+  key, a `-D` system property or `System.setProperty`, or as `SPRING_DATASOURCE_PASSWORD` in an
+  environment file. Three rules read them now, `jdbc-connection-string`, `jdbc-oracle-connection-string`
+  and `spring-datasource-password`, at high severity and medium confidence like `db-connection-string`,
+  and each reports the password alone as the secret. What stands where a password goes is not reported:
+  `${DB_PASSWORD}`, `$DB_PASSWORD`, `%DB_PASSWORD%`, `<password>`, `{{password}}`, `%(password)s`,
+  `@db.password@`, a `****` mask, an empty value, `ENC(…)` and `{cipher}…` ciphertext, a Terraform or
+  Python expression assigned to the environment variable, and a JDBC account written with the words
+  themselves (`username/password@`, `user=user;password=password`), which the URI rule already stands down.
+  **A scan can now fail where it passed before.** On a fixture holding the issue's three JDBC URLs and its
+  `application.properties`, `synapse-cli scan` went from 0 findings and exit 0 to 4 high findings and
+  exit 1, with the default gate and with `--fail-on low`; `--min-confidence high` drops them, as it drops
+  `db-connection-string`. A high-entropy password in these positions is still reported by `generic-secret`
+  as well, so its line carries two findings, as an AWS secret key line already does. Not covered: a nested
+  YAML `datasource:` block and the default value in `${DB_PASSWORD:value}`.
+
 - **Restore verification no longer reports every healthy multi-tenant database as tampered.**
   Since migration 0085 each tenant's audit entries form their own hash chain, enforced by
   `audit_chain_link_v2_uniq (tenant_id, previous_hash)`, so every chain starts at an empty

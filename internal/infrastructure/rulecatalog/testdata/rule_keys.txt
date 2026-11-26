@@ -1513,6 +1513,8 @@ java-xxe-transformer-factory
 java-xxe-xmlinput-factory
 java-xxe-xmlreaderfactory
 java-zip-slip
+jdbc-connection-string
+jdbc-oracle-connection-string
 jenkins-api-token
 jfrog-token
 js-a11y-anchor-href-hash
@@ -2968,6 +2970,7 @@ spring-actuator-exposure-wildcard
 spring-actuator-health-details-always
 spring-actuator-sensitive-endpoint-exposed
 spring-actuator-shutdown-enabled
+spring-datasource-password
 spring-h2-console-enabled
 sqlalchemy-raw-sql-dynamic
 square-token
