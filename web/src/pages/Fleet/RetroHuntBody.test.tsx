@@ -26,7 +26,7 @@ describe('RetroHuntBody', () => {
 
   it('hunts the timeline window and renders the transitions and truncation', async () => {
     vi.mocked(api.retroHunt).mockResolvedValue(result())
-    render(<RetroHuntBody assetId="ba-001" />)
+    render(<RetroHuntBody assetId="ba-001" canOperate />)
 
     fireEvent.click(screen.getByRole('button', { name: /hunt/i }))
 
@@ -44,10 +44,19 @@ describe('RetroHuntBody', () => {
   })
 
   it('blocks a zero-width window', () => {
-    render(<RetroHuntBody assetId="ba-001" />)
+    render(<RetroHuntBody assetId="ba-001" canOperate />)
     fireEvent.change(screen.getByLabelText('Retro-hunt look-back minutes'), { target: { value: '0' } })
     fireEvent.change(screen.getByLabelText('Retro-hunt look-forward minutes'), { target: { value: '0' } })
     expect(screen.getByText(/zero-width window is rejected/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /hunt/i })).toBeDisabled()
+  })
+
+  it('does not offer the hunt to a role the server would refuse', () => {
+    render(<RetroHuntBody assetId="ba-001" canOperate={false} />)
+    expect(screen.getByText(/needs the operate permission/)).toBeInTheDocument()
+    const hunt = screen.getByRole('button', { name: /hunt/i })
+    expect(hunt).toBeDisabled()
+    fireEvent.click(hunt)
+    expect(api.retroHunt).not.toHaveBeenCalled()
   })
 })
