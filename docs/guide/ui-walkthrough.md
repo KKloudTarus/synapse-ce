@@ -666,9 +666,10 @@ channels.
 The wording of notification messages. Only tenant administrators and integration administrators
 see this tab's content; everyone else sees **Administrator access required**.
 
-1. **Built-in defaults** lists the read-only default templates with `Clone to customize`, which
-   opens a new draft pre-filled with the default's key and text. Until the default template set
-   ships, the section says the defaults are not available in this build yet.
+1. **Built-in defaults** lists the read-only default templates in a scrolling table (event,
+   channel family, language) with `Clone to customize`, which opens a new draft pre-filled with
+   the default's key and text. Until the default template set ships, the section says the
+   defaults are not available in this build yet.
 2. **Custom templates** lists the tenant's templates grouped by event type, then channel family,
    with status (`Draft`, `Active`, `Archived`), language, the latest version and the version that
    renders. Filter by event, channel family and status.

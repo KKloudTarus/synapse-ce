@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, TEMPLATE_VERSION_PAGE, type NotificationTemplate, type NotificationTemplateDetail, type NotificationTemplateVersion } from '../../../lib/api'
+import { api, ApiError, TEMPLATE_VERSION_PAGE, type BuiltinNotificationTemplate, type NotificationTemplate, type NotificationTemplateDetail, type NotificationTemplateVersion } from '../../../lib/api'
 import type { NotificationEventSpec } from '../../../lib/api/notifications'
 import { resetCapabilityCache } from '../../../lib/capabilities'
 import { STALE_MESSAGE, TemplateEditor } from './TemplateEditor'
@@ -201,6 +201,24 @@ describe('template library', () => {
         fields: { subject: 'Sự cố mới', body: 'Mở bảng điều khiển' },
       }),
     )
+  })
+
+  it('renders the built-in catalogue through a windowed table (#1704)', async () => {
+    // One default per event type, channel family and language: 33 x 4 x 2 = 264 rows today.
+    const builtins: BuiltinNotificationTemplate[] = Array.from({ length: 33 }, (_, event) =>
+      (['chat', 'email', 'pager', 'webhook'] as const).flatMap((family) =>
+        (['en', 'vi'] as const).map((locale) => ({ event_type: `event_${event}.happened`, family, locale, fields: { body: 'Body' } })),
+      ),
+    ).flat()
+    vi.mocked(api.listBuiltinNotificationTemplates).mockResolvedValue(builtins)
+    renderAt('/settings/templates')
+
+    const table = await screen.findByTestId('virtual-table')
+    expect(table).toHaveAttribute('aria-rowcount', String(builtins.length + 1))
+    const rendered = within(table).getAllByRole('row').length - 1
+    expect(rendered).toBeGreaterThan(0)
+    expect(rendered).toBeLessThan(builtins.length)
+    expect(within(table).getAllByRole('button', { name: /^Clone / })).toHaveLength(rendered)
   })
 
   it('shows the permission state and no controls to a user without manage_integrations', async () => {

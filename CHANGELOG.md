@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **The inbox and the template library no longer render about 17,500 px of fixed catalogue (#1704).**
+  Delivery preferences hold one row per configurable event per personal channel (132 today), and the
+  built-in templates one per event, channel family and language (264). Both rendered every row at
+  once. They now go through `VirtualTable`, so each screen stays under two viewports tall and only the
+  visible rows are in the DOM.
+
 - **A database password in a JDBC URL or a Spring datasource setting is now reported (#1665).**
   The secret scanner read a database password only from the `scheme://user:password@host` form, so the
   shapes Java applications use were reported by nothing unless the password happened to be 16

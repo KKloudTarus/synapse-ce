@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { VirtualTable, type Column } from '../../components/synapse/VirtualTable'
 import { api, type InboxItem, type InboxPreference } from '../../lib/api'
 
 function safePath(path: string) {
@@ -8,6 +9,44 @@ function safePath(path: string) {
 
 /** Personal channels as people know them (#1418, #1419, #1420). */
 const CHANNEL_LABELS: Record<string, string> = { in_app: 'In-app', email: 'Email', slack: 'Slack DM', teams: 'Microsoft Teams' }
+
+/**
+ * The preference list holds one row for every configurable event on every personal channel, so it
+ * grows with the event catalogue, not with anything the reader asked for (132 rows today). It renders
+ * through VirtualTable so the page keeps its height and only the visible rows are in the DOM (#1704).
+ */
+function preferenceColumns(save: (item: InboxPreference, state: InboxPreference['state']) => void): Column<InboxPreference>[] {
+  return [
+    {
+      header: 'Event',
+      className: 'flex-1 min-w-[14rem]',
+      cell: (item) => {
+        const label = item.event_type.replaceAll('_', ' ').replaceAll('.', ' · ')
+        return (
+          <div className="min-w-0">
+            <div className="truncate font-medium capitalize text-primary" title={label}>{label}</div>
+            {item.reason && <div className="truncate text-xs text-secondary" title={item.reason}>{item.reason}</div>}
+          </div>
+        )
+      },
+    },
+    { header: 'Channel', className: 'w-36 shrink-0 text-secondary', cell: (item) => CHANNEL_LABELS[item.channel] ?? item.channel },
+    {
+      header: 'Delivery',
+      className: 'w-60 shrink-0',
+      cell: (item) =>
+        item.available && !item.mandatory ? (
+          <select className="w-full rounded-lg border border-primary bg-primary px-2 py-1.5 text-sm text-primary" aria-label={`${item.event_type} ${item.channel}`} value={item.state} onChange={(event) => save(item, event.target.value as InboxPreference['state'])}>
+            <option value="inherit">Use the default ({item.default ? 'on' : 'off'})</option>
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+          </select>
+        ) : (
+          <span className="text-xs text-secondary">{item.mandatory ? 'In-app delivery is required.' : 'This channel cannot be turned on.'}</span>
+        ),
+    },
+  ]
+}
 
 export function InboxPage() {
   const [items, setItems] = useState<InboxItem[] | null>(null)
@@ -103,24 +142,18 @@ export function InboxPage() {
       {next && <button type="button" disabled={loading} onClick={() => void load(next)} className="text-sm text-brand-primary underline disabled:opacity-50">Load more</button>}
       <section aria-labelledby="notification-preferences" className="space-y-3">
         <h2 id="notification-preferences" className="text-lg font-semibold text-primary">Delivery preferences</h2>
-        <ul className="space-y-3">
-          {preferences.map((item) => (
-            <li key={`${item.event_type}:${item.channel}`} className="rounded-xl border border-secondary p-4">
-              <p className="font-medium capitalize text-primary">{item.event_type.replaceAll('_', ' ').replaceAll('.', ' · ')} · {CHANNEL_LABELS[item.channel] ?? item.channel}</p>
-              {item.reason && <p className="text-sm text-secondary">{item.reason}</p>}
-              {item.available && !item.mandatory ? (
-                <label className="mt-2 block text-sm text-secondary">
-                  Delivery
-                  <select className="mt-1 w-full rounded-lg border border-primary bg-primary px-3 py-2 text-primary" aria-label={`${item.event_type} ${item.channel}`} value={item.state} onChange={(event) => void save(item, event.target.value as InboxPreference['state'])}>
-                    <option value="inherit">Use the default ({item.default ? 'on' : 'off'})</option>
-                    <option value="enabled">Enabled</option>
-                    <option value="disabled">Disabled</option>
-                  </select>
-                </label>
-              ) : <p className="mt-2 text-sm text-secondary">{item.mandatory ? 'In-app delivery is required.' : 'This channel cannot be turned on.'}</p>}
-            </li>
-          ))}
-        </ul>
+        {preferences.length > 0 && (
+          <div className="rounded-xl border border-secondary bg-primary">
+            <VirtualTable
+              items={preferences}
+              columns={preferenceColumns((item, state) => void save(item, state))}
+              rowKey={(item) => `${item.event_type}:${item.channel}`}
+              rowHeight={60}
+              maxHeightClass="max-h-[60vh]"
+              tableMinWidthClass="min-w-[36rem]"
+            />
+          </div>
+        )}
       </section>
     </div>
   )
