@@ -293,7 +293,9 @@ func keyEvidenceFor(action string) ports.IdentityKeyEvidence {
 // credential.
 func loadHashUniqueness(ctx context.Context, tx pgx.Tx, tenant string, ids, hashes, digests []string, batch []ports.IdentityLegacyUser) error {
 	// users carries a global unique index on api_key_hash; this exact-value count detects a source
-	// where that invariant was lost. It reads only the values already held by the batch.
+	// where that invariant was lost. It reads only the values already held by the batch. Under users
+	// row-level security the transaction sees one tenant, so the count runs in an owner function that
+	// returns holder counts only (migration 0282).
 	counts := make(map[string]int, len(hashes))
 	if err := scanPairs(ctx, tx, "check legacy hash uniqueness", func(rows pgx.Rows) error {
 		var hash string
@@ -303,7 +305,7 @@ func loadHashUniqueness(ctx context.Context, tx pgx.Tx, tenant string, ids, hash
 		}
 		counts[hash] = n
 		return nil
-	}, `SELECT api_key_hash, count(*) FROM users WHERE api_key_hash = ANY($1) GROUP BY api_key_hash`, hashes); err != nil {
+	}, `SELECT api_key_hash, holders FROM synapse_users_api_key_hash_counts($1)`, hashes); err != nil {
 		return err
 	}
 	routed := make(map[string]string, len(digests))
