@@ -154,10 +154,11 @@ func schemeFor(ecosystem, rangeType string) (scheme, bool) {
 			return rubygemsScheme, true
 		case "NuGet":
 			return nugetScheme, true
-		case "Hex", "Pub":
+		case "Hex", "Pub", "GitHub Actions":
 			// Hex (Elixir) and Pub (Dart) are strict SemVer 2.0; their OSV range boundaries are plain
 			// versions, so the shared SemVer engine orders them, and validCore fail-closes on a non-SemVer
-			// boundary (a git ref, a `dev-*` branch) rather than guessing (EPIC #1034, #1037).
+			// boundary (a git ref, a `dev-*` branch) rather than guessing (EPIC #1034, #1037). GitHub Actions
+			// ranges are release tags in the same shape; a commit SHA or a floating major tag fails closed (#1665).
 			return semverScheme, true
 		case "Packagist":
 			return packagistScheme, true

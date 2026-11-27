@@ -562,6 +562,8 @@ func osvEcosystem(purlType string) string {
 		return "Packagist" // PHP; Composer-stability-ordered ranges (advisory.packagistScheme), #1037.
 	case "pub":
 		return "Pub" // Dart; SemVer-ordered ranges (advisory.schemeFor), #1037.
+	case "githubactions":
+		return "GitHub Actions" // workflow `uses:` references; SemVer-ordered release tags, #1665.
 	}
 	return ""
 }

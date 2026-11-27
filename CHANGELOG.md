@@ -176,6 +176,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **The actions a repository's CI runs are dependencies (#1665).** Every `uses: owner/repo@ref` in a
+  workflow under `.github/workflows` and in a composite `action.yml` becomes a component
+  (`pkg:githubactions/owner/repo@version`), scoped development, so OSV's GitHub Actions advisories match.
+  OSV.dev does not version-match that ecosystem, so the adapter queries the action by name and places the
+  version against each advisory's range itself. Only a release tag with at least `major.minor` is a version:
+  a commit SHA, a branch or a floating tag such as `v4` stays visible as a component and matches nothing,
+  rather than being guessed into a range. Measured against live OSV: `actions/download-artifact@v4.1.2`
+  reports GHSA-cxww-7g56-2vh6 (fixed in 4.1.3), and `@v4.1.3` reports nothing.
+
 - **An external observation no longer merges with a first-party finding on a coincidence of line number (#1184).**
   The SARIF deduplicator sets an imported finding's `finding_id` when a result lands on the same file and
   line as a first-party finding, and every reader treated that as a management decision, so two

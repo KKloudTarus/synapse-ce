@@ -32,7 +32,9 @@ const (
 	// 0.9.0 would keep the walk-order scope.
 	// 0.11.0: a Gradle test-only dependency is test scope, not development (#1692). A cached SBOM would keep the
 	// development scope, and with it the old exit code.
-	ownsbomVersion = "ownsbom/0.11.0"
+	// 0.12.0: GitHub Actions `uses:` references in workflows and composite actions are components (#1665). A
+	// cached SBOM would not carry them.
+	ownsbomVersion = "ownsbom/0.12.0"
 	// maxManifestBytes caps a single manifest read so a hostile/corrupt repo cannot OOM the scan with an
 	// absurd file. Real manifests are KB–low-MB; exceeding this is malicious or wrong, so it fails loud.
 	maxManifestBytes = 64 << 20
@@ -62,10 +64,19 @@ type EcosystemParser interface {
 	Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error)
 }
 
+// PathMatcher is implemented by a parser whose manifests are recognized by where they sit rather than by a
+// fixed basename, such as GitHub Actions workflows, which may have any name under .github/workflows.
+type PathMatcher interface {
+	// MatchesPath reports whether the file at rel, a slash-separated path relative to the scan root, is a
+	// manifest this parser owns.
+	MatchesPath(rel string) bool
+}
+
 // Registry is an owned SBOM producer: it dispatches each recognized manifest to its EcosystemParser and
 // merges the result into one normalized sbom.SBOM. It satisfies ports.SBOMGenerator.
 type Registry struct {
 	byMarker map[string]EcosystemParser // lower-cased manifest basename -> parser
+	byPath   []EcosystemParser          // parsers that also recognize manifests by path (PathMatcher)
 	ecos     []string                   // distinct ecosystems present, sorted
 	// mavenFetcher is kept so the registry can report what POM fetching could not do. It is the same instance
 	// the Maven parser holds, so its per-scan state is the state being reported.
@@ -108,6 +119,9 @@ func New(parsers ...EcosystemParser) (*Registry, error) {
 			}
 			r.byMarker[lm] = p
 		}
+		if _, ok := p.(PathMatcher); ok {
+			r.byPath = append(r.byPath, p)
+		}
 		if !ecoset[p.Ecosystem()] {
 			ecoset[p.Ecosystem()] = true
 			r.ecos = append(r.ecos, p.Ecosystem())
@@ -148,7 +162,7 @@ func (r *Registry) SBOMWarnings() []string {
 func DefaultRegistryWith(opts RegistryOptions) (*Registry, error) {
 	reg, err := New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, Bun{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{},
 		Maven{Fetcher: opts.MavenPOMFetcher}, Gradle{}, GradleLockfile{}, BuildGradle{}, Gem{}, Composer{}, NuGet{},
-		NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
+		NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{}, GitHubActions{})
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +259,9 @@ func (r *Registry) walkManifests(ctx context.Context, targetRef string, visit fu
 		}
 		parser, ok := r.byMarker[strings.ToLower(d.Name())]
 		if !ok {
+			parser, ok = r.pathParser(targetRef, path)
+		}
+		if !ok {
 			return nil
 		}
 		// Re-stat via Lstat right before the read (parity with the SAST adapter): narrows the TOCTOU
@@ -265,6 +282,24 @@ func (r *Registry) walkManifests(ctx context.Context, targetRef string, visit fu
 		}
 		return visit(path, parser)
 	})
+}
+
+// pathParser returns the parser that recognizes path by its location under the scan root, if any.
+func (r *Registry) pathParser(root, path string) (EcosystemParser, bool) {
+	if len(r.byPath) == 0 {
+		return nil, false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return nil, false
+	}
+	rel = filepath.ToSlash(rel)
+	for _, p := range r.byPath {
+		if p.(PathMatcher).MatchesPath(rel) {
+			return p, true
+		}
+	}
+	return nil, false
 }
 
 // skipDir prunes dependency-cache + VCS directories so the registry parses only top-level manifests, not
