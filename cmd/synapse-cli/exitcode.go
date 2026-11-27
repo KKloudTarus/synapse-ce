@@ -25,12 +25,26 @@ func gateFailed(format string, args ...any) error {
 	return gateFailure{msg: fmt.Sprintf(format, args...)}
 }
 
+// usageError is an error that reports an invalid invocation: nothing was analyzed.
+type usageError struct{ msg string }
+
+func (u usageError) Error() string { return u.msg }
+
+// usageFailed builds the error a subcommand returns for an option it cannot accept.
+func usageFailed(format string, args ...any) error {
+	return usageError{msg: fmt.Sprintf(format, args...)}
+}
+
 // exitCodeFor maps a command's error to its exit code: a gate result anywhere in the chain is
-// exitGate, anything else is exitRuntime.
+// exitGate, an invalid invocation exitUsage, anything else exitRuntime.
 func exitCodeFor(err error) int {
 	var gate gateFailure
 	if errors.As(err, &gate) {
 		return exitGate
+	}
+	var usage usageError
+	if errors.As(err, &usage) {
+		return exitUsage
 	}
 	return exitRuntime
 }

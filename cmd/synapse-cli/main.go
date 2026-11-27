@@ -213,10 +213,10 @@ func runDoctor(args []string) error {
 			jsonOut = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
-				return fmt.Errorf("unknown doctor option %q", args[i])
+				return usageFailed("unknown doctor option %q", args[i])
 			}
 			if pathSet {
-				return fmt.Errorf("doctor accepts at most one path")
+				return usageFailed("doctor accepts at most one path")
 			}
 			dir = args[i]
 			pathSet = true
@@ -382,19 +382,19 @@ func runMetrics(args []string) error {
 		case args[i] == "--fail-on-complexity" && i+1 < len(args):
 			n, err := strconv.Atoi(args[i+1])
 			if err != nil || n < 1 {
-				return fmt.Errorf("--fail-on-complexity wants a positive integer, got %q", args[i+1])
+				return usageFailed("--fail-on-complexity wants a positive integer, got %q", args[i+1])
 			}
 			failOn = n
 			i++
 		case args[i] == "--top" && i+1 < len(args):
 			n, err := strconv.Atoi(args[i+1])
 			if err != nil || n < 0 {
-				return fmt.Errorf("--top wants a non-negative integer, got %q", args[i+1])
+				return usageFailed("--top wants a non-negative integer, got %q", args[i+1])
 			}
 			top = n
 			i++
 		default:
-			return fmt.Errorf("unknown or incomplete option %q", args[i])
+			return usageFailed("unknown or incomplete option %q", args[i])
 		}
 	}
 
@@ -424,7 +424,7 @@ func runMetrics(args []string) error {
 	if failOn > 0 {
 		over := report.OverCyclomatic(failOn)
 		if len(over) > 0 {
-			return fmt.Errorf("%d function(s) exceed cyclomatic complexity %d (highest %d)", len(over), failOn, report.MaxCyclomatic())
+			return gateFailed("%d function(s) exceed cyclomatic complexity %d (highest %d)", len(over), failOn, report.MaxCyclomatic())
 		}
 	}
 	return nil
@@ -435,7 +435,7 @@ func runMetrics(args []string) error {
 func runDuplication(args []string) error {
 	dir := args[0]
 	if strings.HasPrefix(dir, "-") {
-		return fmt.Errorf("first argument must be a path, got option %q", dir)
+		return usageFailed("first argument must be a path, got option %q", dir)
 	}
 	minTokens := duplication.DefaultMinTokens
 	failOnPct := -1.0 // <0 = no gate
@@ -445,26 +445,26 @@ func runDuplication(args []string) error {
 		case args[i] == "--min-tokens" && i+1 < len(args):
 			n, err := strconv.Atoi(args[i+1])
 			if err != nil || n < 1 {
-				return fmt.Errorf("--min-tokens wants a positive integer, got %q", args[i+1])
+				return usageFailed("--min-tokens wants a positive integer, got %q", args[i+1])
 			}
 			minTokens = n
 			i++
 		case args[i] == "--fail-on-duplication" && i+1 < len(args):
 			p, err := strconv.ParseFloat(args[i+1], 64)
 			if err != nil || p < 0 {
-				return fmt.Errorf("--fail-on-duplication wants a non-negative percentage, got %q", args[i+1])
+				return usageFailed("--fail-on-duplication wants a non-negative percentage, got %q", args[i+1])
 			}
 			failOnPct = p
 			i++
 		case args[i] == "--top" && i+1 < len(args):
 			n, err := strconv.Atoi(args[i+1])
 			if err != nil || n < 0 {
-				return fmt.Errorf("--top wants a non-negative integer, got %q", args[i+1])
+				return usageFailed("--top wants a non-negative integer, got %q", args[i+1])
 			}
 			top = n
 			i++
 		default:
-			return fmt.Errorf("unknown or incomplete option %q", args[i])
+			return usageFailed("unknown or incomplete option %q", args[i])
 		}
 	}
 
@@ -488,7 +488,7 @@ func runDuplication(args []string) error {
 		}
 	}
 	if failOnPct >= 0 && report.Density() > failOnPct {
-		return fmt.Errorf("duplicated-lines density %.1f%% exceeds %.1f%%", report.Density(), failOnPct)
+		return gateFailed("duplicated-lines density %.1f%% exceeds %.1f%%", report.Density(), failOnPct)
 	}
 	return nil
 }
@@ -505,7 +505,7 @@ func runQuality(args []string) error { return runQualityTo(os.Stdout, args) }
 func runQualityTo(w io.Writer, args []string) error {
 	dir := args[0]
 	if strings.HasPrefix(dir, "-") {
-		return fmt.Errorf("first argument must be a path, got option %q", dir)
+		return usageFailed("first argument must be a path, got option %q", dir)
 	}
 	failOn := ""
 	sarifOut := false
@@ -519,7 +519,7 @@ func runQualityTo(w io.Writer, args []string) error {
 		case args[i] == "--min-complexity" && i+1 < len(args):
 			n, err := strconv.Atoi(args[i+1])
 			if err != nil || n < 1 {
-				return fmt.Errorf("--min-complexity wants a positive integer, got %q", args[i+1])
+				return usageFailed("--min-complexity wants a positive integer, got %q", args[i+1])
 			}
 			complexityMin = n
 			i++
@@ -528,7 +528,7 @@ func runQualityTo(w io.Writer, args []string) error {
 		case args[i] == "--include-test-smells":
 			includeTestSmells = true
 		default:
-			return fmt.Errorf("unknown or incomplete option %q", args[i])
+			return usageFailed("unknown or incomplete option %q", args[i])
 		}
 	}
 	if failOn != "" {
@@ -635,7 +635,7 @@ func sastAnalyzer() *sast.Analyzer {
 func runRating(args []string) error {
 	dir := args[0]
 	if strings.HasPrefix(dir, "-") {
-		return fmt.Errorf("first argument must be a path, got option %q", dir)
+		return usageFailed("first argument must be a path, got option %q", dir)
 	}
 	jsonOut := false
 	failBelow := ""
@@ -647,7 +647,7 @@ func runRating(args []string) error {
 			failBelow = strings.ToUpper(args[i+1])
 			i++
 		default:
-			return fmt.Errorf("unknown or incomplete option %q", args[i])
+			return usageFailed("unknown or incomplete option %q", args[i])
 		}
 	}
 	// The standalone CLI is the single-tenant deployment boundary. Bind the same canonical tenant
@@ -703,7 +703,7 @@ func runRating(args []string) error {
 		order := map[string]int{"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}
 		threshold, ok := order[failBelow]
 		if !ok {
-			return fmt.Errorf("--fail-below wants a grade A-E, got %q", failBelow)
+			return usageFailed("--fail-below wants a grade A-E, got %q", failBelow)
 		}
 		worst := 0
 		for _, g := range []rating.Grade{rep.Security, rep.Reliability, rep.Maintainability} {
@@ -726,7 +726,7 @@ func runRating(args []string) error {
 func runGate(args []string) error {
 	dir := args[0]
 	if strings.HasPrefix(dir, "-") {
-		return fmt.Errorf("first argument must be a path, got option %q", dir)
+		return usageFailed("first argument must be a path, got option %q", dir)
 	}
 	newCodeOnly := false
 	base := "origin/main"
@@ -758,12 +758,12 @@ func runGate(args []string) error {
 			i++
 		case args[i] == "--format" && i+1 < len(args):
 			if args[i+1] != "markdown" && args[i+1] != "text" {
-				return fmt.Errorf("--format wants text|markdown, got %q", args[i+1])
+				return usageFailed("--format wants text|markdown, got %q", args[i+1])
 			}
 			markdown = args[i+1] == "markdown"
 			i++
 		default:
-			return fmt.Errorf("unknown or incomplete option %q", args[i])
+			return usageFailed("unknown or incomplete option %q", args[i])
 		}
 	}
 	ctx := context.Background()
@@ -929,7 +929,7 @@ func runGate(args []string) error {
 func runCoverage(args []string) error {
 	path := args[0]
 	if strings.HasPrefix(path, "-") {
-		return fmt.Errorf("first argument must be a report file, got option %q", path)
+		return usageFailed("first argument must be a report file, got option %q", path)
 	}
 	failBelow := -1.0
 	top := 10
@@ -938,19 +938,19 @@ func runCoverage(args []string) error {
 		case args[i] == "--fail-below" && i+1 < len(args):
 			p, err := strconv.ParseFloat(args[i+1], 64)
 			if err != nil || p < 0 || p > 100 {
-				return fmt.Errorf("--fail-below wants a percentage 0-100, got %q", args[i+1])
+				return usageFailed("--fail-below wants a percentage 0-100, got %q", args[i+1])
 			}
 			failBelow = p
 			i++
 		case args[i] == "--top" && i+1 < len(args):
 			n, err := strconv.Atoi(args[i+1])
 			if err != nil || n < 0 {
-				return fmt.Errorf("--top wants a non-negative integer, got %q", args[i+1])
+				return usageFailed("--top wants a non-negative integer, got %q", args[i+1])
 			}
 			top = n
 			i++
 		default:
-			return fmt.Errorf("unknown or incomplete option %q", args[i])
+			return usageFailed("unknown or incomplete option %q", args[i])
 		}
 	}
 	rep, _, err := coverage.Parse(path)
@@ -1117,7 +1117,7 @@ func usageTo(w io.Writer) {
 	out("      --insecure-http   allow a plain-http --server that is not loopback (the token then travels in the clear)")
 	out("      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	out("      --require-complete  fail after writing the report unless every required scan engine completed with complete coverage")
-	out("      --sarif-out FILE  write the SARIF report to FILE and keep the human report on stdout, so a CI log still shows what was found")
+	out("      --sarif-out FILE  write the SARIF report to FILE and keep the human report on stdout, so a CI log still shows what was found; combines with --json or --sbom")
 	out("      --image    treat the argument as a container image reference (pulled daemonlessly, in-process) instead of a local path")
 	out("      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with the local sources only – the owned advisory store, plus Grype's pre-synced DB when SYNAPSE_DETECTION_SOURCES lists it (air-gapped / fast)")
 	out("      --include-test  also fail the gate on findings in test/fixture/example paths (default: reported but exempt)")
@@ -1317,11 +1317,11 @@ func runScan() {
 // over the dump directory streams every parseable advisory into the store via the narrow AdvisoryWriter.
 func syncAdvisories(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--remote-secdb|--csaf <dir> (requires SYNAPSE_DB_DSN)")
+		return usageFailed("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--remote-secdb|--csaf <dir> (requires SYNAPSE_DB_DSN)")
 	}
 	if args[0] == "--oval" {
 		if len(args) < 2 {
-			return fmt.Errorf("usage: synapse-cli sync-advisories --oval <dir>")
+			return usageFailed("usage: synapse-cli sync-advisories --oval <dir>")
 		}
 		return fmt.Errorf("unsigned local OVAL cannot be imported into durable advisory storage; configure an API-managed OVAL source with a pinned OpenPGP key, trusted provider metadata, or the exact SUSE HTTPS-origin option")
 	}
@@ -1345,25 +1345,25 @@ func syncAdvisories(args []string) error {
 		src, bulkAdapter, sourceKey, sourceName = "OSV bulk bucket (distros)", "osv", "cli-osv-bulk", "CLI OSV bulk ingest"
 	case args[0] == "--csaf":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: synapse-cli sync-advisories --csaf <dir>")
+			return usageFailed("usage: synapse-cli sync-advisories --csaf <dir>")
 		}
 		feed = ownadvisory.NewCSAFDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "CSAF dir "+args[1], "csaf", "cli-csaf-bulk", "CLI CSAF bulk ingest"
 	case args[0] == "--updateinfo":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: synapse-cli sync-advisories --updateinfo <dir>")
+			return usageFailed("usage: synapse-cli sync-advisories --updateinfo <dir>")
 		}
 		feed = ownadvisory.NewUpdateInfoDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "updateinfo dir "+args[1], "oval", "cli-updateinfo-bulk", "CLI updateinfo bulk ingest"
 	case args[0] == "--rocky":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: synapse-cli sync-advisories --rocky <dir>")
+			return usageFailed("usage: synapse-cli sync-advisories --rocky <dir>")
 		}
 		feed = ownadvisory.NewRockyOSVDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "Rocky Apollo OSV dir "+args[1], "osv", "cli-rocky-bulk", "CLI Rocky OSV bulk ingest"
 	case args[0] == "--secdb":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: synapse-cli sync-advisories --secdb <dir>")
+			return usageFailed("usage: synapse-cli sync-advisories --secdb <dir>")
 		}
 		feed = ownadvisory.NewSecdbDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "apk secdb dir "+args[1], "osv", "cli-secdb-bulk", "CLI apk secdb bulk ingest"
@@ -2285,11 +2285,18 @@ func formatFindingKinds(findings []finding.Finding) string {
 func printReport(target string, res *scauc.ScanResult) {
 	fmt.Printf("\nSynapse scan – %s\n", target)
 	fmt.Printf("  tools: %s · vuln-db: %s\n", formatToolVersions(res.ToolVersions), res.VulnDBSnapshot)
-	if w := res.Completeness.Warning; w != "" {
-		fmt.Printf("  ! INCOMPLETE SCAN: %s\n", w)
-	} else {
+	// A confident result can still carry a caveat, such as versions a resolver pinned at scan time. It stays
+	// confident and says so, with the caveat as a note; only a result that is not confident is incomplete.
+	if res.Completeness.Confident {
 		fmt.Printf("  completeness: confident (%d/%d components resolved; lockfiles %s)\n",
 			res.Completeness.ComponentsResolved, res.Completeness.ComponentsTotal, formatLockfiles(res.Completeness.Lockfiles))
+		if w := res.Completeness.Warning; w != "" {
+			fmt.Printf("  note: %s\n", w)
+		}
+	} else if w := res.Completeness.Warning; w != "" {
+		fmt.Printf("  ! INCOMPLETE SCAN: %s\n", w)
+	} else {
+		fmt.Printf("  ! INCOMPLETE SCAN: %d/%d components resolved\n", res.Completeness.ComponentsResolved, res.Completeness.ComponentsTotal)
 	}
 	if res.SBOM != nil {
 		fmt.Printf("  components: %d\n", len(res.SBOM.Components))

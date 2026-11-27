@@ -461,8 +461,8 @@ misconfigured invocation:
 | Code | Meaning |
 | --- | --- |
 | `0` | The command succeeded and no gate threshold was crossed. |
-| `1` | A gate result: a finding at or above `--fail-on`, required engine coverage incomplete under `--require-complete`, a failed quality gate, coverage below its threshold, a rating below `--fail-below`, or a failed rule-pack gate. The analysis completed. |
-| `2` | Invalid usage: an unknown or incomplete flag, a missing required argument, or an invalid enum value such as `--fail-on none`. Nothing was analyzed. |
+| `1` | A gate result: a finding at or above `--fail-on`, required engine coverage incomplete under `--require-complete`, a failed quality gate, coverage below its threshold, a rating below `--fail-below`, complexity or duplication over its limit, SARIF results refused by `validate-sarif`, or a failed rule-pack gate or replay. The analysis completed. |
+| `2` | Invalid usage, in `scan` or any other subcommand: an unknown or incomplete flag, a missing required argument, or an invalid value such as `--fail-on none`. Nothing was analyzed. |
 | `3` | A runtime failure: the command could not complete, for example the target could not be read, a required tool failed, or the server refused a push. No gate verdict was reached. |
 
 Treat `1` as "inspect the findings", `2` as "fix the pipeline definition" and `3` as "the scanner did not
@@ -584,7 +584,8 @@ The value is read as plain text, never as shell, so these rules are all there is
   flag, so without this a second `--fail-on` in `args` would quietly replace the one in the `with:` block.
 - `sarif: true` makes the action pass `--sarif-out`, which writes a file and combines with `--json` or `--sbom`
   in `args`: the step prints the JSON report or the SBOM and still writes the SARIF. A `version` that pins a
-  release older than `--sarif-out` cannot combine them, and the step fails with exit 2 before the scan runs.
+  release from before the combination was allowed cannot combine them, and the step fails with exit 2 before
+  the scan runs.
   With `sarif` left off, `--json` prints the JSON report to the step's log:
 
 ```yaml

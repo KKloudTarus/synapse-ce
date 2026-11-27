@@ -225,7 +225,11 @@ runs:
               # A pinned binary older than --sarif-out takes --sarif on stdout instead, which cannot share
               # stdout; say which input conflicts rather than leaving the CLI's wording to explain it.
               --json|--sbom)
-                if [ "${SYNAPSE_SARIF}" = "true" ] && ! synapse-cli scan --help 2>&1 | grep -q -- '--sarif-out'; then
+                # Probed by the usage wording that announces the combination: releases that had --sarif-out
+                # before it could combine reject the pair, so the flag's mere presence is not enough. The help
+                # text is read whole first, so an early-exiting grep cannot SIGPIPE the CLI under pipefail.
+                usage_text="$(synapse-cli scan --help 2>/dev/null || true)"
+                if [ "${SYNAPSE_SARIF}" = "true" ] && [[ "${usage_text}" != *"combines with --json or --sbom"* ]]; then
                   echo "::error::args contains ${word}, which this synapse-cli version cannot combine with sarif: true (it has no --sarif-out); pin a newer version or drop one of them" >&2
                   exit 2
                 fi ;;
