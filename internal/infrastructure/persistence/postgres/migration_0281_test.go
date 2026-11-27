@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pressly/goose/v3"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
@@ -84,5 +85,35 @@ func TestMigration0281EnforcesCredentialsTenantRLS(t *testing.T) {
 	}
 	if _, err := v.Resolve(shared.WithTenant(ctx, shared.ID(tenantB)), shared.ID(engA), "token"); err == nil {
 		t.Fatal("tenant B resolved tenant A's credential")
+	}
+}
+
+// TestMigration0281RefusesAnAttributableRowWithoutTenant: a NULL-tenant row whose engagement still exists
+// means the 0277 trigger was bypassed. The migration must stop rather than delete a usable secret.
+func TestMigration0281RefusesAnAttributableRowWithoutTenant(t *testing.T) {
+	const tenant, eng = "cred-guard", "cred-guard-eng"
+	isolated := newIsolatedMigrationDB(t, 281, 280)
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO tenants(id,name) VALUES ($1,$1)`, []any{tenant}},
+		{`WITH bound AS (SELECT set_config('app.current_tenant', $2, false))
+		  INSERT INTO engagements(id,tenant_id,name) SELECT $1,$2,'g' FROM bound`, []any{eng, tenant}},
+		{`ALTER TABLE credentials DISABLE TRIGGER USER`, nil},
+		{`INSERT INTO credentials(engagement_id,name,ciphertext) VALUES ($1,'live','x')`, []any{eng}},
+		{`ALTER TABLE credentials ENABLE TRIGGER USER`, nil},
+	} {
+		if _, err := isolated.db.Exec(q.sql, q.args...); err != nil {
+			t.Fatalf("seed %q: %v", q.sql, err)
+		}
+	}
+	err := goose.UpTo(isolated.db, ".", 281)
+	if err == nil || !strings.Contains(err.Error(), "migration 0281") {
+		t.Fatalf("migrate to 281: err = %v, want the 0281 guard to stop it", err)
+	}
+	var kept int
+	if err := isolated.db.QueryRow(`SELECT count(*) FROM credentials WHERE engagement_id=$1`, eng).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("the live secret was not kept: %d (%v)", kept, err)
 	}
 }
