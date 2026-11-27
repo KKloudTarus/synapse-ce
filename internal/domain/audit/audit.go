@@ -35,12 +35,11 @@ const (
 	// HashSchemeFramed prefixes the preimage with a domain tag and writes every field as its byte
 	// length followed by its bytes, so the preimage decodes back to exactly one record.
 	HashSchemeFramed = 2
-	// CurrentHashScheme is the scheme every new record is written with. It stays legacy for one
-	// release. A binary from before hash_scheme existed reads no scheme and recomputes every row as
-	// legacy, so a framed row written while such a binary still runs (a rolling deploy, a rollback)
-	// would read to it as tampered: a stored tamper alert, a blocked SIEM sink, a blocked report.
-	// This release teaches every reader the scheme; the next one moves writers to framed.
-	CurrentHashScheme = HashSchemeLegacy
+	// CurrentHashScheme is the scheme every new record is written with. v0.3.0 taught every reader the
+	// scheme while still writing legacy, so a framed row written during a rolling deploy from v0.3.0 reads
+	// correctly on both binaries. A binary older than v0.3.0 recomputes every row as legacy and would read
+	// a framed row as tampered, so upgrade through v0.3.0.
+	CurrentHashScheme = HashSchemeFramed
 )
 
 // framedDomain separates audit preimages from every other framed preimage in the product.

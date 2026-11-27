@@ -43,8 +43,7 @@ func TestFramedEvidenceBindsContentLength(t *testing.T) {
 
 func TestSealWritesTheCurrentSchemeAndChainsVerifyAcrossSchemes(t *testing.T) {
 	at := time.Date(2026, 11, 27, 8, 0, 0, 0, time.UTC)
-	// A legacy link as an upgraded database returns it: the stored hash and no scheme, or the
-	// column default.
+	// A legacy link as an upgraded database returns it: the stored hash and no scheme, or scheme 1.
 	legacy := Evidence{Kind: "scan", CreatedBy: "u", CreatedAt: at, Content: []byte("one")}
 	legacy.Hash = ComputeHash(legacy)
 	explicit := Evidence{Kind: "scan", CreatedBy: "u", CreatedAt: at, Content: []byte("two"), PreviousHash: legacy.Hash, HashScheme: HashSchemeLegacy}

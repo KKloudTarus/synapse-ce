@@ -297,3 +297,43 @@ func TestImportRejectsDanglingCommentRef(t *testing.T) {
 		t.Errorf("a rejected import must not create an engagement (have %d)", len(engs))
 	}
 }
+
+// TestBundleVersionFollowsLinkSchemes (#1703): a bundle with any framed link is v2, so an importer older than
+// v0.3.0 refuses the format instead of reporting a tampered chain. An all-legacy bundle stays v1, which
+// v0.3.0 can still import.
+func TestBundleVersionFollowsLinkSchemes(t *testing.T) {
+	legacy := evdom.Evidence{Kind: "scan", HashScheme: evdom.HashSchemeLegacy}
+	framed := evdom.Evidence{Kind: "scan", HashScheme: evdom.HashSchemeFramed}
+	cases := []struct {
+		name  string
+		items []evdom.Evidence
+		want  string
+	}{
+		{"empty", nil, BundleVersionLegacy},
+		{"legacy only", []evdom.Evidence{legacy, {Kind: "unset"}}, BundleVersionLegacy},
+		{"any framed", []evdom.Evidence{legacy, framed}, BundleVersion},
+	}
+	for _, tc := range cases {
+		if got := bundleVersionFor(tc.items); got != tc.want {
+			t.Errorf("%s: bundleVersionFor = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestImportAcceptsLegacyBundleVersion(t *testing.T) {
+	svc, engRepo, findRepo, ev := setup(t)
+	seedEngagement(t, engRepo, findRepo, ev)
+	ctx := context.Background()
+	bundle, err := svc.Export(ctx, "alice", "", "e1")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	bundle.Version = BundleVersionLegacy
+	if _, err := svc.Import(ctx, "alice", "", bundle); err != nil {
+		t.Fatalf("a v1 bundle must still import: %v", err)
+	}
+	bundle.Version = "synapse.engagement-bundle/v3"
+	if _, err := svc.Import(ctx, "alice", "", bundle); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("an unknown version must be refused, got %v", err)
+	}
+}

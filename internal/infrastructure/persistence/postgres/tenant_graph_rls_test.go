@@ -49,7 +49,7 @@ func TestAssessmentGraphRLSKnownIDIsolation(t *testing.T) {
 		{`INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'A'),($3,$4,'B')`, []any{engagementA, tenantA, engagementB, tenantB}},
 		{`INSERT INTO scope_targets(id,tenant_id,engagement_id,in_scope,kind,value) VALUES($1,$2,$3,true,'url','https://a.example')`, []any{ids["scope_targets"], tenantA, engagementA}},
 		{`INSERT INTO findings(id,tenant_id,engagement_id,title) VALUES($1,$2,$3,'A finding')`, []any{findingA, tenantA, engagementA}},
-		{`INSERT INTO evidence(id,tenant_id,finding_id,engagement_id,kind,sha256,storage_ref,content) VALUES($1,$2,$3,$4,'artifact',$1,$1,'a')`, []any{ids["evidence"], tenantA, findingA, engagementA}},
+		{`INSERT INTO evidence(id,tenant_id,finding_id,engagement_id,kind,sha256,storage_ref,content,hash_scheme) VALUES($1,$2,$3,$4,'artifact',$1,$1,'a',1)`, []any{ids["evidence"], tenantA, findingA, engagementA}},
 		{`INSERT INTO finding_comments(id,tenant_id,engagement_id,finding_id,author,body) VALUES($1,$2,$3,$4,'alice','a')`, []any{ids["finding_comments"], tenantA, engagementA, findingA}},
 		{`INSERT INTO finding_retests(id,tenant_id,engagement_id,finding_id,outcome,tester) VALUES($1,$2,$3,$4,'still_open','alice')`, []any{ids["finding_retests"], tenantA, engagementA, findingA}},
 		{`INSERT INTO imported_sboms(id,tenant_id,engagement_id,spec_version,target_ref,component_count,sha256,raw_json) VALUES($1,$2,$3,'1.5','a',1,$1,'{}')`, []any{ids["imported_sboms"], tenantA, engagementA}},

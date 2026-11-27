@@ -119,7 +119,7 @@ func TestResponseHaltWriterRoleIsolation(t *testing.T) {
 		t.Fatal("halt writer mutated unrelated response data")
 	}
 	if err := WithContextTenant(tenantCtx, halt, func(tx pgx.Tx) error {
-		_, err := tx.Exec(tenantCtx, `INSERT INTO evidence(id,tenant_id,kind,sha256,storage_ref,content,created_at) VALUES('forged',current_setting('app.current_tenant',true),'test','hash','forged','forged',now())`)
+		_, err := tx.Exec(tenantCtx, `INSERT INTO evidence(id,tenant_id,kind,sha256,storage_ref,content,created_at,hash_scheme) VALUES('forged',current_setting('app.current_tenant',true),'test','hash','forged','forged',now(),1)`)
 		return err
 	}); err == nil {
 		t.Fatal("halt writer inserted unrelated evidence data")

@@ -20,8 +20,26 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// BundleVersion identifies the bundle schema so an importer can refuse unknown formats.
-const BundleVersion = "synapse.engagement-bundle/v1"
+// Bundle versions identify the bundle schema so an importer can refuse unknown formats.
+const (
+	// BundleVersion is written when any evidence link is framed (evidence.HashSchemeFramed). An importer
+	// older than v0.3.0 recomputes every link as legacy and would reject such a chain as tampered; the
+	// new version makes it refuse the format instead, which names the actual problem.
+	BundleVersion = "synapse.engagement-bundle/v2"
+	// BundleVersionLegacy is written when every link is legacy, so v0.3.0 and older importers still
+	// accept a bundle they can verify. Import accepts both.
+	BundleVersionLegacy = "synapse.engagement-bundle/v1"
+)
+
+// bundleVersionFor returns the oldest bundle version whose importers verify every link in items.
+func bundleVersionFor(items []evdom.Evidence) string {
+	for _, e := range items {
+		if e.HashScheme == evdom.HashSchemeFramed {
+			return BundleVersion
+		}
+	}
+	return BundleVersionLegacy
+}
 
 // Sanity caps so a hostile/oversized bundle can't drive unbounded inserts (the
 // transport body is also capped at the handler). Generous for real engagements.
@@ -110,7 +128,7 @@ func (s *Service) Export(ctx context.Context, actor string, tenantID, engagement
 		return Bundle{}, fmt.Errorf("audit export: %w", err)
 	}
 	return Bundle{
-		Version:      BundleVersion,
+		Version:      bundleVersionFor(rep.Items),
 		ExportedAt:   s.clock.Now().UTC(),
 		Engagement:   eng,
 		Findings:     findings,
@@ -127,7 +145,7 @@ func (s *Service) Export(ctx context.Context, actor string, tenantID, engagement
 // first write; if any write then fails, the partially-materialized engagement is
 // rolled back (Delete cascades), so a broken/partial import never lingers. Audited.
 func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, b Bundle) (*engagement.Engagement, error) {
-	if b.Version != BundleVersion {
+	if b.Version != BundleVersion && b.Version != BundleVersionLegacy {
 		return nil, fmt.Errorf("%w: unsupported bundle version %q", shared.ErrValidation, b.Version)
 	}
 	if b.Engagement == nil {

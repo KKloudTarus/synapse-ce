@@ -55,7 +55,7 @@ func TestMigration0273AuditStoresTheSchemeItHashedWith(t *testing.T) {
 }
 
 // TestMigration0273VerifyGlobalReadsEachRowsScheme seeds one tenant chain the way an upgraded
-// database holds it: a row written before the migration (column default, legacy hash) followed by a
+// database holds it: a row written before the migration (scheme 1, legacy hash) followed by a
 // row written after it (scheme 2, framed hash). The chain must verify, and a row whose stored scheme
 // disagrees with how its hash was made must be named as the break.
 func TestMigration0273VerifyGlobalReadsEachRowsScheme(t *testing.T) {
@@ -72,8 +72,8 @@ func TestMigration0273VerifyGlobalReadsEachRowsScheme(t *testing.T) {
 		target := "hash-scheme-" + tenant.String()
 		cleanupAuditRows(t, pool, target)
 		first := audit.ComputeHash(audit.HashSchemeLegacy, "", "op", "before", target, nil, at)
-		if _, err := pool.Exec(ctx, `INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version)
-			VALUES ($1,'op','before',$2,'{}',$3,$4,'',2)`, tenant.String(), target, at, first); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version, hash_scheme)
+			VALUES ($1,'op','before',$2,'{}',$3,$4,'',2,1)`, tenant.String(), target, at, first); err != nil {
 			t.Fatalf("seed legacy row: %v", err)
 		}
 		second := audit.ComputeHash(secondHashedAs, first, "op", "after", target, nil, at)
@@ -173,8 +173,8 @@ func TestMigration0273EvidenceRoundTripsItsScheme(t *testing.T) {
 	// A pre-migration link: legacy hash, inserted without naming the column.
 	legacy := evidence.Evidence{ID: shared.ID(eng + "-a"), EngagementID: shared.ID(eng), Kind: "scan", Content: []byte("one"), CreatedBy: "op", CreatedAt: at}
 	legacy.Hash = evidence.ComputeHash(legacy)
-	if _, err := pool.Exec(ctx, `INSERT INTO evidence (id, tenant_id, engagement_id, kind, sha256, previous_hash, storage_ref, content, created_by, created_at)
-		VALUES ($1,'default',$2,'scan',$3,'','',$4,'op',$5)`, legacy.ID.String(), eng, legacy.Hash, legacy.Content, at); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO evidence (id, tenant_id, engagement_id, kind, sha256, previous_hash, storage_ref, content, created_by, created_at, hash_scheme)
+		VALUES ($1,'default',$2,'scan',$3,'','',$4,'op',$5,1)`, legacy.ID.String(), eng, legacy.Hash, legacy.Content, at); err != nil {
 		t.Fatalf("seed legacy link: %v", err)
 	}
 
