@@ -25,8 +25,8 @@ func (s *NotificationSource) pollOwnership(ctx context.Context, tx pgx.Tx, tenan
 		COALESCE((SELECT title FROM findings f WHERE f.tenant_id=d.tenant_id AND f.id=d.finding_id),''),
 		COALESCE((SELECT name FROM ownership_teams t WHERE t.tenant_id=d.tenant_id AND t.id=d.payload->'before'->>'team_id'),''),
 		COALESCE((SELECT name FROM ownership_teams t WHERE t.tenant_id=d.tenant_id AND t.id=d.payload->'after'->>'team_id'),''),
-		COALESCE((SELECT name FROM users u WHERE u.tenant_id=d.tenant_id AND u.id=d.payload->'before'->>'assignee_id'),''),
-		COALESCE((SELECT name FROM users u WHERE u.tenant_id=d.tenant_id AND u.id=d.payload->'after'->>'assignee_id'),'')
+		COALESCE((SELECT name FROM users u WHERE u.ownership_tenant_id=d.tenant_id AND u.id=d.payload->'before'->>'assignee_id'),''),
+		COALESCE((SELECT name FROM users u WHERE u.ownership_tenant_id=d.tenant_id AND u.id=d.payload->'after'->>'assignee_id'),'')
 		FROM ownership_intents i
 		JOIN ownership_decisions d ON d.tenant_id=i.tenant_id AND d.engagement_id=i.engagement_id
 		AND d.finding_id=i.finding_id AND d.id=i.decision_id
