@@ -40,8 +40,10 @@ type harnessWriteRequest struct {
 	headers map[string]string
 	// tenantBound binds the caller's tenant into the request context, as the production auth
 	// middleware does, for a use case that reads it from there. It is set per route, as in the
-	// read sweep, so that a store partitioned by that context cannot stand in for a route guard on
-	// a route that does not need it.
+	// read sweep. Unlike the read sweep, the write sweep counts a 404 as a refusal whatever produced
+	// it, so on a tenant-bound route a store partitioned by that context can answer for a missing
+	// route guard; pin such a guard with a unit test that plants a colliding id in the caller's own
+	// partition (keyregistry's TestRevokeRefusesAForeignAgentEvenWhenTheStoreWouldNot).
 	tenantBound bool
 }
 
@@ -53,8 +55,6 @@ var harnessWriteDefault = harnessWriteRequest{body: `{}`}
 // route that needs more than harnessWriteDefault has an entry. Where a record carries a version,
 // the routes that move it name the version the previous route in the sweep's order left behind.
 var harnessWriteRequests = map[string]harnessWriteRequest{
-	// A mapping delete names the version it removes (engmisc tickets seed).
-	"DELETE /api/v1/ticket-mappings/{mappingID}": {query: "?version=1"},
 	// The signing-key store scopes by the tenant on the request context (fleet keys seed).
 	"POST /api/v1/agents/{id}/keys/{keyID}/revoke": {tenantBound: true},
 	// Engagement-row writes. No withEngTenant: the engagement service scopes them. Moving engA to
@@ -287,13 +287,7 @@ var harnessWriteForeignNoEffect = map[string]string{
 // because a path parameter has no value, each with the reason. As with the read sweep, the sweep
 // fails for a route missing here and for an entry it can address now. The routes are grouped by
 // family.
-var harnessKnownUnaddressableWrites = map[string]string{
-
-	// Ticket mappings, intents and the Jira breaker: the ticket workflow the engagement seed wires has
-	// no Jira integration, mapping or intent.
-
-	// Child records the seeds plant or could plant but do not name.
-}
+var harnessKnownUnaddressableWrites = map[string]string{}
 
 // harnessWritePathValue returns the value the write sweep substitutes for a parameter of a write
 // route. A write changes the record a read serves, so it takes, in order: a value a seed declared for

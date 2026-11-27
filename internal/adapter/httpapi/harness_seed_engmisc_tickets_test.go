@@ -96,8 +96,10 @@ func seedEngmiscTicketRecords(w *harnessWorld, store *memory.TicketStore) {
 }
 
 // engmiscTicketIntegrations answers the one tenantA Jira integration for every caller, whatever tenant
-// asks. It stands for a store that does not scope: the workflow's own check that the integration
-// belongs to the requesting tenant is then the guard the sweep tests on the metadata and breaker routes.
+// asks, so the metadata and breaker routes are addressed at a real integration id. The harness provider
+// registry has no Jira descriptor, so tenantA's own requests are refused too and these routes stay
+// vacuous: they prove tenantB is refused, not which check refuses it. A route proven through this stub
+// later must be read with that in mind, since the stub does not scope.
 type engmiscTicketIntegrations struct{ ports.IntegrationStore }
 
 func (engmiscTicketIntegrations) GetIntegration(_ context.Context, id shared.ID) (integration.Integration, error) {

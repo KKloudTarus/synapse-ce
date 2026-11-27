@@ -80,7 +80,8 @@ func init() {
 			"POST /api/v1/integrations/{integrationID}/jira-breaker/reset":            {"{integrationID}": engmiscTicketIntegration.String()},
 			"GET /api/v1/integrations/{integrationID}/jira-metadata":                  {"{integrationID}": engmiscTicketIntegration.String()},
 			"GET /api/v1/integrations/{integrationID}/ticket-metadata":                {"{integrationID}": engmiscTicketIntegration.String()},
-			// One link serves both contexts: the store keys it by finding id alone.
+			// The link is created under engagement engA. The project-scoped route resolves the project's
+			// hidden context engagement instead, so it reaches no link and stays vacuous.
 			"DELETE /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}":      {"{linkID}": engmiscTicketLink.String()},
 			"DELETE /api/v1/projects/{key}/source-findings/{fid}/tickets/{linkID}": {"{linkID}": engmiscTicketLink.String()},
 		},
