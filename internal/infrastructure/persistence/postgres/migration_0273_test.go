@@ -170,7 +170,7 @@ func TestMigration0273EvidenceRoundTripsItsScheme(t *testing.T) {
 	}
 	at := time.Now().UTC().Truncate(time.Microsecond)
 
-	// A pre-migration link: legacy hash, inserted without naming the column.
+	// A pre-migration link: legacy hash, scheme 1.
 	legacy := evidence.Evidence{ID: shared.ID(eng + "-a"), EngagementID: shared.ID(eng), Kind: "scan", Content: []byte("one"), CreatedBy: "op", CreatedAt: at}
 	legacy.Hash = evidence.ComputeHash(legacy)
 	if _, err := pool.Exec(ctx, `INSERT INTO evidence (id, tenant_id, engagement_id, kind, sha256, previous_hash, storage_ref, content, created_by, created_at, hash_scheme)
@@ -183,7 +183,7 @@ func TestMigration0273EvidenceRoundTripsItsScheme(t *testing.T) {
 	if err := store.Append(ctx, []evidence.Evidence{sealed}); err != nil {
 		t.Fatalf("append sealed: %v", err)
 	}
-	// A framed link, as the release after this one writes it, must persist and read back framed.
+	// A framed link, as writers seal it since #1703, must persist and read back framed.
 	framed := evidence.Evidence{ID: shared.ID(eng + "-c"), EngagementID: shared.ID(eng), Kind: "finding", Content: []byte("three"), PreviousHash: sealed.Hash, CreatedBy: "op", CreatedAt: at, HashScheme: evidence.HashSchemeFramed}
 	framed.Hash = evidence.ComputeHash(framed)
 	if err := store.Append(ctx, []evidence.Evidence{framed}); err != nil {

@@ -22,9 +22,9 @@ import (
 
 // Bundle versions identify the bundle schema so an importer can refuse unknown formats.
 const (
-	// BundleVersion is written when any evidence link is framed (evidence.HashSchemeFramed). An importer
-	// older than v0.3.0 recomputes every link as legacy and would reject such a chain as tampered; the
-	// new version makes it refuse the format instead, which names the actual problem.
+	// BundleVersion is written when any evidence link is framed (evidence.HashSchemeFramed). Every
+	// importer before this release refuses it by version: one older than v0.3.0 would otherwise reject the
+	// chain as tampered, and v0.3.0 accepts only v1.
 	BundleVersion = "synapse.engagement-bundle/v2"
 	// BundleVersionLegacy is written when every link is legacy, so v0.3.0 and older importers still
 	// accept a bundle they can verify. Import accepts both.
@@ -147,6 +147,10 @@ func (s *Service) Export(ctx context.Context, actor string, tenantID, engagement
 func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, b Bundle) (*engagement.Engagement, error) {
 	if b.Version != BundleVersion && b.Version != BundleVersionLegacy {
 		return nil, fmt.Errorf("%w: unsupported bundle version %q", shared.ErrValidation, b.Version)
+	}
+	// A v1 label promises a chain v0.3.0 can verify. A framed link under it is a relabelled v2 bundle.
+	if b.Version == BundleVersionLegacy && bundleVersionFor(b.Evidence) != BundleVersionLegacy {
+		return nil, fmt.Errorf("%w: a %s bundle cannot carry framed evidence links", shared.ErrValidation, BundleVersionLegacy)
 	}
 	if b.Engagement == nil {
 		return nil, fmt.Errorf("%w: bundle has no engagement", shared.ErrValidation)

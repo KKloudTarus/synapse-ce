@@ -328,9 +328,17 @@ func TestImportAcceptsLegacyBundleVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
+	// The seeded links are framed, so a v1 label is a relabelled v2 bundle.
 	bundle.Version = BundleVersionLegacy
-	if _, err := svc.Import(ctx, "alice", "", bundle); err != nil {
-		t.Fatalf("a v1 bundle must still import: %v", err)
+	if _, err := svc.Import(ctx, "alice", "", bundle); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("a v1 label over framed links must be refused, got %v", err)
+	}
+	legacy := bundle
+	legacy.Evidence = nil
+	legacy.EvidenceHead = ""
+	legacy.Attestation = nil
+	if _, err := svc.Import(ctx, "alice", "", legacy); err != nil {
+		t.Fatalf("a v1 bundle of legacy links must still import: %v", err)
 	}
 	bundle.Version = "synapse.engagement-bundle/v3"
 	if _, err := svc.Import(ctx, "alice", "", bundle); !errors.Is(err, shared.ErrValidation) {

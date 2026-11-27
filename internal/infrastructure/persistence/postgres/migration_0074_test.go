@@ -53,8 +53,8 @@ func TestMigration0074Detections(t *testing.T) {
 		{`INSERT INTO tenants(id,name) VALUES($1,$1),($2,$2)`, []any{tenantA.String(), tenantB.String()}},
 		{`INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'det-eng')`, []any{engA, tenantA.String()}},
 		// A real evidence-chain link the detection references (FK evidence_id -> evidence(id)).
-		{`INSERT INTO evidence(id,tenant_id,engagement_id,kind,sha256,previous_hash,storage_ref,content,created_by)
-		   VALUES($1,$2,$3,'detection','deadbeef','','', $4,'agent:1')`, []any{evID, tenantA.String(), engA, []byte("{}")}},
+		{`INSERT INTO evidence(id,tenant_id,engagement_id,kind,sha256,previous_hash,storage_ref,content,created_by,hash_scheme)
+		   VALUES($1,$2,$3,'detection','deadbeef','','', $4,'agent:1',1)`, []any{evID, tenantA.String(), engA, []byte("{}")}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.q, stmt.args...); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -233,8 +233,8 @@ func TestDetectionRecordEngagementScopedKey(t *testing.T) {
 	}{
 		{`INSERT INTO tenants(id,name) VALUES($1,$1)`, []any{tenant.String()}},
 		{`INSERT INTO engagements(id,tenant_id,name) VALUES($1,$3,'detk-a'),($2,$3,'detk-b')`, []any{engA, engB, tenant.String()}},
-		{`INSERT INTO evidence(id,tenant_id,engagement_id,kind,sha256,previous_hash,storage_ref,content,created_by)
-		   VALUES($1,$3,$5,'detection','deadbeef','','', $7,'agent:1'),($2,$4,$6,'detection','feedface','','', $7,'agent:1')`,
+		{`INSERT INTO evidence(id,tenant_id,engagement_id,kind,sha256,previous_hash,storage_ref,content,created_by,hash_scheme)
+		   VALUES($1,$3,$5,'detection','deadbeef','','', $7,'agent:1',1),($2,$4,$6,'detection','feedface','','', $7,'agent:1',1)`,
 			[]any{evA, evB, tenant.String(), tenant.String(), engA, engB, []byte("{}")}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.q, stmt.args...); err != nil {
