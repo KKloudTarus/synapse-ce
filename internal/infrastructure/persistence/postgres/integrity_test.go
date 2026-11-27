@@ -136,7 +136,7 @@ func TestAuditForkGuard(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	parent := "parent-" + randHex(t)
-	ins := `INSERT INTO audit_log (tenant_id, actor, action, target, hash, previous_hash) VALUES ('default','op','a','t',$1,$2)`
+	ins := `INSERT INTO audit_log (tenant_id, actor, action, target, hash, previous_hash, hash_scheme) VALUES ('default','op','a','t',$1,$2,1)`
 	if _, err := pool.Exec(ctx, ins, "h1-"+parent, parent); err != nil {
 		t.Fatalf("first child of parent: %v", err)
 	}

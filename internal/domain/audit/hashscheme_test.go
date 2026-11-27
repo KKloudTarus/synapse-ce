@@ -52,13 +52,11 @@ func TestFramedSchemeSeparatesEveryStringField(t *testing.T) {
 	}
 }
 
-// TestWritersStayLegacyForOneRelease pins the rollout. A binary from before hash_scheme existed
-// recomputes every row as legacy, so a framed row written while one still runs reads to it as
-// tampered. Writers move to framed in the release after the one that taught every reader the scheme;
-// that change edits this test on purpose.
-func TestWritersStayLegacyForOneRelease(t *testing.T) {
-	if CurrentHashScheme != HashSchemeLegacy {
-		t.Fatalf("CurrentHashScheme = %d; writers may move to framed only once no deployed binary reads rows without their scheme", CurrentHashScheme)
+// TestWritersUseFramed pins the second half of the rollout (#1703). v0.3.0 taught every reader the
+// scheme and kept writing legacy; this release writes framed, the encoding with one preimage per record.
+func TestWritersUseFramed(t *testing.T) {
+	if CurrentHashScheme != HashSchemeFramed {
+		t.Fatalf("CurrentHashScheme = %d, want framed (%d)", CurrentHashScheme, HashSchemeFramed)
 	}
 }
 

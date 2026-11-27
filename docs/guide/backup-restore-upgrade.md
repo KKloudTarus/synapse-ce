@@ -124,6 +124,8 @@ deploy/operations/recovery/forward-upgrade.sh \
   --execute
 ```
 
+Audit rows and evidence links written after the upgrade use hash scheme 2. A binary older than v0.3.0 recomputes every row as scheme 1 and reports a scheme 2 row as tampered, so no such binary may run against the upgraded database. This runbook keeps writers quiesced and deploys only current artifacts, which satisfies that. A rolling deploy, where old and new binaries run side by side, has to pass through v0.3.0 first.
+
 Do not run a down migration. Do not remove migration records, edit migration files, or attempt to make a newer database appear older. The deployed current service configuration must keep SYNAPSE_DB_AUTO_MIGRATE=false; production migration authority belongs to the separate owner-level migration credential.
 
 ## 5. Rollback rehearsal and recovery

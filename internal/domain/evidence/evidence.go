@@ -132,10 +132,10 @@ const (
 	// HashSchemeFramed prefixes the preimage with a domain tag and writes every field, Content
 	// included, as its byte length followed by its bytes.
 	HashSchemeFramed = 2
-	// CurrentHashScheme is the scheme Seal writes. It stays legacy for one release, for the reason
-	// audit.CurrentHashScheme gives: a binary from before hash_scheme existed would recompute a
-	// framed link as legacy and report the chain tampered. The next release moves Seal to framed.
-	CurrentHashScheme = HashSchemeLegacy
+	// CurrentHashScheme is the scheme Seal writes. Readers learned the scheme in v0.3.0, which still
+	// sealed legacy links; a binary older than that recomputes every link as legacy and would report a
+	// framed link tampered, so upgrade through v0.3.0 (see audit.CurrentHashScheme).
+	CurrentHashScheme = HashSchemeFramed
 )
 
 // framedDomain separates evidence preimages from every other framed preimage in the product.

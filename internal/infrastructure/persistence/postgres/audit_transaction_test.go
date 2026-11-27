@@ -261,8 +261,8 @@ func TestAuditReadsAreTenantScoped(t *testing.T) {
 	// posture this test recreates below.
 	for _, tenant := range []shared.ID{tenantA, tenantB} {
 		if _, err := pool.Exec(ctx,
-			`INSERT INTO audit_log (tenant_id, actor, action, target, created_at, hash_version)
-			 VALUES ($1, 'operator', 'test.scoped', $2, now(), 2)`,
+			`INSERT INTO audit_log (tenant_id, actor, action, target, created_at, hash_version, hash_scheme)
+			 VALUES ($1, 'operator', 'test.scoped', $2, now(), 2, 1)`,
 			tenant.String(), target); err != nil {
 			t.Fatalf("seed audit row for %s: %v", tenant, err)
 		}
@@ -397,8 +397,8 @@ func TestVerifyGlobalAttributesABreakToOneTenantChain(t *testing.T) {
 		when := at.Add(time.Duration(i) * time.Second)
 		hash := audit.ComputeHash(audit.HashSchemeLegacy, prev, "operator", action, "t", nil, when)
 		if _, err := pool.Exec(ctx,
-			`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version)
-			 VALUES ($1,'operator',$2,'t','{}',$3,$4,$5,2)`,
+			`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version, hash_scheme)
+			 VALUES ($1,'operator',$2,'t','{}',$3,$4,$5,2,1)`,
 			tenant.String(), action, when, hash, prev); err != nil {
 			t.Fatalf("seed audit row: %v", err)
 		}
@@ -410,8 +410,8 @@ func TestVerifyGlobalAttributesABreakToOneTenantChain(t *testing.T) {
 	forgedAction := "verify.chains.forged." + stamp
 	forged := audit.ComputeHash(audit.HashSchemeLegacy, "deadbeef", "mallory", forgedAction, "t", nil, when)
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version)
-		 VALUES ($1,'mallory',$2,'t','{}',$3,$4,'deadbeef',2)`,
+		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version, hash_scheme)
+		 VALUES ($1,'mallory',$2,'t','{}',$3,$4,'deadbeef',2,1)`,
 		tenant.String(), forgedAction, when, forged); err != nil {
 		t.Fatalf("forge row: %v", err)
 	}

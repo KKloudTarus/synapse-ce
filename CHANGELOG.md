@@ -7,6 +7,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Changed
+
+- **Audit and evidence writers use hash scheme 2 (#1703).** v0.3.0 taught every reader the framed
+  encoding and kept writing scheme 1. New audit rows and evidence links are now hashed under scheme 2,
+  where every field is length-prefixed, so one hash names one record. A binary older than v0.3.0
+  recomputes every row as scheme 1 and reads a scheme 2 row as tampered, so a rolling deploy has to
+  pass through v0.3.0; a quiesced upgrade (`docs/guide/backup-restore-upgrade.md`) can skip it. Migration
+  0279 drops the `hash_scheme` default on `audit_log` and `evidence`, so an insert that omits the
+  column fails instead of being stamped scheme 1. An engagement bundle that carries a scheme 2 link is
+  exported as `synapse.engagement-bundle/v2`, which importers older than this release refuse by
+  version; a bundle of scheme 1 links stays v1, and import accepts both.
+
 ### Fixed
 
 - **An advisory that aliases several CVEs is reported under its own id (#1665).** Every detection
