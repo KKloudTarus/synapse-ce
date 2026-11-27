@@ -40,7 +40,7 @@ func seedEngmiscSnapshots(w *harnessWorld) {
 		w.t.Fatalf("store snapshot cycle member: %v", err)
 	}
 
-	snapshot, err := snapshotdom.NewFinalized("tenantA", "snapshot-A", cycle.ID, engmiscEngagement,
+	snapshot, err := snapshotdom.NewFinalized("tenantA", engmiscSnapshot, cycle.ID, engmiscEngagement,
 		snapshotdom.Boundary{Kind: cycledom.BoundaryStandalone}, "legacy-"+engmiscMarker, engmiscMarker, engmiscNow,
 		[]snapshotdom.SelectedRun{{
 			ID: "legacy-run-A", ManifestHash: strings.Repeat("a", 64), Provenance: scanrun.ProvenanceLegacy, TerminalStatus: scanrun.StatusUnknown,

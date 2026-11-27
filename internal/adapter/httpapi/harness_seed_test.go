@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
@@ -75,6 +76,11 @@ type harnessWorld struct {
 	// because its own SIEM checks read a sealed secret back out of this store, so a seed plants a
 	// sink in this store rather than replacing the router's service.
 	siem *siemuc.Memory
+	// assessmentCycleAPI is the fixture's assessment cycle service and assessmentCycles the store behind
+	// it. The fixture's own checks read cycle-A through that service, so a seed plants its cycles in
+	// this store and wires further dependencies onto this service rather than replacing it.
+	assessmentCycleAPI *cycleuc.APIService
+	assessmentCycles   *memory.AssessmentCycleRepository
 
 	// state carries what one seed leaves for another. Some services take their stores only through
 	// their constructor, so two seeds cannot each build one without the later replacing the earlier

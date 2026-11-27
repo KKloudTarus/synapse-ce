@@ -644,7 +644,7 @@ func TestHostileHarness(t *testing.T) {
 	seedMarkers := runHarnessSeeds(&harnessWorld{
 		t: t, rt: rt, engagements: engRepo, engSvc: engagementService, projectRepo: projectRepo,
 		projects: projectSvc, analyses: analysisStore, assets: attackAssets, users: usersSvc, audit: audit,
-		siem: siemStore, state: map[string]any{},
+		siem: siemStore, assessmentCycleAPI: lifecycleAPI, assessmentCycles: lifecycleCycles, state: map[string]any{},
 	})
 	mux := rt.routes()
 
@@ -1518,20 +1518,6 @@ var harnessKnownUnaddressable = map[string]string{
 	// Planted by the engagement-data seeds.
 	"GET /api/v1/engagements/{id}/observation-bindings": "the fixture's binding stand-in (harnessObservationBindings) answers every caller with no bindings",
 
-	// Assessment cycles, snapshots, comparisons and relationship candidates (#1702). The fixture
-	// plants cycle-A and snapshot-A for its hand-written checks, but no seed declares their ids, and
-	// no comparison or candidate is planted at all.
-	"GET /api/v1/assessment-cycles/{cycleId}":                                       "assessment cycle family not seeded yet (#1702)",
-	"GET /api/v1/assessment-cycles/{cycleId}/members":                               "assessment cycle family not seeded yet (#1702)",
-	"GET /api/v1/assessment-cycles/{cycleId}/closure-manifests":                     "assessment cycle family not seeded yet (#1702)",
-	"GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}":        "assessment cycle family not seeded yet (#1702)",
-	"GET /api/v1/assessment-cycles/{cycleId}/closure-manifests/{manifestId}/report": "assessment cycle family not seeded yet (#1702)",
-	"GET /api/v1/assessment-snapshots/{snapshotId}":                                 "assessment snapshot family not seeded yet (#1702)",
-	"GET /api/v1/assessment-comparisons/{comparisonId}":                             "assessment comparison family not seeded yet (#1702)",
-	"GET /api/v1/assessment-comparisons/{comparisonId}/items":                       "assessment comparison family not seeded yet (#1702)",
-	"GET /api/v1/assessment-comparisons/{comparisonId}/summary":                     "assessment comparison family not seeded yet (#1702)",
-	"GET /api/v1/assessment-relationship-candidates/{candidateId}":                  "assessment relationship family not seeded yet (#1702)",
-
 	// Notification rules, deliveries and templates (#1702). The notifications seed plants one
 	// engagement setting and one channel; the template routes are not even registered, because the
 	// fixture's notification service has no template store.
@@ -1578,7 +1564,7 @@ var harnessKnownUnaddressable = map[string]string{
 
 // harnessUnaddressableCeiling is how many routes harnessKnownUnaddressable may list. It only goes
 // down: the seed that takes routes off the list lowers it by as many.
-const harnessUnaddressableCeiling = 34
+const harnessUnaddressableCeiling = 24
 
 // The real root Router keeps tenant resolution entirely on the endpoint ID.
 // The hostile harness exercises both directions with an otherwise valid MAC.

@@ -111,6 +111,48 @@ var harnessWriteRequests = map[string]harnessWriteRequest{
 	"POST /api/v1/integrations/{id}/operations": {body: `{"type":"poll"}`},
 	"PUT /api/v1/integrations/{id}":             {body: `{"name":"write sweep integration","endpoint":"https://ci-a.example","version":4}`},
 	"POST /api/v1/integrations/{id}/archive":    {body: `{"version":5}`},
+	// Assessment cycles planted by the assessment seed. A commit carries the signed, single-use token its
+	// own preview returned, and the sweep sends one fixed body, so tenantA's commit is refused at the
+	// token check exactly as tenantB's is: the three commit routes stay vacuous. The previews read the
+	// closed cycle, at version 4, without changing it. The legacy reopen addresses the legacy cycle,
+	// completed at version 2 without a manifest, and the archive ends the open cycle at version 1.
+	"POST /api/v1/assessment-cycles/{cycleId}/archive": {headers: map[string]string{"Idempotency-Key": "write-sweep-cycle-archive", "If-Match": `"1"`}},
+	"POST /api/v1/assessment-cycles/{cycleId}/closure-commits": {
+		headers: map[string]string{"Idempotency-Key": "write-sweep-closure-commit", "If-Match": `"4"`},
+		body:    `{"preview_token":"write-sweep-preview","reason":"write sweep"}`,
+	},
+	"POST /api/v1/assessment-cycles/{cycleId}/closure-previews": {body: `{"reason":"write sweep"}`},
+	"POST /api/v1/assessment-cycles/{cycleId}/relationship-commits": {
+		headers: map[string]string{"Idempotency-Key": "write-sweep-relationship-commit", "If-Match": `"4"`},
+		body:    `{"command":"select_head","selected_head_assessment_id":"assessment-seed-branch","preview_token":"write-sweep-preview","reason":"write sweep"}`,
+	},
+	"POST /api/v1/assessment-cycles/{cycleId}/relationship-previews": {body: `{"command":"select_head","selected_head_assessment_id":"assessment-seed-branch"}`},
+	"POST /api/v1/assessment-cycles/{cycleId}/reopen": {
+		headers: map[string]string{"Idempotency-Key": "write-sweep-cycle-reopen", "If-Match": `"2"`},
+		body:    `{"reason":"write sweep"}`,
+	},
+	"POST /api/v1/assessment-cycles/{cycleId}/reopen-commits": {
+		headers: map[string]string{"Idempotency-Key": "write-sweep-reopen-commit", "If-Match": `"4"`},
+		body:    `{"preview_token":"write-sweep-preview","reason":"write sweep"}`,
+	},
+	// The comparison planted by the assessment seed, at version 3, and its one item. A review resolves a
+	// lineage match candidate for an item pending identity review, and the seed's item is not pending
+	// review, so tenantA's request is refused after it has found the comparison and the item: both review
+	// routes stay vacuous.
+	"POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm": {
+		headers: map[string]string{"Idempotency-Key": "write-sweep-comparison-confirm", "If-Match": `"3"`},
+		body:    `{"candidate_id":"write-sweep-candidate","source_observation_id":"assessment-seed-observation-final","reason":"write sweep"}`,
+	},
+	"POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink": {
+		headers: map[string]string{"Idempotency-Key": "write-sweep-comparison-unlink", "If-Match": `"3"`},
+		body:    `{"candidate_id":"write-sweep-candidate","source_observation_id":"assessment-seed-observation-final","reason":"write sweep"}`,
+	},
+	// The relationship candidate planted by the assessment seed, at version 1. Dismissing it records the
+	// decision and changes no cycle.
+	"POST /api/v1/assessment-relationship-candidates/{candidateId}/decisions": {
+		headers: map[string]string{"Idempotency-Key": "write-sweep-relationship-decision", "If-Match": `"1"`},
+		body:    `{"action":"dismiss","reason":"write sweep"}`,
+	},
 }
 
 // harnessWriteProven names the routes the sweep proves: tenantB is refused and tenantA's same
@@ -160,6 +202,13 @@ var harnessWriteProven = []string{
 	"PUT /api/v1/appsec/assets/{assetID}/technical-assets",
 	"POST /api/v1/fleet/assets/{id}/processes",
 	"PUT /api/v1/fleet/assets/{id}/desired-capabilities",
+	// Assessment cycles and relationship candidates (assessment seed).
+	"POST /api/v1/assessment-cycles/{cycleId}/archive",
+	"POST /api/v1/assessment-cycles/{cycleId}/closure-previews",
+	"POST /api/v1/assessment-cycles/{cycleId}/relationship-previews",
+	"POST /api/v1/assessment-cycles/{cycleId}/reopen",
+	"POST /api/v1/assessment-cycles/{cycleId}/reopen-previews",
+	"POST /api/v1/assessment-relationship-candidates/{candidateId}/decisions",
 	// AI-triage review (aitriage seed).
 	"POST /api/v1/ai-triage/reviews/{rid}/claim",
 	"POST /api/v1/ai-triage/reviews/{rid}/decision",
@@ -206,20 +255,6 @@ var harnessKnownUnaddressableWrites = map[string]string{
 	"POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding": "no seed declares a value for {observationId}",
 	"PUT /api/v1/fleet/assets/{id}/response-observers/{agentID}":              "no seed declares a value for {agentID}",
 	"PUT /api/v1/projects/{key}/profiles/{language}":                          "no seed declares a value for {language}",
-
-	// Assessment cycles, comparisons and relationship candidates: the same families the read sweep
-	// lists in harnessKnownUnaddressable.
-	"POST /api/v1/assessment-cycles/{cycleId}/archive":                          "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-cycles/{cycleId}/closure-commits":                  "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-cycles/{cycleId}/closure-previews":                 "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-cycles/{cycleId}/relationship-commits":             "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-cycles/{cycleId}/relationship-previews":            "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-cycles/{cycleId}/reopen":                           "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-cycles/{cycleId}/reopen-commits":                   "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-cycles/{cycleId}/reopen-previews":                  "assessment cycle family not seeded yet (#1702)",
-	"POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm": "assessment comparison family not seeded yet (#1702)",
-	"POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink":  "assessment comparison family not seeded yet (#1702)",
-	"POST /api/v1/assessment-relationship-candidates/{candidateId}/decisions":   "assessment relationship family not seeded yet (#1702)",
 
 	// Notification rules, templates and deliveries: the notifications seed plants an engagement
 	// setting and a channel only.
