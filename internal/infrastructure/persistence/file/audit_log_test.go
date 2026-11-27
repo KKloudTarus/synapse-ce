@@ -305,27 +305,43 @@ func TestAuditLogTenantEndpointsHideLegacyEntries(t *testing.T) {
 	}
 }
 
-// TestAuditLogVerifiesInvalidUTF8Metadata (#1723): JSON encoding turns an invalid byte into U+FFFD, so the
-// writer must hash the normalized metadata or the line read back never recomputes to its hash. A retry with
-// the same raw bytes is the same entry.
+// TestAuditLogVerifiesInvalidUTF8Metadata (#1723): JSON encoding turns an invalid byte into U+FFFD, so each
+// writer method must hash the normalized entry or the line read back never recomputes to its hash. A retry
+// with the same raw bytes is the same entry, so it writes nothing and raises no conflict.
 func TestAuditLogVerifiesInvalidUTF8Metadata(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	ctx := shared.WithTenant(context.Background(), "tenant-a")
-	a := NewAuditLog(path)
-	e := ports.AuditEntry{Actor: "op\xff", Action: "scan.archive", Target: "t", At: time.Unix(1, 0).UTC(),
-		Metadata: map[string]string{"path": "a\xffb", "idempotency_key": "k1"}}
-	for i := 0; i < 2; i++ {
-		if err := a.RecordOnce(ctx, e); err != nil {
-			t.Fatalf("record attempt %d: %v", i, err)
-		}
+	entry := func() ports.AuditEntry {
+		return ports.AuditEntry{Actor: "op\xff", Action: "scan.archive", Target: "t\x00", At: time.Unix(1, 0).UTC(),
+			Metadata: map[string]string{"path": "a\xffb", "idempotency_key": "k\xfe1"}}
 	}
-	rep, err := NewAuditLog(path).Verify(ctx)
-	if err != nil {
-		t.Fatalf("verify: %v", err)
+	cases := []struct {
+		name   string
+		record func(a *AuditLog, e ports.AuditEntry) error
+		rows   int
+	}{
+		{"Record", func(a *AuditLog, e ports.AuditEntry) error { return a.Record(ctx, e) }, 2},
+		{"RecordOnce", func(a *AuditLog, e ports.AuditEntry) error { return a.RecordOnce(ctx, e) }, 1},
+		{"RecordFirstObservation", func(a *AuditLog, e ports.AuditEntry) error { return a.RecordFirstObservation(ctx, e) }, 1},
 	}
-	if !rep.Intact || rep.Verified != 1 {
-		t.Fatalf("report = %+v, want one intact entry", rep)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "audit.jsonl")
+			a := NewAuditLog(path)
+			for i := 0; i < 2; i++ {
+				if err := tc.record(a, entry()); err != nil {
+					t.Fatalf("attempt %d: %v", i, err)
+				}
+			}
+			rep, err := NewAuditLog(path).Verify(ctx)
+			if err != nil {
+				t.Fatalf("verify: %v", err)
+			}
+			if !rep.Intact || rep.Verified != tc.rows {
+				t.Fatalf("report = %+v, want %d intact entries", rep, tc.rows)
+			}
+		})
 	}
+	a := NewAuditLog(filepath.Join(t.TempDir(), "audit.jsonl"))
 	if err := a.Record(ctx, ports.AuditEntry{Action: "x", At: time.Unix(2, 0).UTC(), Metadata: map[string]string{"a\xff": "1", "a\xfe": "2"}}); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("colliding keys: err = %v, want ErrValidation", err)
 	}

@@ -14,7 +14,8 @@ import (
 
 // TestAuditRowWithInvalidUTF8RecomputesToItsHash (#1723): JSON encoding stores an invalid metadata byte as
 // U+FFFD, so the writer must hash the normalized metadata. The stored row, read back, recomputes to its
-// stored hash, on the global path and on the tenant-bound transaction path.
+// stored hash on the global path, the first-observation path and the tenant-bound transaction path. Run as
+// the owner, row-level security is off, so these reach the two global append functions.
 func TestAuditRowWithInvalidUTF8RecomputesToItsHash(t *testing.T) {
 	pool := auditTxTestPool(t)
 	ctx := context.Background()
@@ -33,6 +34,17 @@ func TestAuditRowWithInvalidUTF8RecomputesToItsHash(t *testing.T) {
 		{"global", func(target string) error {
 			return log.Record(ctx, ports.AuditEntry{Actor: "op\xff", Action: "scan.archive", Target: target, At: time.Now().UTC(),
 				Metadata: map[string]string{"path": "a\xffb", "evidence_head": "\x00"}})
+		}},
+		{"first observation", func(target string) error {
+			tenantCtx := shared.WithTenant(ctx, tenant)
+			e := ports.AuditEntry{Actor: "op", Action: "scan.archive", Target: target, At: time.Now().UTC(),
+				Metadata: map[string]string{"path": "a\xffb", "idempotency_key": target + "\xfe"}}
+			for i := 0; i < 2; i++ { // a retry with the same raw bytes matches the stored row
+				if err := log.RecordFirstObservation(tenantCtx, e); err != nil {
+					return err
+				}
+			}
+			return nil
 		}},
 		{"tenant transaction", func(target string) error {
 			return runner.Run(ctx, tenant, func(txCtx context.Context) error {
