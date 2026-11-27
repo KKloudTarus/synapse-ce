@@ -366,7 +366,7 @@ func (service *APIService) CreateRetestAssessment(ctx context.Context, input Cre
 		inScope = filtered
 		engagementInput := enguc.CreateInput{
 			TenantID: tenantID, BusinessAssetID: cycle.BusinessAssetID, AssessmentProjectID: cycle.ProjectID, CreatedBy: input.Request.Actor,
-			Name: name, Client: source.Client, InScope: inScope, OutOfScope: outOfScope,
+			Name: name, Client: source.Client, InScope: inScope, OutOfScope: outOfScope, InheritedInScope: source.Scope.InScope,
 			AuthorizedFrom: input.AuthorizedFrom, AuthorizedTo: input.AuthorizedTo, Timezone: input.Timezone,
 			RoE: input.RoE, RequiresExplicitExecutionAuthorization: true,
 		}

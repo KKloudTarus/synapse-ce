@@ -57,7 +57,12 @@ type Service struct {
 	audit       ports.AuditLogger
 	clock       ports.Clock
 	ids         ports.IDGenerator
+	localScope  func(path string) error
 }
+
+// SetLocalScopeCheck installs the operator's floor on local repository scope entries, so an imported
+// scope meets the same check as one written through the API (#1701).
+func (s *Service) SetLocalScopeCheck(check func(path string) error) { s.localScope = check }
 
 // NewService validates dependencies and returns the transfer service.
 func NewService(engagements ports.EngagementRepository, findings ports.FindingRepository, comments ports.CommentRepository, ev *evidence.Service, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
@@ -171,6 +176,9 @@ func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, 
 	// canonical validation boundary as an API edit before the first repository write.
 	if err := eng.SetScope(b.Engagement.Scope.InScope, b.Engagement.Scope.OutOfScope, now); err != nil {
 		return nil, fmt.Errorf("%w: imported engagement scope: %v", shared.ErrValidation, err)
+	}
+	if err := engagement.CheckLocalRepos(eng.Scope.InScope, nil, s.localScope); err != nil {
+		return nil, fmt.Errorf("imported engagement scope: %w", err)
 	}
 	eng.RoE = b.Engagement.RoE
 	eng.AuthorizedFrom = b.Engagement.AuthorizedFrom

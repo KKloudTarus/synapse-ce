@@ -54,6 +54,16 @@ type Acquirer struct {
 	comparisonDepth    int                         // bounded history depth for Code comparison resolution
 	gitCreds           ports.GitCredentialResolver // when set, a git clone whose host has a tenant connector authenticates (private repos)
 	allowInternalHosts bool                        // test-only: permit a loopback/link-local git host (a loopback httptest server). Never set in production.
+	floor              *TargetFloor                // operator floor on local paths and private origins; nil for the CLI, which scans its own checkout
+}
+
+// WithTargetFloor installs the origin half of the operator's floor: a git or registry origin in
+// private address space the floor does not allow is refused before anything is dialled, and again at
+// connect time for a registry pull. The path half is GuardPaths, which must sit in front of the
+// whole chain because the source-upload acquirer feeds this one server-built archive paths.
+func (a *Acquirer) WithTargetFloor(f TargetFloor) *Acquirer {
+	a.floor = &f
+	return a
 }
 
 // rejectInternalHost refuses a git clone target that resolves to a loopback/link-local/metadata
@@ -63,7 +73,39 @@ func (a *Acquirer) rejectInternalHost(host string) error {
 	if a.allowInternalHosts {
 		return nil
 	}
-	return rejectInternalAcquisitionHost(host)
+	if err := rejectInternalAcquisitionHost(host); err != nil {
+		return err
+	}
+	if a.floor == nil || a.floor.allowPrivateOrigins {
+		return nil
+	}
+	ips, ok := resolveAcquisitionHost(host)
+	if !ok {
+		// Under a floor an origin that cannot be judged is refused: a resolver that answers nothing
+		// now and a private address at clone time is the rebinding the floor exists to stop.
+		return fmt.Errorf("%w: acquisition host %q does not resolve", shared.ErrValidation, host)
+	}
+	for _, ip := range ips {
+		if why := a.floor.refusedOrigin(ip); why != "" {
+			return fmt.Errorf("%w: acquisition host %q resolves to %s", shared.ErrValidation, host, why)
+		}
+	}
+	return nil
+}
+
+// refuseIP is the dial-time form of the origin check, for a transport that resolves again at
+// connect time. It returns why ip is refused, or "".
+func (a *Acquirer) refuseIP(ip net.IP) string {
+	if a.allowInternalHosts {
+		return ""
+	}
+	if a.floor == nil {
+		if isInternalAcquisitionIP(ip) {
+			return "a loopback/link-local address"
+		}
+		return ""
+	}
+	return a.floor.refusedOrigin(ip)
 }
 
 // New returns a new Acquirer.
@@ -739,12 +781,8 @@ func rejectInternalAcquisitionHost(host string) error {
 	if host == "" {
 		return fmt.Errorf("%w: empty acquisition host", shared.ErrValidation)
 	}
-	var ips []net.IP
-	if ip := net.ParseIP(host); ip != nil {
-		ips = []net.IP{ip}
-	} else if resolved, err := net.LookupIP(host); err == nil {
-		ips = resolved
-	} else {
+	ips, ok := resolveAcquisitionHost(host)
+	if !ok {
 		return nil // unresolvable: the egress pin / fetch fails closed downstream anyway
 	}
 	for _, ip := range ips {
@@ -753,6 +791,18 @@ func rejectInternalAcquisitionHost(host string) error {
 		}
 	}
 	return nil
+}
+
+// resolveAcquisitionHost returns the addresses host names, or false when it does not resolve.
+func resolveAcquisitionHost(host string) ([]net.IP, bool) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, true
+	}
+	resolved, err := net.LookupIP(host)
+	if err != nil {
+		return nil, false
+	}
+	return resolved, true
 }
 
 // metadataIPs are the cloud instance-metadata endpoints that do NOT fall in the IPv4 link-local
@@ -809,6 +859,15 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	// is loaded in-process into an OCI layout — no registry. A bare registry reference has no
 	// archive suffix / is not a file on disk, so this never intercepts one.
 	if isLocalImageArchive(ref) {
+		// A tarball on the server's disk is a local target like any other: under a floor it must be
+		// an absolute path below an allowed root. Without this a relative ref such as
+		// "data/../../srv/bundles/app.tar" passes the image-reference syntax and reads any archive
+		// the process can open.
+		if a.floor != nil {
+			if err := a.floor.CheckLocal(ref); err != nil {
+				return nil, err
+			}
+		}
 		return a.acquireImageArchive(ctx, ref)
 	}
 	if err := validateImageRef(ref); err != nil {
@@ -849,7 +908,7 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	// downloaded lazily and written by layout.AppendImage below. The transport is per-pull, so its
 	// idle keep-alive connections (and their goroutines/FDs) are closed when the pull returns
 	// rather than lingering IdleConnTimeout past every pull.
-	transport := registryTransport(regHosts, a.allowInternalHosts, maxBytes)
+	transport := registryTransport(regHosts, a.refuseIP, maxBytes)
 	defer transport.closeIdleConnections()
 	img, err := remote.Image(parsed,
 		remote.WithContext(ctx),
@@ -949,7 +1008,7 @@ func checkImageManifestSize(img v1.Image, maxBytes int64) error {
 // registry; it is never set in production. Every connection, including a blob-CDN redirect and a
 // cross-host token exchange, flows through this DialContext, so a redirect to a non-allow-listed
 // host fails closed. The returned transport carries the pull's shared byte budget (maxBytes).
-func registryTransport(allowHosts []string, allowInternal bool, maxBytes int64) *boundedRoundTripper {
+func registryTransport(allowHosts []string, refuse func(net.IP) string, maxBytes int64) *boundedRoundTripper {
 	allow := make(map[string]struct{}, len(allowHosts))
 	for _, h := range allowHosts {
 		allow[strings.ToLower(strings.TrimSpace(h))] = struct{}{}
@@ -978,9 +1037,11 @@ func registryTransport(allowHosts []string, allowInternal bool, maxBytes int64) 
 			}
 			var lastErr error
 			for _, ip := range ips {
-				if !allowInternal && isInternalAcquisitionIP(ip) {
-					lastErr = fmt.Errorf("registry egress: host %q resolves to a loopback/link-local address (%s) – refused (SSRF/metadata guard)", host, ip)
-					continue
+				if refuse != nil {
+					if why := refuse(ip); why != "" {
+						lastErr = fmt.Errorf("registry egress: host %q resolves to %s (%s) – refused", host, why, ip)
+						continue
+					}
 				}
 				conn, derr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
 				if derr == nil {

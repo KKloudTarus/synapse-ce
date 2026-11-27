@@ -168,7 +168,32 @@ type CreateInput struct {
 	GateID               string
 }
 
+// ownArchive refuses an archive binding that does not name this project's own upload. The archive
+// store writes <dir>/<projectID><ext>; the acquisition floor confines the directory. Before #1701,
+// Create accepted any archive path, so a binding stored then may name another project's upload, and
+// only its file name tells the two apart.
+func ownArchive(p *project.Project) error {
+	if p.SourceBinding.Kind != project.SourceArchive {
+		return nil
+	}
+	base := filepath.Base(p.SourceBinding.Value)
+	for _, ext := range []string{".zip", ".tgz", ".tar.gz"} {
+		if base == p.ID.String()+ext {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: this project's archive source does not name its own upload; upload the archive again", shared.ErrValidation)
+}
+
+// Create registers a project from a caller-supplied source binding. An archive binding is refused:
+// its value is a path on the server's disk, and the only archives the server may acquire are the ones
+// it stored itself through CreateFromArchive. Accepting one here let a tenant point a project at any
+// readable file on the host, including another tenant's uploaded archive (#1701).
 func (s *Service) Create(ctx context.Context, in CreateInput) (*project.Project, error) {
+	// project.New trims the kind, so compare the trimmed value: " archive" is stored as "archive".
+	if strings.TrimSpace(in.SourceBinding.Kind) == project.SourceArchive {
+		return nil, fmt.Errorf("%w: archive project sources are created by uploading the archive, not by naming a path", shared.ErrValidation)
+	}
 	return s.create(ctx, in, s.ids.NewID())
 }
 
@@ -179,6 +204,7 @@ func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*pr
 	if s.engagements == nil {
 		return nil, fmt.Errorf("%w: project analysis context repository is required", shared.ErrValidation)
 	}
+	in.SourceBinding.Kind = strings.TrimSpace(in.SourceBinding.Kind)
 	if in.SourceBinding.Kind == project.SourceLocal && !s.allowLocalSource {
 		return nil, fmt.Errorf("%w: local project sources are only available in development", shared.ErrValidation)
 	}
@@ -567,6 +593,9 @@ func (s *Service) StartWebhookAnalysis(ctx context.Context, actor string, tenant
 }
 
 func (s *Service) projectAcquireRequest(ctx context.Context, p *project.Project) (ports.AcquireRequest, error) {
+	if err := ownArchive(p); err != nil {
+		return ports.AcquireRequest{}, err
+	}
 	request := ports.AcquireRequest{Kind: p.SourceBinding.Kind, Value: p.SourceBinding.Value, Ref: p.SourceBinding.Ref}
 	if p.SourceBinding.Kind != project.SourceGit || p.SourceBinding.BaseRef != "" {
 		request.BaseRef = p.SourceBinding.BaseRef

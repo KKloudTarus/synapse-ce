@@ -117,7 +117,12 @@ generates the SBOM and runs detection.
 
 Two constraints are enforced server-side, so it is worth knowing them before the first attempt:
 
-- A local target must be an **absolute path** that the API process can read. A relative path is rejected.
+- A local target must be an **absolute path** that the API process can read, under a directory the operator
+  listed in `SYNAPSE_LOCAL_SCAN_ROOTS`. With the variable unset, which is the default, local targets are
+  refused, and a relative path is always rejected. Set `SYNAPSE_LOCAL_SCAN_ROOTS=/path/to/checkouts` to scan
+  local directories during evaluation.
+- A git origin or registry in private address space (`10.0.0.0/8`, `192.168.0.0/16`, a tailnet) is refused
+  unless `SYNAPSE_ALLOW_PRIVATE_ACQUISITION_ORIGINS=true`.
 - A **container image** target is supported: set the kind to `image` and give a reference such as
   `docker.io/library/alpine:3.19`. The server pulls it daemonlessly (in-process, no external binary) and reports its OS and
   language package CVEs. The image must be in the engagement scope. The CLI form is

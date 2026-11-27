@@ -123,7 +123,7 @@ func TestAcquireImageManifestSizeCap(t *testing.T) {
 // TestRegistryTransportRejectsUnlistedHost proves the egress pin refuses a dial to any host
 // outside the allow-list, before DNS resolution.
 func TestRegistryTransportRejectsUnlistedHost(t *testing.T) {
-	rt := registryTransport([]string{"registry-1.docker.io"}, false, MaxWorkspaceBytes)
+	rt := registryTransport([]string{"registry-1.docker.io"}, New().refuseIP, MaxWorkspaceBytes)
 	client := &http.Client{Transport: rt}
 	req, err := http.NewRequest(http.MethodGet, "https://evil.example.test/v2/", nil)
 	if err != nil {
@@ -142,7 +142,7 @@ func TestRegistryTransportRejectsUnlistedHost(t *testing.T) {
 // host that resolves to a loopback address (SSRF/metadata guard) when internal hosts are not
 // permitted. localhost always resolves to loopback with no network access.
 func TestRegistryTransportRejectsLoopback(t *testing.T) {
-	rt := registryTransport([]string{"localhost"}, false, MaxWorkspaceBytes)
+	rt := registryTransport([]string{"localhost"}, New().refuseIP, MaxWorkspaceBytes)
 	client := &http.Client{Transport: rt}
 	req, err := http.NewRequest(http.MethodGet, "http://localhost/v2/", nil)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestRegistryTransportBoundsResponseBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := registryTransport([]string{host}, true, 16) // 16-byte total budget, allowInternal for loopback
+	rt := registryTransport([]string{host}, nil, 16) // 16-byte total budget, allowInternal for loopback
 	client := &http.Client{Transport: rt}
 
 	// First 10-byte response fits the 16-byte budget.

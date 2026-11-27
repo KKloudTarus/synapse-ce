@@ -33,6 +33,17 @@ type Service struct {
 	notifications             ports.NotificationOutbox
 	notificationFacts         ports.NotificationLifecycleFactsReader
 	notificationLocker        ports.EngagementMutationLocker
+	localScopeCheck           func(path string) error
+}
+
+// SetLocalScopeCheck installs the operator's floor on local repository targets. An in-scope repo
+// entry naming an absolute path the floor refuses is rejected when the scope is written, so a scope
+// cannot authorize a target the executor will refuse (#1701). Nil, the default, checks nothing; the
+// acquirer enforces the floor at execution either way.
+func (s *Service) SetLocalScopeCheck(check func(path string) error) { s.localScopeCheck = check }
+
+func (s *Service) checkLocalScope(e *domain.Engagement, inherited []domain.Target) error {
+	return domain.CheckLocalRepos(e.Scope.InScope, inherited, s.localScopeCheck)
 }
 
 // NewService wires the engagement use case with its driven ports.
@@ -78,6 +89,7 @@ type CreateInput struct {
 	Client                                 string
 	InScope                                []domain.Target
 	OutOfScope                             []domain.Target
+	InheritedInScope                       []domain.Target // entries copied from a predecessor; the local floor does not re-judge them
 	AuthorizedFrom                         *time.Time
 	AuthorizedTo                           *time.Time
 	Timezone                               string
@@ -357,6 +369,9 @@ func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*do
 	if err := e.SetScope(in.InScope, in.OutOfScope, now); err != nil {
 		return nil, err
 	}
+	if err := s.checkLocalScope(e, in.InheritedInScope); err != nil {
+		return nil, err
+	}
 	if err := e.SetAuthorizationWindow(in.AuthorizedFrom, in.AuthorizedTo, in.Timezone, now); err != nil {
 		return nil, err
 	}
@@ -400,6 +415,9 @@ func (s *Service) UpdateScope(ctx context.Context, actor string, tenantID, id sh
 		now := s.clock.Now()
 		cp := *current
 		if err := cp.SetScope(in, out, now); err != nil {
+			return err
+		}
+		if err := s.checkLocalScope(&cp, current.Scope.InScope); err != nil {
 			return err
 		}
 		cp.Audit.UpdatedBy = actor

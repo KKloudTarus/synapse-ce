@@ -32,6 +32,27 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   superuser and refuses the database owner at startup, because both tables force their policies on
   the owner.
 
+- **A tenant can no longer make the server read its own disk or probe its private network (#1701).**
+  The engagement scope is enforced before execution, but the tenant writes it, so the gate could not
+  protect the host from the tenants it serves. A scope of `/srv`, `/home` or `/opt` was accepted, a local
+  target was read in the API process, and a git origin at an RFC 1918 address let a tenant map the
+  operator's network from `git clone`'s errors. A project could also be created with an `archive` source
+  naming any readable file on the host, including another tenant's stored upload. The operator now sets
+  the floor: `SYNAPSE_LOCAL_SCAN_ROOTS` lists the directories a local target, a local image archive, a
+  local scope entry or a local project source may sit under, judged after resolving symlinks, and
+  `SYNAPSE_ALLOW_PRIVATE_ACQUISITION_ORIGINS` admits private-address git and registry origins, including
+  IPv4 addresses carried in NAT64 and 6to4. The acquirer enforces both at execution. Scan submission
+  answers `400`, and a scope write or bundle import that adds a local entry outside the roots is refused
+  with the same reason. Archive project sources are created only by upload, and an analysis acquires
+  only the project's own upload. A root that overlaps a server data directory is refused at startup.
+
+  **Rollout:** both defaults refuse. A deployment that scans local directories must set
+  `SYNAPSE_LOCAL_SCAN_ROOTS`, and one that clones from an internal Git server or pulls from an internal
+  registry must set `SYNAPSE_ALLOW_PRIVATE_ACQUISITION_ORIGINS=true`, before upgrading. Existing
+  engagements whose scope names a local path outside the roots keep that entry, stay editable, and
+  their re-tests may copy it; a scan of that path is refused at execution. A project whose archive
+  binding names another project's upload must be uploaded again. `synapse-cli` is unchanged.
+
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
   (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
   served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator
