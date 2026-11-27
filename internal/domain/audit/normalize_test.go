@@ -11,7 +11,7 @@ import (
 )
 
 func TestNormalizeMetadataRoundTripsThroughJSON(t *testing.T) {
-	in := map[string]string{"path": "a\xffb", "k\xfe": "v", "ok": "plain"}
+	in := map[string]string{"path": "a\xffb", "k\xfe": "v", "ok": "plain", "head": "\x00"}
 	got, err := NormalizeMetadata(in)
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +59,9 @@ func TestNormalizeMetadataRefusesCollidingKeys(t *testing.T) {
 func TestNormalizeText(t *testing.T) {
 	if got := NormalizeText("a\xff\xfeb"); got != "a�b" {
 		t.Errorf("NormalizeText = %q", got)
+	}
+	if got := NormalizeText("a\x00b"); got != "a\uFFFDb" {
+		t.Errorf("NormalizeText(NUL) = %q", got)
 	}
 	if got := NormalizeText("ok"); got != "ok" {
 		t.Errorf("NormalizeText(valid) = %q", got)

@@ -32,7 +32,7 @@ func TestAuditRowWithInvalidUTF8RecomputesToItsHash(t *testing.T) {
 	}{
 		{"global", func(target string) error {
 			return log.Record(ctx, ports.AuditEntry{Actor: "op\xff", Action: "scan.archive", Target: target, At: time.Now().UTC(),
-				Metadata: map[string]string{"path": "a\xffb"}})
+				Metadata: map[string]string{"path": "a\xffb", "evidence_head": "\x00"}})
 		}},
 		{"tenant transaction", func(target string) error {
 			return runner.Run(ctx, tenant, func(txCtx context.Context) error {
@@ -60,8 +60,11 @@ func TestAuditRowWithInvalidUTF8RecomputesToItsHash(t *testing.T) {
 			if err := json.Unmarshal(meta, &metadata); err != nil {
 				t.Fatalf("decode metadata: %v", err)
 			}
-			if metadata["path"] != "a�b" {
+			if metadata["path"] != "a\uFFFDb" {
 				t.Fatalf("stored path = %q, want the U+FFFD form", metadata["path"])
+			}
+			if tc.name == "global" && metadata["evidence_head"] != "\uFFFD" {
+				t.Fatalf("stored evidence_head = %q, want a NUL stored as U+FFFD", metadata["evidence_head"])
 			}
 			if want := audit.ComputeHash(scheme, prev, actor, action, target, metadata, at); want != hash {
 				t.Fatalf("stored row recomputes to %s, stored hash is %s: the row reads as tampered", want, hash)
