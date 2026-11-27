@@ -27,7 +27,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   writer and the identity backfill's API-key uniqueness count run as owner functions and reach every
   tenant through a policy that admits only the table's owner; the runtime role never owns an RLS table.
   The count moves into `synapse_users_api_key_hash_counts`, which `synapse-migrate` and `synapse-api`
-  grant to the runtime role after migrating. **Rollout:** run v0.3.0 or later while 0282 applies.
+  grant to the runtime role after migrating. The migration stops if those functions are not owned by
+  the owner of `users`. **Rollout:** run v0.3.0 or later while 0282 applies, and run
+  `synapse-identity-backfill` from this release: the v0.3.0 backfill counts API-key holders in one
+  tenant only under the new policy.
 
 - **The engagement secret vault is isolated by the database (#1687).** Migration 0281 enables forced
   row-level security on `credentials` and makes `tenant_id` NOT NULL, the contract half of 0277. A

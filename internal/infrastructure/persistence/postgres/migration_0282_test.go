@@ -102,6 +102,13 @@ func TestMigration0282EnforcesUsersTenantRLS(t *testing.T) {
 		t.Fatalf("insert into another tenant: err = %v, want a policy or writer-fence refusal", err)
 	}
 
+	// The owner policy admits the table's owner, so the crossing functions must share it.
+	var mismatched int
+	if err := owner.QueryRow(`SELECT count(*) FROM pg_proc p, pg_class c
+		WHERE c.oid = 'public.users'::regclass AND p.proowner <> c.relowner
+		  AND p.proname IN ('synapse_user_by_api_key_hash','synapse_users_api_key_hash_counts')`).Scan(&mismatched); err != nil || mismatched != 0 {
+		t.Fatalf("%d crossing functions are not owned by the users owner (%v)", mismatched, err)
+	}
 	// The owner functions answer without a bound tenant: authentication and the backfill's count.
 	var id, tenant string
 	if err := pool.QueryRow(ctx, `SELECT id, tenant_id FROM synapse_user_by_api_key_hash('hash-bob')`).Scan(&id, &tenant); err != nil || id != "bob" || tenant != tenantB {

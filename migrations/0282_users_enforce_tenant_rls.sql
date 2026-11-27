@@ -35,6 +35,30 @@ $$;
 -- +goose StatementEnd
 REVOKE ALL ON FUNCTION synapse_users_api_key_hash_counts(TEXT[]) FROM PUBLIC;
 
+-- The owner policy admits the table's owner, so the functions that must cross tenants have to run as that
+-- owner. If a deployment split ownership (a group role owns the table, the login role owns the functions),
+-- the API-key lookup would return nothing and every API key would be refused. Stop instead.
+-- +goose StatementBegin
+DO $$
+DECLARE
+    v_table_owner OID;
+    v_mismatch TEXT;
+BEGIN
+    SELECT relowner INTO v_table_owner FROM pg_catalog.pg_class WHERE oid = 'public.users'::regclass;
+    SELECT string_agg(p.oid::regprocedure::text, ', ') INTO v_mismatch
+      FROM pg_catalog.pg_proc p
+      JOIN pg_catalog.pg_roles r ON r.oid = p.proowner
+     WHERE p.oid IN ('public.synapse_user_by_api_key_hash(text)'::regprocedure,
+                     'public.synapse_users_api_key_hash_counts(text[])'::regprocedure)
+       AND p.proowner <> v_table_owner
+       AND NOT r.rolsuper;
+    IF v_mismatch IS NOT NULL THEN
+        RAISE EXCEPTION 'migration 0282: % must be owned by the owner of users (%) for the owner policy to admit them',
+            v_mismatch, pg_catalog.pg_get_userbyid(v_table_owner);
+    END IF;
+END $$;
+-- +goose StatementEnd
+
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users FORCE ROW LEVEL SECURITY;
 CREATE POLICY users_tenant_isolation ON users
