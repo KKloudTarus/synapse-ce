@@ -21,6 +21,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Security
 
+- **The engagement secret vault is isolated by the database (#1687).** Migration 0281 enables forced
+  row-level security on `credentials` and makes `tenant_id` NOT NULL, the contract half of 0277. A
+  secret whose engagement was deleted before 0277 could not be attributed to a tenant and could not be
+  resolved by any engagement; the migration deletes those rows. It stops instead if a row without a
+  tenant still has its engagement. v0.3.0 reads and writes the vault only inside a bound tenant, so it
+  keeps working during the rollout.
+
 - **An imported evidence link no longer authorizes an artifact read.** Artifact blobs are
   content-addressed in one store shared by every tenant, and an engagement could read any blob its
   chain referenced, including through links that arrived in an imported bundle. Only a link sealed on
