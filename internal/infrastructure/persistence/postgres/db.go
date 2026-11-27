@@ -587,6 +587,14 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 			"GRANT EXECUTE ON FUNCTION synapse_rotate_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
 		)
 	}
+	var userKeyLookupInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_user_by_api_key_hash(text)') IS NOT NULL").Scan(&userKeyLookupInstalled); err != nil {
+		return fmt.Errorf("inspect user key lookup: %w", err)
+	}
+	if userKeyLookupInstalled {
+		// Migration 0278 revokes it from PUBLIC; the authentication path calls it by name.
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_user_by_api_key_hash(TEXT) TO "+quotedRole)
+	}
 	var jiraInstalled bool
 	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_provision_jira_inbound_webhook(text,text,text,text,integer)') IS NOT NULL").Scan(&jiraInstalled); err != nil {
 		return fmt.Errorf("inspect Jira webhook functions: %w", err)

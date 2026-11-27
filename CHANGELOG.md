@@ -68,6 +68,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   caller's tenant, filters by it, and refuses a context without one. Forced row-level security on the
   table follows in the next release, once no deployed binary reads it unscoped.
 
+- **The API-key lookup no longer needs an unscoped read of `users` (#1697).** It was the one `users`
+  query that could not bind a tenant. Migration 0278 moves it behind a function that runs as the table
+  owner, and the bootstrap and the unbound user read now bind their tenant. Forced row-level security on
+  `users` follows in the next release.
+
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
   (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
   served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator

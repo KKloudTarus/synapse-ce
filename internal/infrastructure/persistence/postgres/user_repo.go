@@ -99,6 +99,11 @@ func (r *UserRepository) Bootstrap(ctx context.Context, u *user.User, auditEntry
 		return fmt.Errorf("bootstrap user: begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Bind the user's tenant before touching the table, as every other users write does, so the
+	// bootstrap keeps working once users carries a tenant policy (#1697).
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", shared.TenantOrDefault(shared.ID(u.TenantID)).String()); err != nil {
+		return fmt.Errorf("bootstrap user: bind tenant: %w", err)
+	}
 
 	var inserted bool
 	if err := tx.QueryRow(ctx,
@@ -137,7 +142,20 @@ func (r *UserRepository) GetByID(ctx context.Context, tenantID, id shared.ID) (*
 	} else if bound {
 		row = tx.QueryRow(ctx, query, shared.DefaultTenant.String(), tenant.String(), id.String())
 	} else {
-		row = r.pool.QueryRow(ctx, query, shared.DefaultTenant.String(), tenant.String(), id.String())
+		// Unbound: read inside the user's tenant rather than on a bare connection (#1697).
+		var u *user.User
+		err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
+			var scanErr error
+			u, scanErr = scanUser(tx.QueryRow(ctx, query, shared.DefaultTenant.String(), tenant.String(), id.String()))
+			return scanErr
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, shared.ErrNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get user: %w", err)
+		}
+		return u, nil
 	}
 	u, err := scanUser(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -185,11 +203,12 @@ func (r *UserRepository) Update(ctx context.Context, tenantID shared.ID, u *user
 }
 
 // GetByAPIKeyHash is the authentication path: the tenant is unknown until the presented token
-// resolves to a user, so this is the one user lookup without a tenant predicate. The key is the
-// SHA-256 digest of a 192-bit random secret, and the resolved user's own tenant scopes every
-// subsequent read and write.
+// resolves to a user, so this is the one user lookup without a tenant predicate. It goes through
+// synapse_user_by_api_key_hash (migration 0278), which runs as the table owner, so it keeps working
+// once users carries a tenant policy. The key is the SHA-256 digest of a 192-bit random secret, and
+// the resolved user's own tenant scopes every subsequent read and write.
 func (r *UserRepository) GetByAPIKeyHash(ctx context.Context, hash string) (*user.User, error) {
-	u, err := scanUser(r.pool.QueryRow(ctx, `SELECT `+userCols+` FROM users WHERE api_key_hash=$1`, hash))
+	u, err := scanUser(r.pool.QueryRow(ctx, `SELECT `+userCols+` FROM synapse_user_by_api_key_hash($1)`, hash))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, shared.ErrNotFound
 	}
