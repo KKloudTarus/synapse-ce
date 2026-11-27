@@ -47,7 +47,7 @@ inputs:
     required: false
     default: ""
   args:
-    description: "Extra flags appended to `synapse-cli scan`, for example `--require-complete --min-confidence high` or `--json`. The value is split on whitespace (spaces, tabs, newlines, so a multi-line block works) into separate words and nothing else is interpreted: no quoting or escaping, and `$`, backticks, `;`, `&&`, `*` and quotes are ordinary characters of a word, so a value containing a space cannot be passed. A flag that has its own input (`--fail-on`, `--image`, `--offline`, `--server`, `--project`, `--sarif`, `--sarif-out`) is rejected: set it through that input. `--json` and `--sbom` take stdout and cannot be combined with `sarif: true`; the step fails before the scan runs. Default: no extra flags."
+    description: "Extra flags appended to `synapse-cli scan`, for example `--require-complete --min-confidence high` or `--json`. The value is split on whitespace (spaces, tabs, newlines, so a multi-line block works) into separate words and nothing else is interpreted: no quoting or escaping, and `$`, backticks, `;`, `&&`, `*` and quotes are ordinary characters of a word, so a value containing a space cannot be passed. A flag that has its own input (`--fail-on`, `--image`, `--offline`, `--server`, `--project`, `--sarif`, `--sarif-out`) is rejected: set it through that input. `--json` or `--sbom` combines with `sarif: true`, because the action writes the SARIF to a file; with a `version` older than `--sarif-out` the step fails before the scan runs. Default: no extra flags."
     required: false
     default: ""
   install-grype:
@@ -221,12 +221,12 @@ runs:
               --fail-on|--image|--offline|--server|--project|--sarif|--sarif-out)
                 echo "::error::args must not contain ${word}; set it through the matching input of this action" >&2
                 exit 2 ;;
-              # The CLI accepts only one of --json, --sarif (or --sarif-out) and --sbom, and `sarif: true`
-              # adds --sarif-out below. It would exit 2 anyway; say which input conflicts instead of leaving
-              # the CLI's wording to explain it.
+              # `sarif: true` adds --sarif-out below, which writes a file and combines with --json or --sbom.
+              # A pinned binary older than --sarif-out takes --sarif on stdout instead, which cannot share
+              # stdout; say which input conflicts rather than leaving the CLI's wording to explain it.
               --json|--sbom)
-                if [ "${SYNAPSE_SARIF}" = "true" ]; then
-                  echo "::error::args contains ${word}, which cannot be combined with sarif: true (the CLI takes only one of --json, --sarif and --sbom); drop one of them" >&2
+                if [ "${SYNAPSE_SARIF}" = "true" ] && ! synapse-cli scan --help 2>&1 | grep -q -- '--sarif-out'; then
+                  echo "::error::args contains ${word}, which this synapse-cli version cannot combine with sarif: true (it has no --sarif-out); pin a newer version or drop one of them" >&2
                   exit 2
                 fi ;;
             esac

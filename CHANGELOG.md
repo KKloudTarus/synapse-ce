@@ -253,6 +253,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- **`synapse-cli` exits `3` when it cannot complete, and `1` only for a gate result (#1665).** A
+  pipeline could not tell "findings over threshold" from "the scanner broke" without parsing the
+  output, because both exited `1`. A gate result keeps `1`: a finding at or above `--fail-on`,
+  incomplete coverage under `--require-complete`, a failed quality gate, coverage or rating below its
+  threshold, or a failed rule-pack gate. A runtime failure is now `3`. Usage errors stay `2`. A
+  pipeline that treats any non-zero exit as a failure is unaffected; one that matched `1` to mean
+  "scanner error" must match `3`.
+
+- **`--sarif-out` combines with `--json` or `--sbom` (#1665).** `--sarif-out` writes a file, so one scan
+  can print the JSON result or the SBOM and still write the SARIF for a code-scanning upload. The
+  GitHub Action accepts `--json` or `--sbom` in `args` together with `sarif: true`.
+
 - **A Gradle dependency used only by test configurations is now test scope, as a Maven
   `<scope>test</scope>` dependency is, so the gate exempts it. This can change an exit code
   (#1692).** Both Gradle parsers gave such a dependency development scope, which `--fail-on`

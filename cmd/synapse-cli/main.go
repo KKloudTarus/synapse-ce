@@ -114,100 +114,87 @@ func main() {
 	switch os.Args[1] {
 	case "doctor":
 		if err := runDoctor(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "scan":
 		runScan()
 	case "publish-source":
 		if err := runPublishSource(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	// validate-sarif is named for what it does: it reports what the server would accept or refuse and
 	// writes nothing. `import-sarif` is kept as an alias so an existing invocation still works, but it
 	// prints the same "persisted: false" contract rather than implying an ingest happened.
 	case "validate-sarif", "import-sarif":
 		if err := validateSARIF(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "sync-advisories":
 		if len(os.Args) < 3 {
 			usage() // missing <dir> exits 2, consistent with scan's missing-path
 		}
 		if err := syncAdvisories(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "build-cvss-db":
 		if len(os.Args) < 4 {
 			usage() // need <out> + at least one NVD json input
 		}
 		if err := runBuildCVSSDB(os.Args[2], os.Args[3:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "inventory":
 		if len(os.Args) < 3 {
 			usage() // missing <dir> exits 2
 		}
 		if err := runInventory(os.Args[2]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "metrics":
 		if len(os.Args) < 3 {
 			usage()
 		}
 		if err := runMetrics(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "duplication":
 		if len(os.Args) < 3 {
 			usage()
 		}
 		if err := runDuplication(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "quality":
 		if len(os.Args) < 3 {
 			usage()
 		}
 		if err := runQuality(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "rating":
 		if len(os.Args) < 3 {
 			usage()
 		}
 		if err := runRating(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "gate":
 		if len(os.Args) < 3 {
 			usage()
 		}
 		if err := runGate(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "rulepack":
 		if err := runRulePack(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	case "coverage":
 		if len(os.Args) < 3 {
 			usage()
 		}
 		if err := runCoverage(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-			os.Exit(1)
+			fail(err)
 		}
 	default:
 		usage()
@@ -622,7 +609,7 @@ func runQualityTo(w io.Writer, args []string) error {
 			}
 		}
 		if over > 0 {
-			return fmt.Errorf("%d code-quality finding(s) at or above %s", over, failOn)
+			return gateFailed("%d code-quality finding(s) at or above %s", over, failOn)
 		}
 	}
 	return nil
@@ -725,7 +712,7 @@ func runRating(args []string) error {
 			}
 		}
 		if worst > threshold {
-			return fmt.Errorf("a health grade is below %s (security %s, reliability %s, maintainability %s)", failBelow, rep.Security, rep.Reliability, rep.Maintainability)
+			return gateFailed("a health grade is below %s (security %s, reliability %s, maintainability %s)", failBelow, rep.Security, rep.Reliability, rep.Maintainability)
 		}
 	}
 	return nil
@@ -929,7 +916,7 @@ func runGate(args []string) error {
 	}
 	triggerGateDecorationFromEnv(ctx, decorator, result, summary, scoped)
 	if !result.Passed {
-		return fmt.Errorf("quality gate FAILED: %d condition(s) not met", len(result.Failures()))
+		return gateFailed("quality gate FAILED: %d condition(s) not met", len(result.Failures()))
 	}
 	if !markdown {
 		fmt.Println("  quality gate PASSED")
@@ -980,7 +967,7 @@ func runCoverage(args []string) error {
 		}
 	}
 	if failBelow >= 0 && rep.Percent() < failBelow {
-		return fmt.Errorf("line coverage %.1f%% is below %.1f%%", rep.Percent(), failBelow)
+		return gateFailed("line coverage %.1f%% is below %.1f%%", rep.Percent(), failBelow)
 	}
 	return nil
 }
@@ -1313,21 +1300,14 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: %v\n", err)
 		os.Exit(2)
 	}
-	// The three output modes each own stdout completely, so they are mutually exclusive rather than
-	// silently last-one-wins.
-	chosen := 0
-	for _, on := range []bool{jsonOut, sarifOut, sbomOut} {
-		if on {
-			chosen++
-		}
-	}
-	if chosen > 1 {
-		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
+	// --json, --sbom and --sarif without a file each own stdout completely, so at most one of them may
+	// be chosen rather than silently last-one-wins. --sarif-out writes a file and combines with either.
+	if stdoutOwners(jsonOut, sbomOut, sarifOut, sarifPath) > 1 {
+		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom; --sarif-out FILE combines with --json or --sbom")
 		os.Exit(2)
 	}
 	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut, sarifPath, sbomOut, includeTest, verifySecrets, requireComplete, push); err != nil {
-		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
-		os.Exit(1)
+		fail(err)
 	}
 }
 
@@ -2005,23 +1985,9 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 
 	status := pushStatusWriter(jsonOut, sbomOut, sarifOut, sarifPath)
 
-	switch {
-	case sbomOut:
-		// CycloneDX to stdout, so nothing else mixes in. This is the SAME renderer the engagement
-		// export uses (#412 req 5): a release SBOM produced by a separate path could drift from the one
-		// customers get, and an engine we would not trust to describe our own artifact has no business
-		// describing theirs.
-		doc, mErr := scauc.MarshalCycloneDX(res.SBOM, res.Target, time.Now().UTC())
-		if mErr != nil {
-			return mErr
-		}
-		// A short write to stdout is a truncated SBOM, which must not read as a successful one.
-		if _, wErr := os.Stdout.Write(append(doc, '\n')); wErr != nil {
-			return fmt.Errorf("write sbom: %w", wErr)
-		}
-	case sarifOut:
-		// SARIF 2.1.0 for a code-scanning uploader (e.g. GitHub codeql-action/upload-sarif), to stdout so
-		// nothing else mixes in. Covers every finding kind (SCA/SAST/secret/misconfig); first-party kinds
+	buildSARIF := func() ([]byte, error) {
+		// SARIF 2.1.0 for a code-scanning uploader (e.g. GitHub codeql-action/upload-sarif), written to a
+		// file or to stdout alone. Covers every finding kind (SCA/SAST/secret/misconfig); first-party kinds
 		// carry a file:line physical location. Map each component@version to the manifest it was found in
 		// so SCA findings get a physical location too (GitHub rejects logical-only locations). The
 		// --fail-on gate below still sets the exit code, so the same run both annotates and gates.
@@ -2063,22 +2029,48 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		}
 		ruleMeta, rerr := exportcompose.SARIFRuleMeta(ctx)
 		if rerr != nil {
-			return fmt.Errorf("load rule catalog for sarif: %w", rerr)
+			return nil, fmt.Errorf("load rule catalog for sarif: %w", rerr)
 		}
 		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"], exportuc.SARIFOptions{
 			Manifest: manifestFor, Fix: fixFor, AIGateExemption: exemptionFor, RuleMeta: ruleMeta,
 		})
 		if err != nil {
-			return fmt.Errorf("encode sarif: %w", err)
+			return nil, fmt.Errorf("encode sarif: %w", err)
 		}
-		if sarifPath != "" {
-			// 0o644: a code-scanning uploader in the same job reads it, and it carries no secret.
-			if err := os.WriteFile(sarifPath, append(out, '\n'), 0o644); err != nil {
-				return fmt.Errorf("write sarif %s: %w", sarifPath, err)
-			}
-			printReport(target, res)
-			fmt.Printf("  sarif: %s\n", sarifPath)
-			break
+		return out, nil
+	}
+
+	// SARIF bound for a file is written first and owns nothing on stdout, so it combines with --json or
+	// --sbom: a pipeline gets the machine-readable result and the code-scanning upload from one scan
+	// (#1665). The other modes below each own stdout.
+	if sarifOut && sarifPath != "" {
+		out, err := buildSARIF()
+		if err != nil {
+			return err
+		}
+		// 0o644: a code-scanning uploader in the same job reads it, and it carries no secret.
+		if err := os.WriteFile(sarifPath, append(out, '\n'), 0o644); err != nil {
+			return fmt.Errorf("write sarif %s: %w", sarifPath, err)
+		}
+	}
+	switch {
+	case sbomOut:
+		// CycloneDX to stdout, so nothing else mixes in. This is the SAME renderer the engagement
+		// export uses (#412 req 5): a release SBOM produced by a separate path could drift from the one
+		// customers get, and an engine we would not trust to describe our own artifact has no business
+		// describing theirs.
+		doc, mErr := scauc.MarshalCycloneDX(res.SBOM, res.Target, time.Now().UTC())
+		if mErr != nil {
+			return mErr
+		}
+		// A short write to stdout is a truncated SBOM, which must not read as a successful one.
+		if _, wErr := os.Stdout.Write(append(doc, '\n')); wErr != nil {
+			return fmt.Errorf("write sbom: %w", wErr)
+		}
+	case sarifOut && sarifPath == "":
+		out, err := buildSARIF()
+		if err != nil {
+			return err
 		}
 		if _, err := os.Stdout.Write(append(out, '\n')); err != nil {
 			return fmt.Errorf("write sarif: %w", err)
@@ -2096,6 +2088,9 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		defer writeScanCompletionSummary(os.Stderr, res)
 	default:
 		printReport(target, res)
+		if sarifOut && sarifPath != "" {
+			fmt.Printf("  sarif: %s\n", sarifPath)
+		}
 	}
 
 	if push.enabled() {
@@ -2199,7 +2194,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		fmt.Fprintf(os.Stderr, "synapse-cli: %d verified low-risk false-positive candidate(s) at or above %s held back from the gate by policy (reported; not deleted)\n", fpExempt, failOn)
 	}
 	if over > 0 {
-		return fmt.Errorf("%d finding(s) at or above %s", over, failOn)
+		return gateFailed("%d finding(s) at or above %s", over, failOn)
 	}
 	if err := completeCoverageGate(res, requireComplete); err != nil {
 		return err
@@ -2214,7 +2209,7 @@ func completeCoverageGate(res *scauc.ScanResult, required bool) error {
 	if !required || res.EngineCoverage.Complete() {
 		return nil
 	}
-	return fmt.Errorf("required scan coverage is %s (%d/%d required engine(s) completed)", res.EngineCoverage.Status, res.EngineCoverage.Completed, res.EngineCoverage.Required)
+	return gateFailed("required scan coverage is %s (%d/%d required engine(s) completed)", res.EngineCoverage.Status, res.EngineCoverage.Completed, res.EngineCoverage.Required)
 }
 
 // formatToolVersions renders the tool-version map as a stable, readable list. Printing the map with %v

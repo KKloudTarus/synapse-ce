@@ -193,7 +193,9 @@ synapse-cli scan <path|image-ref> [flags]
 | `--branch <ref>`, `--run-url <url>`, `--ci-provider <name>` | What the pipeline says about itself, shown on the analysis in the console. On GitHub Actions, GitLab CI, Bitbucket Pipelines, Jenkins and Azure Pipelines these are read from provider variables when not given. |
 
 `--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.
-Passing more than one exits `2` rather than silently honoring the last flag. While one of them owns stdout,
+Passing more than one exits `2` rather than silently honoring the last flag. `--sarif-out <file>` writes a
+file instead, so it combines with `--json` or `--sbom`: one scan prints the JSON result or the SBOM and writes
+the SARIF for a code-scanning upload. While one of them owns stdout,
 the `--server` push status lines (engagement ingest, SBOM import, source publication) go to stderr, so stdout
 stays exactly one document.
 
@@ -459,11 +461,13 @@ misconfigured invocation:
 | Code | Meaning |
 | --- | --- |
 | `0` | The command succeeded and no gate threshold was crossed. |
-| `1` | A runtime failure, or a gate result: a finding at or above `--fail-on`, a failed quality gate, coverage below its threshold, or a rating below `--fail-below`. |
+| `1` | A gate result: a finding at or above `--fail-on`, required engine coverage incomplete under `--require-complete`, a failed quality gate, coverage below its threshold, a rating below `--fail-below`, or a failed rule-pack gate. The analysis completed. |
 | `2` | Invalid usage: an unknown or incomplete flag, a missing required argument, or an invalid enum value such as `--fail-on none`. Nothing was analyzed. |
+| `3` | A runtime failure: the command could not complete, for example the target could not be read, a required tool failed, or the server refused a push. No gate verdict was reached. |
 
-Treat `2` as "fix the pipeline definition" and `1` as "inspect the findings". Retrying an exit `2`
-unchanged will always fail again.
+Treat `1` as "inspect the findings", `2` as "fix the pipeline definition" and `3` as "the scanner did not
+finish; retry or investigate". Retrying an exit `2` unchanged will always fail again. Releases before this
+contract returned `1` for a runtime failure as well.
 
 ## Container image (Docker)
 
@@ -578,9 +582,10 @@ The value is read as plain text, never as shell, so these rules are all there is
   `--offline`, `--server`, `--project`, `--sarif` and `--sarif-out`. Use `fail-on`, `image`, `offline`,
   `server` and `project`, or `sarif` and `sarif-output` instead. The CLI keeps the last copy of a repeated
   flag, so without this a second `--fail-on` in `args` would quietly replace the one in the `with:` block.
-- The CLI accepts only one of `--json`, `--sarif` (or `--sarif-out`) and `--sbom`, and `sarif: true` makes the
-  action pass `--sarif-out`. Passing `--json` or `--sbom` together with `sarif: true` therefore fails the step
-  with exit 2 before the scan runs. With `sarif` left off, `--json` prints the JSON report to the step's log:
+- `sarif: true` makes the action pass `--sarif-out`, which writes a file and combines with `--json` or `--sbom`
+  in `args`: the step prints the JSON report or the SBOM and still writes the SARIF. A `version` that pins a
+  release older than `--sarif-out` cannot combine them, and the step fails with exit 2 before the scan runs.
+  With `sarif` left off, `--json` prints the JSON report to the step's log:
 
 ```yaml
 - uses: KKloudTarus/synapse-ce@v1

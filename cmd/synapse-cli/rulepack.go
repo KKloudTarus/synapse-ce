@@ -143,7 +143,7 @@ func runRulePackGate(args []string) error {
 		passed = report.Passed
 	}
 	if !passed {
-		return fmt.Errorf("rulepack %s gate failed", *phase)
+		return gateFailed("rulepack %s gate failed", *phase)
 	}
 	return nil
 }
