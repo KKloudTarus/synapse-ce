@@ -229,6 +229,11 @@ func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, 
 		},
 		At: now,
 	}); err != nil {
+		// An import that cannot be audited must not stay: roll it back like a failed materialize, so no
+		// engagement exists without its engagement.imported record.
+		if delErr := s.engagements.Delete(ctx, newEngID); delErr != nil {
+			return nil, fmt.Errorf("audit import: %w (rollback failed: %v)", err, delErr)
+		}
 		return nil, fmt.Errorf("audit import: %w", err)
 	}
 	return eng, nil
