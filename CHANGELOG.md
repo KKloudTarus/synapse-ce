@@ -7,6 +7,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-27
+
 ### Changed
 
 - **Audit and evidence writers use hash scheme 2 (#1703).** v0.3.0 taught every reader the framed
