@@ -115,26 +115,16 @@ func (e *Enricher) Enrich(ctx context.Context, vulns []vulnerability.Vulnerabili
 	}
 }
 
-// cveCandidates returns every CVE id associated with a vuln: its canonical id (if
-// a CVE) plus each detection's advisory id that is a CVE – so KEV/EPSS match even
-// when the canonical id is a GHSA.
+// cveCandidates returns every CVE id associated with a vuln: its canonical id, each alias, and each
+// detection's advisory id – so KEV/EPSS match when the vuln is reported under a GHSA id. The vuln is
+// annotated with the strongest signal across them: a GHSA that aliases a KEV CVE and its rejected duplicate
+// is KEV.
 func cveCandidates(v vulnerability.Vulnerability) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	add := func(id string) {
-		if !strings.HasPrefix(id, "CVE-") {
-			return
-		}
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
-			out = append(out, id)
-		}
-	}
-	add(v.ID)
+	detections := make([]string, 0, len(v.Detections))
 	for _, d := range v.Detections {
-		add(d.AdvisoryID)
+		detections = append(detections, d.AdvisoryID)
 	}
-	return out
+	return vulnerability.CVEIDs([]string{v.ID}, v.Aliases, detections)
 }
 
 // loadKEV returns the catalogue, refreshing it when the cache is older than kevTTL. The error is non-nil

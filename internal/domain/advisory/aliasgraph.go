@@ -1,6 +1,9 @@
 package advisory
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // AliasEdge is one row of the owned alias index: an alias id that resolves to a canonical advisory id
 // (GHSA-… -> CVE-…, and the like). Each alias maps to exactly one canonical (enforced on ingest), so the
@@ -113,4 +116,88 @@ func (g *AliasGraph) Expand(ids []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// RecordAliases indexes edges by advisory record and returns a lookup from one id to every id of the records
+// that name it: each such record's own id and its aliases, in the spelling the edges carry, sorted. Ids
+// compare case-insensitively. Unlike Closure it never follows a chain from one record into another. A record
+// whose ids name more than one distinct CVE is ambiguous: its non-CVE ids may be either vulnerability, so they
+// resolve to nil and never appear in another id's result, and a VEX statement naming one cannot reach a
+// finding reported under another id. An id no unambiguous record names, or whose records together name more
+// than one CVE, returns nil.
+func RecordAliases(edges []AliasEdge) func(id string) []string {
+	records := map[string][]string{} // normalized record id -> its ids, record id first
+	named := map[string][]string{}   // normalized id -> normalized ids of the records naming it
+	for _, e := range edges {
+		c, a := normalizeID(e.CanonicalID), normalizeID(e.AliasID)
+		if c == "" || a == "" {
+			continue
+		}
+		if _, ok := records[c]; !ok {
+			records[c] = []string{e.CanonicalID}
+			named[c] = append(named[c], c)
+		}
+		records[c] = append(records[c], e.AliasID)
+		named[a] = append(named[a], c)
+	}
+	// A record naming several CVEs is ambiguous, and so is each of its ids that is not itself a CVE: such an id
+	// (the record's GHSA, say) may be either vulnerability. An ambiguous record contributes nothing, and an
+	// ambiguous id neither resolves nor appears in another id's result, since a statement naming it could
+	// mean the other CVE.
+	ambiguousRecord, ambiguousID := map[string]bool{}, map[string]bool{}
+	for c, members := range records {
+		if distinctCVEs(members) <= 1 {
+			continue
+		}
+		ambiguousRecord[c] = true
+		for _, m := range members {
+			if distinctCVEs([]string{m}) == 0 {
+				ambiguousID[normalizeID(m)] = true
+			}
+		}
+	}
+	return func(id string) []string {
+		key := normalizeID(id)
+		if ambiguousID[key] {
+			return nil
+		}
+		seen := map[string]bool{}
+		var out []string
+		for _, record := range named[key] {
+			if ambiguousRecord[record] {
+				continue
+			}
+			for _, member := range records[record] {
+				if k := normalizeID(member); !seen[k] && !ambiguousID[k] {
+					seen[k] = true
+					out = append(out, member)
+				}
+			}
+		}
+		// Two unambiguous records can still name different CVEs between them (GHSA-y aliased by CVE-1's
+		// record and by CVE-2's), so the union is held to the same rule.
+		if distinctCVEs(out) > 1 {
+			return nil
+		}
+		sort.Slice(out, func(i, j int) bool { return normalizeID(out[i]) < normalizeID(out[j]) })
+		return out
+	}
+}
+
+// distinctCVEs counts the distinct CVEs among ids, reading a namespaced wrapper (DEBIAN-CVE-…) as the CVE it
+// wraps.
+func distinctCVEs(ids []string) int {
+	seen := map[string]bool{}
+	for _, id := range ids {
+		u := normalizeID(id)
+		if !strings.HasPrefix(u, "CVE-") {
+			i := strings.Index(u, "-CVE-")
+			if i < 0 {
+				continue
+			}
+			u = u[i+1:]
+		}
+		seen[u] = true
+	}
+	return len(seen)
 }

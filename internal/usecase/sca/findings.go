@@ -753,23 +753,16 @@ type SuppressedFinding struct {
 
 // applySuppressions ANNOTATES findings matched by the .synapseignore policy as accepted-risk (in
 // SuppressedFindings) without removing them from res.Findings, and records expired + malformed rule ids so
-// they get fixed. A finding matches on its PRIMARY advisory id (its vuln's CVE/GHSA, as printed in the
-// report) or its exact dedup key, so a team can suppress by CVE (the common case) or pin a specific
-// finding. Non-primary aliases are not retained on the vuln, so a rule should list the id as reported.
-// Deterministic; nothing is removed, so nothing can be hidden – only the CI gate is exempted.
+// they get fixed. A finding matches on its exact dedup key, its advisory id as printed in the report, or any
+// alias of that advisory, so a rule naming CVE-2023-4863 still matches the finding reported as the GHSA that
+// aliases it. Deterministic; nothing is removed, so nothing can be hidden – only the CI gate is exempted.
 func applySuppressions(res *ScanResult, set ignore.Set, now time.Time) {
 	if res == nil || len(set) == 0 {
 		return
 	}
-	byVuln := make(map[string]vulnerability.Vulnerability, len(res.Vulnerabilities))
-	for _, v := range res.Vulnerabilities {
-		byVuln[vulnDedupKey(v)] = v
-	}
+	advisoryIDs := vulnerability.MatchIDsByDedupKey(res.Vulnerabilities)
 	for _, f := range res.Findings {
-		ids := []string{f.DedupKey}
-		if v, ok := byVuln[f.DedupKey]; ok && v.ID != "" {
-			ids = append(ids, v.ID)
-		}
+		ids := append([]string{f.DedupKey}, advisoryIDs[f.DedupKey]...)
 		if rule, matched := set.Match(ids, now); matched {
 			res.SuppressedFindings = append(res.SuppressedFindings, SuppressedFinding{DedupKey: f.DedupKey, Title: f.Title, RuleID: rule.ID, Reason: rule.Reason})
 		}
@@ -785,10 +778,25 @@ func applySuppressions(res *ScanResult, set ignore.Set, now time.Time) {
 // applyVEX annotates findings that an in-repo OpenVEX not_affected/fixed statement targets as accepted-risk
 // on the SAME retain-and-mark surface as .synapseignore: the finding STAYS in res.Findings (reported +
 // sealed), only exempted from the --fail-on gate, with the VEX justification as the reason. A statement
-// matches by advisory id + component (+ version) via the shared domain/vex matcher. Nothing is removed.
+// matches by advisory id or any alias of it, plus component (+ version), via the shared domain/vex
+// matcher. Nothing is removed.
 func applyVEX(res *ScanResult, doc vex.Document) {
 	if res == nil || len(doc.Statements) == 0 {
 		return
+	}
+	// Index the findings by every id a statement may name, so each statement reaches its candidates with one
+	// map read: the advisory id parsed from the dedup key, plus the vuln's MatchIDs.
+	advisoryIDs := vulnerability.MatchIDsByDedupKey(res.Vulnerabilities)
+	type productKey struct{ component, version string }
+	keys := make([]productKey, len(res.Findings))
+	index := vex.AdvisoryIndex{}
+	for i, f := range res.Findings {
+		a, comp, ver, ok := vulnerability.ParseDedupKey(f.DedupKey)
+		if !ok {
+			continue
+		}
+		keys[i] = productKey{comp, ver}
+		index.Add(i, append([]string{a}, advisoryIDs[f.DedupKey]...)...)
 	}
 	accepted := make(map[string]bool, len(res.SuppressedFindings))
 	for _, sf := range res.SuppressedFindings {
@@ -801,12 +809,12 @@ func applyVEX(res *ScanResult, doc vex.Document) {
 		// A `not_affected` asserts "not exploitable" (a reachability claim); `fixed` asserts remediation
 		// (orthogonal to reachability). Only the former is reconciled against Synapse's own reachability.
 		notAffected := strings.EqualFold(strings.TrimSpace(st.Status), "not_affected")
-		for _, f := range res.Findings {
+		for _, i := range st.Candidates(index) {
+			f := res.Findings[i]
 			if accepted[f.DedupKey] {
 				continue
 			}
-			a, comp, ver, ok := vulnerability.ParseDedupKey(f.DedupKey)
-			if !ok || !st.MatchesFinding(a, comp, ver) {
+			if !st.TargetsProduct(keys[i].component, keys[i].version) {
 				continue
 			}
 			// Reachability reconciliation (EPIC #1042, #1-bar): a not_affected must not exempt the CI gate for a

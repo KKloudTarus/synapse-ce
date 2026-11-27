@@ -1459,8 +1459,10 @@ func loadSynapseignore(dir string) (suppression.Ruleset, error) {
 }
 
 // applySuppressions drops findings matched by an active .synapseignore rule and returns the kept set plus
-// the count suppressed. Non-line findings still match by rule key / advisory id.
-func applySuppressions(findings []finding.Finding, rs suppression.Ruleset, now time.Time) ([]finding.Finding, int) {
+// the count suppressed. Non-line findings still match by rule key / advisory id. advisoryIDs maps a finding's
+// dedup key to every id its advisory goes by (vulnerability.MatchIDsByDedupKey), so a rule naming a CVE
+// still matches a finding reported under the GHSA that aliases it; nil matches the reported id only.
+func applySuppressions(findings []finding.Finding, rs suppression.Ruleset, advisoryIDs map[string][]string, now time.Time) ([]finding.Finding, int) {
 	if len(rs) == 0 {
 		return findings, 0
 	}
@@ -1468,7 +1470,8 @@ func applySuppressions(findings []finding.Finding, rs suppression.Ruleset, now t
 	suppressed := 0
 	for _, f := range findings {
 		file, _, _ := findingFileLine(f)
-		if _, ok := rs.Suppress([]string{f.RuleKey, string(f.AdvisoryID)}, file, now); ok {
+		keys := append([]string{f.RuleKey, f.AdvisoryID}, advisoryIDs[f.DedupKey]...)
+		if _, ok := rs.Suppress(keys, file, now); ok {
 			suppressed++
 			continue
 		}
@@ -1956,7 +1959,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		}
 		now := time.Now()
 		var suppressed int
-		res.Findings, suppressed = applySuppressions(res.Findings, ignoreRules, now)
+		res.Findings, suppressed = applySuppressions(res.Findings, ignoreRules, vulnerability.MatchIDsByDedupKey(res.Vulnerabilities), now)
 		if suppressed > 0 {
 			fmt.Fprintf(os.Stderr, "synapse-cli: .synapseignore suppressed %d finding(s)\n", suppressed)
 		}

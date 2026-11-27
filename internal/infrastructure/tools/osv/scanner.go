@@ -370,6 +370,7 @@ type batchPkg struct {
 // a query that names a version returns nothing, so the adapter asks for every advisory of the package and
 // places the version against each advisory's ranges itself (#1665).
 var versionlessEcosystems = map[string]bool{"GitHub Actions": true}
+
 type batchResp struct {
 	Results []batchResult `json:"results"`
 }
@@ -429,7 +430,7 @@ func osvToRaw(comp sbom.Component, v osvVuln) vulnerability.RawFinding {
 	fixedVersions, rejectedFixedVersions := validatedFixedVersions(identity, matchedAffected)
 	out := vulnerability.RawFinding{
 		Source:                "osv",
-		AdvisoryID:            preferCVE(v.ID, v.Aliases),
+		AdvisoryID:            vulnerability.PreferCVE(v.ID, v.Aliases),
 		Aliases:               append([]string{v.ID}, v.Aliases...),
 		Severity:              shared.SeverityUnknown,
 		Component:             comp.Name,
@@ -607,18 +608,6 @@ func affectedSymbols(affected []osvAffected) []string {
 		}
 	}
 	return out
-}
-
-func preferCVE(id string, aliases []string) string {
-	if strings.HasPrefix(id, "CVE-") {
-		return id
-	}
-	for _, a := range aliases {
-		if strings.HasPrefix(a, "CVE-") {
-			return a
-		}
-	}
-	return id
 }
 
 func mapSeverityLabel(s string) shared.Severity {

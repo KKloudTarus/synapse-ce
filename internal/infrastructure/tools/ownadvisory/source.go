@@ -301,7 +301,7 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []s
 	fixedVersions, rejectedFixedVersions := ownedFixedVersions(a, remediationIdentity, componentArch, fixed)
 	rf := vulnerability.RawFinding{
 		Source:                sourceName,
-		AdvisoryID:            preferCVE(a.ID, a.Aliases),
+		AdvisoryID:            vulnerability.PreferCVE(a.ID, a.Aliases),
 		Aliases:               append([]string{a.ID}, a.Aliases...),
 		Component:             c.Name,
 		Version:               c.Version,
@@ -448,20 +448,6 @@ func sortedVersionKeys(values map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// preferCVE returns a CVE id when one is present (the id or an alias), else the primary id – mirroring the
-// OSV adapter so the owned source's AdvisoryID dedupes against the live sources in Correlate.
-func preferCVE(id string, aliases []string) string {
-	if strings.HasPrefix(id, "CVE-") {
-		return id
-	}
-	for _, a := range aliases {
-		if strings.HasPrefix(a, "CVE-") {
-			return a
-		}
-	}
-	return id
 }
 
 // purlType extracts the PURL type from "pkg:<type>/…" (the segment after "pkg:" up to the first "/").

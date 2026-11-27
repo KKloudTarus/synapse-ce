@@ -466,7 +466,7 @@ func matchToRaw(m grypeMatch, components map[string]sbom.Component) vulnerabilit
 	identity := sbom.IdentityFromComponent(component)
 	r := vulnerability.RawFinding{
 		Source:      "grype",
-		AdvisoryID:  preferCVE(m.Vulnerability.ID, aliases),
+		AdvisoryID:  vulnerability.PreferCVE(m.Vulnerability.ID, aliases),
 		Aliases:     aliases,
 		Component:   component.Name,
 		Version:     component.Version,
@@ -534,16 +534,4 @@ func mapSeverity(s string) shared.Severity {
 	default:
 		return shared.SeverityUnknown
 	}
-}
-
-func preferCVE(id string, aliases []string) string {
-	if strings.HasPrefix(strings.ToUpper(id), "CVE-") {
-		return id
-	}
-	for _, a := range aliases {
-		if strings.HasPrefix(strings.ToUpper(a), "CVE-") {
-			return a
-		}
-	}
-	return id
 }
