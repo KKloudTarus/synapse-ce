@@ -577,8 +577,8 @@ var _ ports.ReportEvidenceProvider = (*Service)(nil)
 
 // ListArtifacts returns the captured binary artifacts in the engagement's chain
 // (oldest first), parsed from their sealed payloads – for the report's evidence
-// exhibits. Only links that reference an out-of-line blob (StorageRef set) are
-// artifacts; sealed scan/summary links are skipped.
+// exhibits. Only links sealed on this instance that reference an out-of-line blob
+// (StorageRef set) are artifacts; sealed scan/summary links and imported links are skipped.
 func (s *Service) ListArtifacts(ctx context.Context, engagementID shared.ID) ([]ports.EvidenceArtifact, error) {
 	items, err := s.store.ListByEngagement(ctx, engagementID)
 	if err != nil {
@@ -586,7 +586,9 @@ func (s *Service) ListArtifacts(ctx context.Context, engagementID shared.ID) ([]
 	}
 	var out []ports.EvidenceArtifact
 	for _, it := range items {
-		if it.StorageRef == "" {
+		// An imported link's blob is not served (ArtifactForEngagement), so it is not an exhibit either:
+		// listing it would make every consumer fail to read it.
+		if it.StorageRef == "" || it.Imported {
 			continue
 		}
 		var p artifactPayload

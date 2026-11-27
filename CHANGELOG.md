@@ -26,7 +26,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   chain referenced, including through links that arrived in an imported bundle. Only a link sealed on
   this instance authorizes a read now. Migration 0280 adds `evidence_imports` and marks the links of
   engagements imported earlier from their `engagement.imported` audit records; an artifact reached only
-  through an imported link returns not found.
+  through an imported link returns not found and is left out of report and document exhibits. The
+  backfill runs once, so block `POST /api/v1/engagements/import` until no v0.3.0 binary serves traffic:
+  an import a v0.3.0 binary handles after the migration is not marked. Imports recorded only on the
+  legacy global audit chain (before migration 0086) are not visible to the backfill;
+  `docs/guide/backup-restore-upgrade.md` gives the maintenance query that marks them.
 
 ### Fixed
 

@@ -135,6 +135,8 @@ func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID share
 	return out, err
 }
 
+// LookupSealedByID does not read the imported mark (evidence_imports). Nothing it returns may authorize
+// an artifact read; ArtifactForEngagement goes through ListByEngagement for that reason.
 func (r *EvidenceStore) LookupSealedByID(ctx context.Context, engagementID, evidenceID shared.ID) (out evidence.Evidence, found bool, err error) {
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id,COALESCE(finding_id,''),engagement_id,kind,sha256,COALESCE(previous_hash,''),COALESCE(storage_ref,''),content,COALESCE(created_by,''),created_at,hash_scheme FROM evidence WHERE engagement_id=$1 AND id=$2`, engagementID.String(), evidenceID.String()).Scan(&out.ID, &out.FindingID, &out.EngagementID, &out.Kind, &out.Hash, &out.PreviousHash, &out.StorageRef, &out.Content, &out.CreatedBy, &out.CreatedAt, &out.HashScheme)

@@ -915,4 +915,11 @@ func TestImportedLinkDoesNotAuthorizeArtifactRead(t *testing.T) {
 	if got, err := svc.ArtifactForEngagement(ctx, "victim", victim.StorageRef); err != nil || string(got) != "secret-bytes" {
 		t.Fatalf("the capturing engagement must still read its artifact: %q, %v", got, err)
 	}
+	// Exhibit listings skip the imported link, so a report or a published document does not try to read it.
+	if list, err := svc.ListArtifacts(ctx, "attacker"); err != nil || len(list) != 0 {
+		t.Fatalf("ListArtifacts(attacker) = %v, %v; want no exhibits", list, err)
+	}
+	if list, err := svc.ListArtifacts(ctx, "victim"); err != nil || len(list) != 1 {
+		t.Fatalf("ListArtifacts(victim) = %v, %v; want the captured artifact", list, err)
+	}
 }
