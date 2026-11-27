@@ -153,6 +153,10 @@ func (a *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	e, err := normalizeAuditEntry(e)
+	if err != nil {
+		return err
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if key := e.Metadata["idempotency_key"]; key != "" {
@@ -191,6 +195,10 @@ func (a *AuditLog) RecordFirstObservation(ctx context.Context, e ports.AuditEntr
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	e, err := normalizeAuditEntry(e)
+	if err != nil {
+		return err
+	}
 	key := e.Metadata["idempotency_key"]
 	if strings.TrimSpace(key) == "" {
 		return fmt.Errorf("%w: first audit observation requires idempotency key", shared.ErrValidation)
@@ -221,6 +229,10 @@ func (a *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	e, err := normalizeAuditEntry(e)
+	if err != nil {
+		return err
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	tenantID := ""
@@ -243,6 +255,19 @@ func sameFileAuditPayload(left, right ports.AuditEntry) bool {
 func sameFirstFileAuditPayload(left, right ports.AuditEntry) bool {
 	return left.Actor == right.Actor && left.Action == right.Action &&
 		left.Target == right.Target && maps.Equal(left.Metadata, right.Metadata)
+}
+
+// normalizeAuditEntry replaces invalid UTF-8 in every hashed field before the entry is compared, hashed or
+// written (#1723). JSON encoding turns an invalid byte into U+FFFD, so a hash over the raw bytes would never
+// recompute from the line read back.
+func normalizeAuditEntry(e ports.AuditEntry) (ports.AuditEntry, error) {
+	metadata, err := audit.NormalizeMetadata(e.Metadata)
+	if err != nil {
+		return ports.AuditEntry{}, fmt.Errorf("normalize audit metadata: %w", err)
+	}
+	e.Metadata = metadata
+	e.Actor, e.Action, e.Target = audit.NormalizeText(e.Actor), audit.NormalizeText(e.Action), audit.NormalizeText(e.Target)
+	return e, nil
 }
 
 func (a *AuditLog) recordLocked(entry auditFileEntry) error {

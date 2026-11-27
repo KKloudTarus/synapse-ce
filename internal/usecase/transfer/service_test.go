@@ -345,3 +345,43 @@ func TestImportAcceptsLegacyBundleVersion(t *testing.T) {
 		t.Fatalf("an unknown version must be refused, got %v", err)
 	}
 }
+
+type failImportAudit struct{}
+
+func (failImportAudit) Record(_ context.Context, e ports.AuditEntry) error {
+	if e.Action == "engagement.imported" {
+		return errors.New("audit store unavailable")
+	}
+	return nil
+}
+
+// TestImportRollsBackWhenAuditFails: an import whose engagement.imported record cannot be written must not
+// leave the imported engagement behind without it.
+func TestImportRollsBackWhenAuditFails(t *testing.T) {
+	svc, engRepo, findRepo, ev := setup(t)
+	seedEngagement(t, engRepo, findRepo, ev)
+	ctx := context.Background()
+	bundle, err := svc.Export(ctx, "alice", "", "e1")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	clock := fixedClock{t: time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)}
+	importer, err := NewService(engRepo, findRepo, memory.NewCommentRepository(), ev, failImportAudit{}, clock, &seqIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := engRepo.List(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.Import(ctx, "alice", "", bundle); err == nil {
+		t.Fatal("import must fail when its audit record cannot be written")
+	}
+	after, err := engRepo.List(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("engagements before=%d after=%d: the unaudited import was left behind", len(before), len(after))
+	}
+}

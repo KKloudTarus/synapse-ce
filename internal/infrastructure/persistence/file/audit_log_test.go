@@ -304,3 +304,45 @@ func TestAuditLogTenantEndpointsHideLegacyEntries(t *testing.T) {
 		t.Fatalf("tenant verify legacy chain = %+v, %v", rep, err)
 	}
 }
+
+// TestAuditLogVerifiesInvalidUTF8Metadata (#1723): JSON encoding turns an invalid byte into U+FFFD, so each
+// writer method must hash the normalized entry or the line read back never recomputes to its hash. A retry
+// with the same raw bytes is the same entry, so it writes nothing and raises no conflict.
+func TestAuditLogVerifiesInvalidUTF8Metadata(t *testing.T) {
+	ctx := shared.WithTenant(context.Background(), "tenant-a")
+	entry := func() ports.AuditEntry {
+		return ports.AuditEntry{Actor: "op\xff", Action: "scan.archive", Target: "t\x00", At: time.Unix(1, 0).UTC(),
+			Metadata: map[string]string{"path": "a\xffb", "idempotency_key": "k\xfe1"}}
+	}
+	cases := []struct {
+		name   string
+		record func(a *AuditLog, e ports.AuditEntry) error
+		rows   int
+	}{
+		{"Record", func(a *AuditLog, e ports.AuditEntry) error { return a.Record(ctx, e) }, 2},
+		{"RecordOnce", func(a *AuditLog, e ports.AuditEntry) error { return a.RecordOnce(ctx, e) }, 1},
+		{"RecordFirstObservation", func(a *AuditLog, e ports.AuditEntry) error { return a.RecordFirstObservation(ctx, e) }, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "audit.jsonl")
+			a := NewAuditLog(path)
+			for i := 0; i < 2; i++ {
+				if err := tc.record(a, entry()); err != nil {
+					t.Fatalf("attempt %d: %v", i, err)
+				}
+			}
+			rep, err := NewAuditLog(path).Verify(ctx)
+			if err != nil {
+				t.Fatalf("verify: %v", err)
+			}
+			if !rep.Intact || rep.Verified != tc.rows {
+				t.Fatalf("report = %+v, want %d intact entries", rep, tc.rows)
+			}
+		})
+	}
+	a := NewAuditLog(filepath.Join(t.TempDir(), "audit.jsonl"))
+	if err := a.Record(ctx, ports.AuditEntry{Action: "x", At: time.Unix(2, 0).UTC(), Metadata: map[string]string{"a\xff": "1", "a\xfe": "2"}}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("colliding keys: err = %v, want ErrValidation", err)
+	}
+}
