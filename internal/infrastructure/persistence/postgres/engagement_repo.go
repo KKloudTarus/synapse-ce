@@ -158,7 +158,7 @@ func (r *EngagementRepository) Delete(ctx context.Context, id shared.ID) error {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 				switch pgErr.ConstraintName {
-				case "fk_scan_runs_engagement", "fk_scan_run_lanes_engagement":
+				case "fk_scan_runs_engagement", "fk_scan_runs_engagement_tenant", "fk_scan_run_lanes_engagement":
 					return fmt.Errorf("%w: engagement has retained scan-run provenance", shared.ErrConflict)
 				case "ticket_mappings_engagement_fk", "ticket_intents_finding_fk":
 					return fmt.Errorf("%w: engagement has retained durable ticket intents", shared.ErrConflict)

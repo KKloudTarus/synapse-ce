@@ -53,6 +53,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   their re-tests may copy it; a scan of that path is refused at execution. A project whose archive
   binding names another project's upload must be uploaded again. `synapse-cli` is unchanged.
 
+- **`scan_runs` is isolated by the database (#1697).** Measured with a role that cannot bypass RLS and
+  tenant A bound, `scan_runs` returned tenant B's runs too: its isolation rested on every query
+  remembering its predicate. Migrations 0275 and 0276 complete the contract 0144 deferred: `tenant_id` is
+  `NOT NULL`, a composite key ties each new run to its engagement's tenant, and forced row-level security
+  refuses the cross-tenant read and write. The not-null check is validated without blocking scan writes,
+  and neither migration locks `engagements`. **Rollout:** run v0.2.4 or later while it applies. Every
+  `scan_runs` statement in v0.2.4 binds its tenant and names `tenant_id`; an older binary does not.
+
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
   (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
   served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator
