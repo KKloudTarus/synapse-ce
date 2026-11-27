@@ -9,7 +9,8 @@ parsers and a pluggable producer, so detection is not tied to a single vendor. T
 (`ownsbom`) is the shipped default, emitting dependency-graph edges and requiring no third-party
 scanner binary; Syft is retained as an opt-in cross-check (`SYNAPSE_SBOM_PRODUCER=syft`). Current
 coverage: Go, npm, Yarn, pnpm, PyPI, Poetry, Pipfile, uv, Cargo, Maven, Gradle, RubyGems, Composer,
-NuGet, Swift, Dart, Hex/Elixir, Conda, R (renv), Julia, and Conan. It can also ingest a
+NuGet, Swift, Dart, Hex/Elixir, Conda, R (renv), Julia, Conan, and the GitHub Actions a workflow
+`uses:` (release tags only; a SHA or floating tag is listed but not matched). It can also ingest a
 client-supplied CycloneDX SBOM as the scan inventory.
 
 **Multi-source detection.** The primary source is Synapse's own advisory store, matched alongside

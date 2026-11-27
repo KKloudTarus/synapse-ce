@@ -18,7 +18,7 @@ func TestDefaultRegistry(t *testing.T) {
 	}
 	// yarn + pnpm share the npm ecosystem, Pipfile shares pypi, and Gradle shares maven, so the distinct
 	// ecosystem set contains each shared PURL type only once.
-	want := []string{"cargo", "composer", "conan", "conda", "cran", "gem", "go", "hex", "julia", "maven", "npm", "nuget", "pub", "pypi", "swift"}
+	want := []string{"cargo", "composer", "conan", "conda", "cran", "gem", "github-actions", "go", "hex", "julia", "maven", "npm", "nuget", "pub", "pypi", "swift"}
 	if len(reg.ecos) != len(want) {
 		t.Fatalf("DefaultRegistry ecosystems = %v, want %v", reg.ecos, want)
 	}

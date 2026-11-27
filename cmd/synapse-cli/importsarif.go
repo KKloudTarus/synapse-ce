@@ -48,7 +48,7 @@ func validateSARIF(args []string) error {
 		default:
 			// An unknown flag is refused rather than ignored: a mistyped --fail-on-refusals would
 			// otherwise silently disable the gate a pipeline is relying on.
-			return fmt.Errorf("unknown flag %q", args[i])
+			return usageFailed("unknown flag %q", args[i])
 		}
 	}
 
@@ -91,12 +91,12 @@ func validateSARIF(args []string) error {
 
 	// A report whose results were ALL refused is not a usable report.
 	if result.Accepted == 0 && len(result.Refused) > 0 {
-		return fmt.Errorf("no result could be ingested: %d refused", len(result.Refused))
+		return gateFailed("no result could be ingested: %d refused", len(result.Refused))
 	}
 	// With --fail-on-refusal a partial refusal is a failure too, so a pipeline can insist that every
 	// result be attributable rather than silently shipping the ones that happened to survive.
 	if failOnRefusal && len(result.Refused) > 0 {
-		return fmt.Errorf("%d of %d results were refused (--fail-on-refusal)", len(result.Refused), len(result.Refused)+result.Accepted)
+		return gateFailed("%d of %d results were refused (--fail-on-refusal)", len(result.Refused), len(result.Refused)+result.Accepted)
 	}
 	return nil
 }

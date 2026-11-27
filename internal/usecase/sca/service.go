@@ -6013,10 +6013,22 @@ func attachDependencyPaths(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) 
 // A scan of source WITHOUT a lockfile leaves versions unresolved, so a low/zero
 // vulnerability count must not be read as "clean" – never silently
 // under-report (a trust signal).
+// resolvedTreeSuffix marks a resolving source the scan produced itself by resolving a lockfile-less
+// manifest (npm-resolved-tree, pypi-resolved-tree, ...), as opposed to a lockfile it read.
+const resolvedTreeSuffix = "-resolved-tree"
+
 func computeCompleteness(doc *sbom.SBOM, lockfiles, unresolvedEco []string) ports.Completeness {
-	total := len(doc.Components)
+	total := 0
 	resolved, osPkgs, appTotal, appResolved := 0, 0, 0, 0
 	for _, c := range doc.Components {
+		// A GitHub Action a workflow uses is pinned by tag or commit, not by a lockfile, and a SHA pin is
+		// the safest form there is. Counting it here marked a fully locked repository incomplete because its
+		// workflows pin actions by SHA (#1665). Actions are reported; they do not measure dependency
+		// resolution.
+		if strings.HasPrefix(c.PURL, "pkg:githubactions/") {
+			continue
+		}
+		total++
 		pinned := isPinnedVersion(c.Version)
 		if pinned {
 			resolved++
@@ -6051,11 +6063,23 @@ func computeCompleteness(doc *sbom.SBOM, lockfiles, unresolvedEco []string) port
 	// components are well-resolved, and no app build system is left unresolved (Gradle/Maven
 	// without a lockfile under-reports that ecosystem's transitive tree – honesty fix).
 	c.Confident = (len(lockfiles) > 0 || osScan) && appRatio >= 0.8 && len(unresolvedEco) == 0
+	for _, source := range lockfiles {
+		if eco, ok := strings.CutSuffix(source, resolvedTreeSuffix); ok {
+			c.ResolvedAtScan = append(c.ResolvedAtScan, eco)
+		}
+	}
 	switch {
 	case len(unresolvedEco) > 0:
 		c.Warning = fmt.Sprintf("Unresolved build system(s) present: %s. Their dependencies are NOT fully captured "+
 			"(the transitive tree wasn't resolved from source), so this result is INCOMPLETE – a low finding count does NOT mean clean. %s",
 			strings.Join(unresolvedEco, ", "), unresolvedRemediation(unresolvedEco))
+	case c.Confident && len(c.ResolvedAtScan) > 0:
+		// The versions are pinned, so the result is confident about what it scanned. What it scanned is
+		// today's resolution of the manifest's ranges, which a reader must not take for the shipped build
+		// (#1665).
+		c.Warning = fmt.Sprintf("Versions for %s were resolved at scan time from the manifest's version ranges, not read "+
+			"from a committed lockfile. They describe what those ranges resolve to today, which may differ from what was "+
+			"built and shipped. Commit a lockfile for a reproducible result.", strings.Join(c.ResolvedAtScan, ", "))
 	case c.Confident:
 	case total == 0:
 		// Two different situations reach zero components, and the message used to assert only the first.

@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// actionReleaseVersion is a GitHub Action release tag after the parser strips its leading v.
+var actionReleaseVersion = regexp.MustCompile(`^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$`)
+
 // ComponentIdentity is the canonical package key used by advisory matching.
 // Status is "resolved" for matchable package identities and "unsupported" or
 // "ambiguous" when the source does not provide enough trustworthy information.
@@ -111,6 +114,17 @@ func IdentityFromComponent(component Component) ComponentIdentity {
 		// Dart Pub: OSV ecosystem "Pub", package is the bare pub name.
 		identity.Ecosystem = "Pub"
 		identity.Package = decodedName
+	case "githubactions":
+		// A GitHub Action: OSV ecosystem "GitHub Actions", package "owner/repo" (#1665). Only a release tag
+		// with at least major.minor is a version. A commit SHA, a branch, or a floating major tag such as
+		// v4 names whatever the repository holds today, and placing it in an advisory range would guess.
+		identity.Ecosystem = "GitHub Actions"
+		identity.Package = decodedName
+		if !actionReleaseVersion.MatchString(identity.Version) {
+			identity.Status = IdentityAmbiguous
+			identity.Reason = "action_ref_is_not_a_release_version"
+			return identity
+		}
 	case "deb", "apk", "rpm":
 		identity.Ecosystem = distroEcosystem(typ, purl, component.verifiedRPMOrigin)
 		identity.Package = decodedName[strings.LastIndexByte(decodedName, '/')+1:]

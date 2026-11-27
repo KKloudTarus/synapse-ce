@@ -22,7 +22,7 @@ const (
 
 func runRulePack(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: synapse-cli rulepack verify|replay|gate")
+		return usageFailed("usage: synapse-cli rulepack verify|replay|gate")
 	}
 	switch args[0] {
 	case "verify":
@@ -42,10 +42,10 @@ func runRulePackVerify(args []string) error {
 	artifactPath := fs.String("artifact", "", "signed RulePack artifact JSON")
 	keyPath := fs.String("public-key", "", "trusted Ed25519 public key, base64 text")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return usageFailed("%v", err)
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*artifactPath) == "" || strings.TrimSpace(*keyPath) == "" {
-		return fmt.Errorf("usage: synapse-cli rulepack verify --artifact FILE --public-key FILE")
+		return usageFailed("usage: synapse-cli rulepack verify --artifact FILE --public-key FILE")
 	}
 	artifact, _, err := loadVerifiedRulePack(*artifactPath, *keyPath)
 	if err != nil {
@@ -66,10 +66,10 @@ func runRulePackReplay(args []string) error {
 	artifactPath := fs.String("artifact", "", "signed RulePack artifact JSON")
 	keyPath := fs.String("public-key", "", "trusted Ed25519 public key, base64 text")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return usageFailed("%v", err)
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*artifactPath) == "" || strings.TrimSpace(*keyPath) == "" {
-		return fmt.Errorf("usage: synapse-cli rulepack replay --artifact FILE --public-key FILE")
+		return usageFailed("usage: synapse-cli rulepack replay --artifact FILE --public-key FILE")
 	}
 	artifact, _, err := loadVerifiedRulePack(*artifactPath, *keyPath)
 	if err != nil {
@@ -84,7 +84,7 @@ func runRulePackReplay(args []string) error {
 	}
 	for _, result := range results {
 		if !result.Pass {
-			return fmt.Errorf("rulepack replay failed: fixture %s did not match its expected detections", result.FixtureID)
+			return gateFailed("rulepack replay failed: fixture %s did not match its expected detections", result.FixtureID)
 		}
 	}
 	return nil
@@ -99,10 +99,10 @@ func runRulePackGate(args []string) error {
 	evidenceKeyPath := fs.String("evidence-public-key", "", "trusted gate-evidence collector Ed25519 public key, base64 text")
 	phase := fs.String("phase", "promotion", "release phase: pre-canary|canary|promotion")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return usageFailed("%v", err)
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*artifactPath) == "" || strings.TrimSpace(*keyPath) == "" || strings.TrimSpace(*evidencePath) == "" || strings.TrimSpace(*evidenceKeyPath) == "" {
-		return fmt.Errorf("usage: synapse-cli rulepack gate --artifact FILE --public-key FILE --evidence FILE --evidence-public-key FILE [--phase pre-canary|canary|promotion]")
+		return usageFailed("usage: synapse-cli rulepack gate --artifact FILE --public-key FILE --evidence FILE --evidence-public-key FILE [--phase pre-canary|canary|promotion]")
 	}
 	if *phase != "pre-canary" && *phase != "canary" && *phase != "promotion" {
 		return fmt.Errorf("--phase must be pre-canary, canary, or promotion")
@@ -131,7 +131,7 @@ func runRulePackGate(args []string) error {
 		return err
 	}
 	if !rulePackGatePhaseAcceptsState(*phase, input.Deployment.State) {
-		return fmt.Errorf("rulepack %s gate requires deployment state %q, got %q", *phase, rulePackGateRequiredState(*phase), input.Deployment.State)
+		return gateFailed("rulepack %s gate requires deployment state %q, got %q", *phase, rulePackGateRequiredState(*phase), input.Deployment.State)
 	}
 	var passed bool
 	switch *phase {
@@ -143,7 +143,7 @@ func runRulePackGate(args []string) error {
 		passed = report.Passed
 	}
 	if !passed {
-		return fmt.Errorf("rulepack %s gate failed", *phase)
+		return gateFailed("rulepack %s gate failed", *phase)
 	}
 	return nil
 }

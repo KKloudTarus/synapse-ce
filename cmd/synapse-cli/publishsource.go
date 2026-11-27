@@ -28,7 +28,7 @@ func runPublishSource(args []string) error {
 	projectKey := fs.String("project", "", "server-owned project key")
 	analysisID := fs.String("analysis", "", "server-owned analysis id")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return usageFailed("%v", err)
 	}
 	if fs.NArg() > 1 {
 		return fmt.Errorf("publish-source accepts at most one source directory")

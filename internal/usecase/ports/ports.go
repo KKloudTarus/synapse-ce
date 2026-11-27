@@ -1681,6 +1681,10 @@ type Completeness struct {
 	ComponentsResolved int      `json:"components_resolved"`
 	Confident          bool     `json:"confident"`
 	Warning            string   `json:"warning,omitempty"`
+	// ResolvedAtScan names the ecosystems whose versions the scan pinned itself, by resolving a
+	// manifest's version ranges when no lockfile was committed. Those versions are what the ranges
+	// resolve to today, which may not be what was built and shipped.
+	ResolvedAtScan []string `json:"resolved_at_scan,omitempty"`
 }
 
 // Close runs Cleanup if present (safe on nil).

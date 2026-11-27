@@ -83,8 +83,10 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 	}
 
 	type item struct {
-		compIdx int
-		purl    string
+		compIdx   int
+		purl      string
+		name      string // with ecosystem, a versionless package query (versionlessEcosystems)
+		ecosystem string
 	}
 	var items []item
 	for i, c := range doc.Components {
@@ -105,6 +107,10 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 		// ecosystems we do not resolve locally (Composer, Hex, Pub, Swift, Conan, …). Gating the query on
 		// IdentityResolved silently dropped those ecosystems from OSV entirely (a false "not vulnerable").
 		// Identity is used only to ENRICH the affected-range/fix data below, never to suppress a match.
+		if identity := sbom.IdentityFromComponent(c); identity.Status == sbom.IdentityResolved && versionlessEcosystems[identity.Ecosystem] {
+			items = append(items, item{compIdx: i, name: identity.Package, ecosystem: identity.Ecosystem})
+			continue
+		}
 		items = append(items, item{compIdx: i, purl: c.PURL})
 	}
 	if len(items) == 0 {
@@ -119,7 +125,7 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 		chunk := items[start:end]
 		queries := make([]batchQuery, len(chunk))
 		for j, it := range chunk {
-			queries[j] = batchQuery{Package: batchPkg{PURL: it.purl}}
+			queries[j] = batchQuery{Package: batchPkg{PURL: it.purl, Name: it.name, Ecosystem: it.ecosystem}}
 		}
 		results, err := s.queryBatch(ctx, queries)
 		if err != nil {
@@ -165,6 +171,11 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 			// so we trust OSV's versioned-PURL match and emit the finding (with fix data left empty rather
 			// than fabricated) — otherwise a whole ecosystem silently reports zero OSV vulns.
 			if identity.Status == sbom.IdentityResolved && len(matchingAffected(identity, component.PURL, detail.Affected)) == 0 {
+				continue
+			}
+			// A versionless query returned every advisory of the package; keep one only when a range or an
+			// explicit version provably includes this component's version.
+			if versionlessEcosystems[identity.Ecosystem] && len(versionScopedAffected(identity, matchingAffected(identity, component.PURL, detail.Affected))) == 0 {
 				continue
 			}
 			out = append(out, osvToRaw(component, detail))
@@ -350,8 +361,15 @@ type batchQuery struct {
 	Package batchPkg `json:"package"`
 }
 type batchPkg struct {
-	PURL string `json:"purl"`
+	PURL      string `json:"purl,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Ecosystem string `json:"ecosystem,omitempty"`
 }
+
+// versionlessEcosystems are the ecosystems OSV.dev publishes advisories for but does not version-match:
+// a query that names a version returns nothing, so the adapter asks for every advisory of the package and
+// places the version against each advisory's ranges itself (#1665).
+var versionlessEcosystems = map[string]bool{"GitHub Actions": true}
 type batchResp struct {
 	Results []batchResult `json:"results"`
 }
