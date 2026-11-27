@@ -115,11 +115,20 @@ func TestIdentityWriterFenceAllowsBootstrapRefreshAndRollsBackNativeProjectionFa
 	f.tenants(t, tenant)
 	f.declare(t, tenant)
 	person := f.newPerson(t, "projection-rollback-person")
-	// An invalid actor makes the terminal audit append fail after the definer projection and
-	// membership insert. The encompassing transaction must leave neither row behind.
-	_, err = f.store.AddMembership(context.Background(), tenant, person, "Rollback", user.RoleMember, string(make([]byte, 300)), now)
+	// A test-only trigger makes the terminal audit append fail after the definer projection and
+	// membership insert. The encompassing transaction must leave neither row behind. (An actor of NUL
+	// bytes used to cause the failure; audit writers now store it as U+FFFD, #1723.)
+	f.exec(t, `CREATE FUNCTION test_fail_membership_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'injected audit failure'; END $$`)
+	f.exec(t, `CREATE TRIGGER test_fail_membership_audit BEFORE INSERT ON audit_log FOR EACH ROW
+		WHEN (NEW.action = 'identity.membership_added') EXECUTE FUNCTION test_fail_membership_audit()`)
+	t.Cleanup(func() {
+		_, _ = f.admin.Exec(context.Background(), `DROP TRIGGER IF EXISTS test_fail_membership_audit ON audit_log`)
+		_, _ = f.admin.Exec(context.Background(), `DROP FUNCTION IF EXISTS test_fail_membership_audit()`)
+	})
+	_, err = f.store.AddMembership(context.Background(), tenant, person, "Rollback", user.RoleMember, "operator", now)
 	if err == nil {
-		t.Fatal("native membership with invalid audit actor succeeded")
+		t.Fatal("native membership succeeded although its audit append failed")
 	}
 	membershipID := legacyIdentityID("membership_", shared.ID(tenant), person)
 	if f.adminCount(t, `SELECT count(*) FROM identity_memberships WHERE tenant_id=$1 AND id=$2`, tenant, membershipID.String()) != 0 ||
