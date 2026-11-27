@@ -93,7 +93,7 @@ func scanEntries(rows pgx.Rows) ([]ports.AuditEntry, error) {
 			hash     *string
 			prevHash *string
 		)
-		if err := rows.Scan(&e.Actor, &e.Action, &e.Target, &meta, &e.At, &hash, &prevHash); err != nil {
+		if err := rows.Scan(&e.Actor, &e.Action, &e.Target, &meta, &e.At, &hash, &prevHash, &e.HashScheme); err != nil {
 			return nil, fmt.Errorf("scan audit: %w", err)
 		}
 		if len(meta) > 0 {
@@ -117,7 +117,7 @@ func (l *AuditLog) List(ctx context.Context, limit int) (out []ports.AuditEntry,
 	}
 	err = WithContextTenant(ctx, l.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT actor, action, target, metadata, created_at, hash, previous_hash
+			`SELECT actor, action, target, metadata, created_at, hash, previous_hash, hash_scheme
 			   FROM audit_log ORDER BY id DESC LIMIT $1`, limit)
 		if err != nil {
 			return fmt.Errorf("list audit: %w", err)
@@ -162,8 +162,13 @@ func (l *AuditLog) VerifyGlobal(ctx context.Context) (audit.Report, error) {
 		return audit.Report{}, fmt.Errorf("global audit verify: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.audit_global_read', 'on', true)"); err != nil {
-		return audit.Report{}, fmt.Errorf("global audit verify: enable read: %w", err)
+	// audit_log forces row-level security, and its only policy admits the bound tenant's v2 rows.
+	// A role that does not bypass RLS would therefore read zero rows here, and an empty chain
+	// verifies as intact: a false pass. With row_security off Postgres raises an error instead of
+	// applying a policy, so such a role fails loudly and only an identity that genuinely sees every
+	// row can produce a report.
+	if _, err := tx.Exec(ctx, "SELECT set_config('row_security', 'off', true)"); err != nil {
+		return audit.Report{}, fmt.Errorf("global audit verify: require unfiltered read: %w", err)
 	}
 	// Read the chain each row belongs to alongside it. The table holds the legacy global chain
 	// written before tenancy and, since migration 0085, one chain per tenant: audit_chain_link_v2_uniq
@@ -172,7 +177,7 @@ func (l *AuditLog) VerifyGlobal(ctx context.Context) (audit.Report, error) {
 	// break at the first row of the second tenant on every healthy multi-tenant restore.
 	rows, err := tx.Query(ctx,
 		`SELECT CASE WHEN hash_version = 2 THEN 'tenant ' || COALESCE(tenant_id, '') ELSE 'legacy global chain' END AS chain,
-		        actor, action, target, metadata, created_at, hash, previous_hash
+		        actor, action, target, metadata, created_at, hash, previous_hash, hash_scheme
 		   FROM audit_log ORDER BY id ASC`)
 	if err != nil {
 		return audit.Report{}, fmt.Errorf("global audit verify: query: %w", err)
@@ -184,7 +189,7 @@ func (l *AuditLog) VerifyGlobal(ctx context.Context) (audit.Report, error) {
 		var e ports.AuditEntry
 		var meta []byte
 		var hash, previous *string
-		if err := rows.Scan(&chain, &e.Actor, &e.Action, &e.Target, &meta, &e.At, &hash, &previous); err != nil {
+		if err := rows.Scan(&chain, &e.Actor, &e.Action, &e.Target, &meta, &e.At, &hash, &previous, &e.HashScheme); err != nil {
 			return audit.Report{}, fmt.Errorf("global audit verify: scan: %w", err)
 		}
 		if len(meta) > 0 {
@@ -192,7 +197,7 @@ func (l *AuditLog) VerifyGlobal(ctx context.Context) (audit.Report, error) {
 				return audit.Report{}, fmt.Errorf("global audit verify: metadata: %w", err)
 			}
 		}
-		record := audit.Record{Actor: e.Actor, Action: e.Action, Target: e.Target, Metadata: e.Metadata, At: e.At}
+		record := audit.Record{Actor: e.Actor, Action: e.Action, Target: e.Target, Metadata: e.Metadata, At: e.At, Scheme: e.HashScheme}
 		if hash != nil {
 			record.Hash = *hash
 		}
@@ -242,7 +247,7 @@ var _ ports.RestoreMigrationReader = (*AuditLog)(nil)
 func (l *AuditLog) tenantEntries(ctx context.Context) (out []ports.AuditEntry, err error) {
 	err = WithContextTenant(ctx, l.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT actor, action, target, metadata, created_at, hash, previous_hash
+			`SELECT actor, action, target, metadata, created_at, hash, previous_hash, hash_scheme
 			   FROM audit_log ORDER BY id ASC`)
 		if err != nil {
 			return fmt.Errorf("verify audit: %w", err)
@@ -433,11 +438,11 @@ func appendAudit(ctx context.Context, tx pgx.Tx, e ports.AuditEntry) error {
 	if prev != nil {
 		prevHash = *prev
 	}
-	hash := audit.ComputeHash(prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
+	hash := audit.ComputeHash(audit.CurrentHashScheme, prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash)
-		 VALUES ('', $1, $2, $3, $4, $5, $6, $7)`,
-		e.Actor, e.Action, e.Target, string(meta), e.At, hash, prevHash); err != nil {
+		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_scheme)
+		 VALUES ('', $1, $2, $3, $4, $5, $6, $7, $8)`,
+		e.Actor, e.Action, e.Target, string(meta), e.At, hash, prevHash, audit.CurrentHashScheme); err != nil {
 		return fmt.Errorf("insert audit: %w", err)
 	}
 	return nil
@@ -471,11 +476,11 @@ func appendGlobalAuditWithFirstObservation(ctx context.Context, tx pgx.Tx, tenan
 	if prev != nil {
 		prevHash = *prev
 	}
-	hash := audit.ComputeHash(prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
+	hash := audit.ComputeHash(audit.CurrentHashScheme, prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, idempotency_key, hash_version, created_at, hash, previous_hash)
-		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), 1, $7, $8, $9)`,
-		tenantID, e.Actor, e.Action, e.Target, string(meta), e.Metadata["idempotency_key"], e.At, hash, prevHash); err != nil {
+		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, idempotency_key, hash_version, created_at, hash, previous_hash, hash_scheme)
+		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), 1, $7, $8, $9, $10)`,
+		tenantID, e.Actor, e.Action, e.Target, string(meta), e.Metadata["idempotency_key"], e.At, hash, prevHash, audit.CurrentHashScheme); err != nil {
 		return fmt.Errorf("insert audit: %w", err)
 	}
 	return nil
@@ -527,11 +532,11 @@ func appendTenantAuditWithFirstObservation(ctx context.Context, tx pgx.Tx, tenan
 	if prev != nil {
 		prevHash = *prev
 	}
-	hash := audit.ComputeHash(prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
+	hash := audit.ComputeHash(audit.CurrentHashScheme, prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, idempotency_key, hash_version, created_at, hash, previous_hash)
-		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), 2, $7, $8, $9)`,
-		tenantID, e.Actor, e.Action, e.Target, string(meta), e.Metadata["idempotency_key"], e.At, hash, prevHash); err != nil {
+		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, idempotency_key, hash_version, created_at, hash, previous_hash, hash_scheme)
+		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), 2, $7, $8, $9, $10)`,
+		tenantID, e.Actor, e.Action, e.Target, string(meta), e.Metadata["idempotency_key"], e.At, hash, prevHash, audit.CurrentHashScheme); err != nil {
 		return fmt.Errorf("insert audit: %w", err) // 23505 propagates for Record's retry
 	}
 	return nil
@@ -575,6 +580,7 @@ func toRecords(entries []ports.AuditEntry) []audit.Record {
 		recs[i] = audit.Record{
 			Actor: e.Actor, Action: e.Action, Target: e.Target,
 			Metadata: e.Metadata, At: e.At, Hash: e.Hash, PreviousHash: e.PreviousHash,
+			Scheme: e.HashScheme,
 		}
 	}
 	return recs

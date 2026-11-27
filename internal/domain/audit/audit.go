@@ -7,6 +7,7 @@ package audit
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -20,10 +21,35 @@ import (
 // ErrChainBroken is returned when the audit chain fails verification.
 var ErrChainBroken = errors.New("audit chain broken")
 
-const sep = "\x1f" // unit separator, unambiguous field boundary
+const sep = "\x1f" // field terminator of the legacy preimage; see HashSchemeLegacy
+
+// Hash schemes. A scheme fixes how a record's fields become the bytes that are hashed. It is
+// stored with every record, and verification recomputes each record under the scheme it was
+// written with, so a chain may hold records of both schemes and still verify end to end.
+const (
+	// HashSchemeLegacy terminates each field with a unit separator. Field contents are neither
+	// escaped nor length-prefixed, so two different records can share a preimage: metadata
+	// {"a=b": "c"} and {"a": "b=c"} both write "a=b=c". Records written under it keep verifying
+	// under it after writers move to HashSchemeFramed.
+	HashSchemeLegacy = 1
+	// HashSchemeFramed prefixes the preimage with a domain tag and writes every field as its byte
+	// length followed by its bytes, so the preimage decodes back to exactly one record.
+	HashSchemeFramed = 2
+	// CurrentHashScheme is the scheme every new record is written with. It stays legacy for one
+	// release. A binary from before hash_scheme existed reads no scheme and recomputes every row as
+	// legacy, so a framed row written while such a binary still runs (a rolling deploy, a rollback)
+	// would read to it as tampered: a stored tamper alert, a blocked SIEM sink, a blocked report.
+	// This release teaches every reader the scheme; the next one moves writers to framed.
+	CurrentHashScheme = HashSchemeLegacy
+)
+
+// framedDomain separates audit preimages from every other framed preimage in the product.
+const framedDomain = "synapse-audit-record:v2"
 
 // Record is one link in the audit hash chain. It mirrors the audit entry's fields
 // plus the chain hashes (kept out of the use-case AuditEntry's hashed content).
+// Scheme is the HashScheme the record was written with; zero reads as HashSchemeLegacy,
+// because records written before the scheme existed carry none.
 type Record struct {
 	Actor        string
 	Action       string
@@ -32,26 +58,55 @@ type Record struct {
 	At           time.Time
 	Hash         string
 	PreviousHash string
+	Scheme       int
 }
 
-// ComputeHash returns the chain hash binding this record's content to previousHash.
-// Deterministic: metadata keys are sorted and the timestamp truncated to µs.
-func ComputeHash(previousHash, actor, action, target string, metadata map[string]string, at time.Time) string {
-	h := sha256.New()
-	write := func(s string) { h.Write([]byte(s)); h.Write([]byte(sep)) }
-	write(previousHash)
-	write(actor)
-	write(action)
-	write(target)
+// ComputeHash returns the chain hash binding this record's content to previousHash under
+// scheme. Deterministic: metadata keys are sorted and the timestamp truncated to µs. An unknown
+// scheme returns "", which no stored hash equals, so a record claiming one never verifies.
+func ComputeHash(scheme int, previousHash, actor, action, target string, metadata map[string]string, at time.Time) string {
 	keys := make([]string, 0, len(metadata))
 	for k := range metadata {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	for _, k := range keys {
-		write(k + "=" + metadata[k])
+	stamp := at.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+
+	h := sha256.New()
+	switch scheme {
+	case 0, HashSchemeLegacy:
+		write := func(s string) { h.Write([]byte(s)); h.Write([]byte(sep)) }
+		write(previousHash)
+		write(actor)
+		write(action)
+		write(target)
+		for _, k := range keys {
+			write(k + "=" + metadata[k])
+		}
+		write(stamp)
+	case HashSchemeFramed:
+		field := func(s string) {
+			var n [8]byte
+			binary.BigEndian.PutUint64(n[:], uint64(len(s)))
+			h.Write(n[:])
+			h.Write([]byte(s))
+		}
+		field(framedDomain)
+		field(previousHash)
+		field(actor)
+		field(action)
+		field(target)
+		var count [8]byte
+		binary.BigEndian.PutUint64(count[:], uint64(len(keys)))
+		h.Write(count[:])
+		for _, k := range keys {
+			field(k)
+			field(metadata[k])
+		}
+		field(stamp)
+	default:
+		return ""
 	}
-	write(at.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -64,7 +119,8 @@ func VerifyChain(items []Record) error {
 		if r.PreviousHash != prev {
 			return fmt.Errorf("%w: entry %d previous_hash does not match the prior entry", ErrChainBroken, i)
 		}
-		if r.Hash != ComputeHash(prev, r.Actor, r.Action, r.Target, r.Metadata, r.At) {
+		// An unknown scheme computes "", which must not match a link stored with an empty hash.
+		if want := ComputeHash(r.Scheme, prev, r.Actor, r.Action, r.Target, r.Metadata, r.At); want == "" || r.Hash != want {
 			return fmt.Errorf("%w: entry %d hash does not match its content (tampered)", ErrChainBroken, i)
 		}
 		prev = r.Hash

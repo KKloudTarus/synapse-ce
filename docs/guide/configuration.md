@@ -271,9 +271,10 @@ versions, Re-test choices, legacy limitations and migrations `0159`/`0160`.
 ## Restore verification (synapse-verify-restore)
 
 `synapse-verify-restore` is a read-only recovery tool. It reuses `SYNAPSE_DB_DSN` and the evidence
-blob-store settings above, and requires a database identity permitted to read every tenant's
-evidence chain; a least-privilege runtime role fails closed rather than reporting an empty restore
-as intact.
+blob-store settings above, and requires a database identity that reads past row-level security, a
+`BYPASSRLS` role or a superuser. The database owner does not qualify, because `evidence` and
+`audit_log` force their policies on it. Any other role fails closed rather than reporting an empty
+restore as intact.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -777,9 +778,10 @@ versions, Re-test choices, legacy limitations and migrations `0159`/`0160`.
 ## Restore verification (synapse-verify-restore)
 
 `synapse-verify-restore` is a read-only recovery tool. It reuses `SYNAPSE_DB_DSN` and the evidence
-blob-store settings above, and requires a database identity permitted to read every tenant's
-evidence chain; a least-privilege runtime role fails closed rather than reporting an empty restore
-as intact.
+blob-store settings above, and requires a database identity that reads past row-level security, a
+`BYPASSRLS` role or a superuser. The database owner does not qualify, because `evidence` and
+`audit_log` force their policies on it. Any other role fails closed rather than reporting an empty
+restore as intact.
 
 | Variable | Default | Description |
 | --- | --- | --- |

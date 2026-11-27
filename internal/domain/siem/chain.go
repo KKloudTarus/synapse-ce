@@ -57,8 +57,8 @@ func VerifyAuditContent(cursor Position, rows []AuditFact, metadata []map[string
 			return accepted, Problem{Kind: "broken", Message: "audit previous hash does not match the prior link"}
 		}
 		at := time.UnixMicro(row.AtUnixMicro).UTC()
-		want := audit.ComputeHash(prevHash, row.Actor, row.Action, row.Target, metadata[i], at)
-		if want != row.Hash {
+		want := audit.ComputeHash(row.HashScheme, prevHash, row.Actor, row.Action, row.Target, metadata[i], at)
+		if want == "" || want != row.Hash {
 			return accepted, Problem{Kind: "broken", Message: "audit content hash does not match the stored link"}
 		}
 		if !cursor.Zero() && row.ID <= cursor.AuditID {

@@ -153,8 +153,8 @@ func TestSyslogTLSContract(t *testing.T) {
 func TestAuditHolesAreNotGapsAndBreaksStop(t *testing.T) {
 	at := time.UnixMicro(1_700_000_000_000_000).UTC()
 	meta := map[string]string{"severity": "high"}
-	firstHash := audit.ComputeHash("", "ada", "finding.created", "asset-1", meta, at)
-	secondHash := audit.ComputeHash(firstHash, "ada", "finding.updated", "asset-1", meta, at)
+	firstHash := audit.ComputeHash(audit.HashSchemeLegacy, "", "ada", "finding.created", "asset-1", meta, at)
+	secondHash := audit.ComputeHash(audit.HashSchemeLegacy, firstHash, "ada", "finding.updated", "asset-1", meta, at)
 	rows := []AuditFact{
 		{ID: 4, Actor: "ada", Action: "finding.created", Target: "asset-1", AtUnixMicro: at.UnixMicro(), Hash: firstHash, HashVersion: 2, Severity: "high"},
 		{ID: 9, Actor: "ada", Action: "finding.updated", Target: "asset-1", AtUnixMicro: at.UnixMicro(), Hash: secondHash, PreviousHash: firstHash, HashVersion: 2, Severity: "high"},

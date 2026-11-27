@@ -581,7 +581,7 @@ func (r *SIEMRepository) ReadAudit(ctx context.Context, afterID int64, limit int
 			return err
 		}
 		rows, err := tx.Query(ctx, `
-			SELECT id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version
+			SELECT id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version, hash_scheme
 			FROM audit_log
 			WHERE tenant_id=current_setting('app.current_tenant', true) AND hash_version=2 AND hash IS NOT NULL AND id > $1
 			ORDER BY id ASC LIMIT $2`, afterID, limit)
@@ -594,7 +594,7 @@ func (r *SIEMRepository) ReadAudit(ctx context.Context, afterID int64, limit int
 			var metaRaw []byte
 			var at time.Time
 			var prev *string
-			if err := rows.Scan(&fact.ID, &fact.Actor, &fact.Action, &fact.Target, &metaRaw, &at, &fact.Hash, &prev, &fact.HashVersion); err != nil {
+			if err := rows.Scan(&fact.ID, &fact.Actor, &fact.Action, &fact.Target, &metaRaw, &at, &fact.Hash, &prev, &fact.HashVersion, &fact.HashScheme); err != nil {
 				return err
 			}
 			if prev != nil {

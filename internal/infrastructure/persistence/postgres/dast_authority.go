@@ -98,7 +98,7 @@ func (s *DASTRunStore) readDASTAuthority(ctx context.Context, tx pgx.Tx, tenant,
 }
 
 func readDASTEvidence(ctx context.Context, tx pgx.Tx, tenant, engagementID, id shared.ID) (e evidence.Evidence, err error) {
-	err = tx.QueryRow(ctx, `SELECT id,COALESCE(finding_id,''),engagement_id,kind,sha256,COALESCE(previous_hash,''),COALESCE(storage_ref,''),content,COALESCE(created_by,''),created_at FROM evidence WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3`, tenant.String(), engagementID.String(), id.String()).Scan(&e.ID, &e.FindingID, &e.EngagementID, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt)
+	err = tx.QueryRow(ctx, `SELECT id,COALESCE(finding_id,''),engagement_id,kind,sha256,COALESCE(previous_hash,''),COALESCE(storage_ref,''),content,COALESCE(created_by,''),created_at,hash_scheme FROM evidence WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3`, tenant.String(), engagementID.String(), id.String()).Scan(&e.ID, &e.FindingID, &e.EngagementID, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme)
 	if err != nil {
 		return e, dastAuthorityError(err, "custody evidence")
 	}
