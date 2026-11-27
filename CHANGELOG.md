@@ -7,6 +7,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-27
+
 ### Fixed
 
 - **Audit and evidence chains now record the encoding each hash was made with, ahead of an
