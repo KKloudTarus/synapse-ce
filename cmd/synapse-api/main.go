@@ -3487,6 +3487,8 @@ func main() {
 				log.Error("fleet key registration init failed", "err", kerr)
 				os.Exit(1)
 			}
+			// Operator list and revoke name an agent of the caller's tenant, or answer not-found (#1702).
+			keyRegSvc.SetAgentDirectory(fleetAgentStore)
 			router.SetFleetKeyRegistration(keyRegSvc)
 			router.SetFleetKeyAdmin(keyRegSvc)
 			log.Info("fleet signing-key registration ENABLED (proof-of-possession required; operator list/revoke)")

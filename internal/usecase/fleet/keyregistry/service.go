@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -28,9 +29,39 @@ const MaxSigningKeyValidity = 365 * 24 * time.Hour
 
 // Service registers, lists, and revokes agent signing keys.
 type Service struct {
-	keys  ports.AgentSigningKeyStore
-	audit ports.AuditLogger
-	clock ports.Clock
+	keys   ports.AgentSigningKeyStore
+	audit  ports.AuditLogger
+	clock  ports.Clock
+	agents agentDirectory // optional; when set, operator reads and revokes name an agent of the caller's tenant
+}
+
+// agentDirectory resolves an agent inside one tenant. The operator routes take an agent id from the
+// path and no engagement to resolve a tenant from, so without it a foreign agent id read as an agent
+// with no keys: an empty 200 decided by the store's partitioning, not by the route.
+type agentDirectory interface {
+	GetAgent(ctx context.Context, tenantID, id shared.ID) (*fleetagent.Agent, error)
+}
+
+// SetAgentDirectory makes List and Revoke answer not-found for an agent outside the caller's tenant.
+func (s *Service) SetAgentDirectory(agents agentDirectory) { s.agents = agents }
+
+// ownAgent refuses an agent the caller's tenant does not hold. With no directory wired it admits every
+// agent, and the store's tenant partitioning stays the only boundary.
+func (s *Service) ownAgent(ctx context.Context, agentID shared.ID) error {
+	if s.agents == nil {
+		return nil
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	if _, err := s.agents.GetAgent(ctx, tenantID, agentID); err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			return fmt.Errorf("agent %s: %w", agentID, shared.ErrNotFound)
+		}
+		return fmt.Errorf("resolve agent: %w", err)
+	}
+	return nil
 }
 
 // NewService validates and constructs the key-registry service.
@@ -98,6 +129,9 @@ func (s *Service) List(ctx context.Context, agentID shared.ID) ([]fleetagent.Age
 	if agentID.IsZero() {
 		return nil, fmt.Errorf("%w: list keys needs an agent id", shared.ErrValidation)
 	}
+	if err := s.ownAgent(ctx, agentID); err != nil {
+		return nil, err
+	}
 	return s.keys.ListByAgent(ctx, agentID)
 }
 
@@ -109,6 +143,9 @@ func (s *Service) Revoke(ctx context.Context, agentID shared.ID, keyID, actor st
 	}
 	if strings.TrimSpace(actor) == "" {
 		return fmt.Errorf("%w: revoke must name the operator", shared.ErrValidation)
+	}
+	if err := s.ownAgent(ctx, agentID); err != nil {
+		return err
 	}
 	if err := s.keys.Revoke(ctx, agentID, keyID, s.clock.Now().UTC()); err != nil {
 		return fmt.Errorf("revoke signing key: %w", err)

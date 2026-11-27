@@ -73,6 +73,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   owner, and the bootstrap and the unbound user read now bind their tenant. Forced row-level security on
   `users` follows in the next release.
 
+- **Agent signing-key routes now answer not-found for another tenant's agent (#1702).** `GET
+  /api/v1/agents/{id}/keys` and the key revoke route took the agent id from the path and no engagement
+  to resolve a tenant from, so a foreign agent id read as an agent with no keys: an empty `200` decided
+  by the store's tenant partition rather than by the route. The key registry now resolves the agent
+  inside the caller's tenant first and answers `404` when it is not there. The hostile harness found it
+  once it could address these routes.
+
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
   (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
   served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator
