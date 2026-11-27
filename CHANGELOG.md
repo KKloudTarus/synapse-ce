@@ -9,6 +9,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
+  (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
+  served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator
+  configuration that may carry an API key in its query string, so a sample read
+  `Get "https://feeds.internal.corp/v1?apikey=...": dial tcp 10.20.0.11:443: i/o timeout`. Those samples
+  sit on a table with no row-level security and are served on a `PermView` route, so a read-only account
+  in any tenant read the credential, the internal hostname and the private address. A transport failure
+  is now reduced to a cause class, `timeout`, `canceled`, `connection closed` or `network error`, the way
+  the KEV catalogue already reports one, and `AddErrorSample` scrubs URL userinfo whichever producer
+  wrote it. A status failure still carries its code, because that is what tells an operator what to do.
+  The detail needed for diagnosis belongs in the server log, not in a stored sample.
+
 - **Archiving an Assessment Cycle closed through the governed closure now says why it is refused
   (#1712).** The state machine allows `completed -> archived`, but a Cycle carrying an active closure
   manifest cannot be stored as archived: the manifest pins the exact Cycle version the closure
