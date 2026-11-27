@@ -248,6 +248,7 @@ var securityDefinerExceptions = map[string]string{
 	"synapse_claim_teams_link":                                "callable: Teams link-code exact-digest single-use claim",
 	"fn_assign_credential_tenant":                             "trigger: credentials tenant from the scan run engagement bridge (#1687)",
 	"synapse_user_by_api_key_hash":                            "callable: authentication exact API-key digest lookup, one row (#1697)",
+	"synapse_users_api_key_hash_counts":                       "callable: identity backfill exact-digest holder counts across tenants, counts only (#1697)",
 }
 
 // runtimeExecuteGrants is the complete set of function EXECUTE grants GrantRuntimePrivileges gives
@@ -282,11 +283,12 @@ var runtimeExecuteGrants = []string{
 	"synapse_identity_admission_source(TEXT,TEXT,TEXT,TIMESTAMPTZ)",
 	"synapse_identity_revoke_admission_source(TEXT,TEXT,TEXT,TIMESTAMPTZ)",
 	"synapse_user_by_api_key_hash(TEXT)",
+	"synapse_users_api_key_hash_counts(TEXT[])",
 }
 
 var (
 	createFunctionPattern = regexp.MustCompile(`(?is)CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+([a-z_][a-z0-9_]*)\s*\((.*?)\$`)
-	executeGrantPattern   = regexp.MustCompile(`GRANT EXECUTE ON FUNCTION ([a-z_]+\([A-Z,]*\)) TO`)
+	executeGrantPattern   = regexp.MustCompile(`GRANT EXECUTE ON FUNCTION ([a-z_]+\([A-Z,\[\]]*\)) TO`)
 )
 
 func upMigrationSQL(t *testing.T) map[string]string {

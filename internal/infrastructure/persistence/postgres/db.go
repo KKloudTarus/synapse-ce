@@ -595,6 +595,14 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 		// Migration 0278 revokes it from PUBLIC; the authentication path calls it by name.
 		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_user_by_api_key_hash(TEXT) TO "+quotedRole)
 	}
+	var userHashCountsInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_users_api_key_hash_counts(text[])') IS NOT NULL").Scan(&userHashCountsInstalled); err != nil {
+		return fmt.Errorf("inspect user key hash counts: %w", err)
+	}
+	if userHashCountsInstalled {
+		// Migration 0282 revokes it from PUBLIC; the identity backfill calls it by name under users RLS.
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_users_api_key_hash_counts(TEXT[]) TO "+quotedRole)
+	}
 	var jiraInstalled bool
 	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_provision_jira_inbound_webhook(text,text,text,text,integer)') IS NOT NULL").Scan(&jiraInstalled); err != nil {
 		return fmt.Errorf("inspect Jira webhook functions: %w", err)

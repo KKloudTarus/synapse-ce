@@ -61,14 +61,10 @@ Synapse is a security tool. Changes must preserve these:
    reached through a `WithTenant` transaction; global reference data (e.g. `advisories`) is the
    deliberate exception. Cross-tenant access must be rejected by the hostile harness.
 
-   `credentials` (the engagement secret vault) is enforced since migration 0281. `users` is the one table
-   still mid-migration onto this rule: it carries its tenant and is read inside a bound tenant, but forced
-   RLS lands one release after migration 0278, because the release before cannot read it under it. Until
-   then its isolation rests on `userTenantPredicate`. **A new reader of `users` must bind a tenant and
-   filter by it**; the authentication lookup goes through `synapse_user_by_api_key_hash`. Two reads still
-   cross tenants on purpose and must move behind an owner function before the contract release: the
-   identity backfill's API-key uniqueness count and the functions migrations 0253 and 0255 define.
-   Tracked in #1697.
+   `credentials` and `users` were the last two tables onto this rule; migrations 0281 and 0282 enforce
+   them. A read that must cross tenants on `users` (authentication by API key, the identity projection
+   writer, the identity backfill's uniqueness count) is a SECURITY DEFINER function owned by the migration
+   owner, which the `users_owner_definer` policy admits; it returns only what its caller already names.
 
 If a change would weaken any of these, please open an issue to discuss first.
 

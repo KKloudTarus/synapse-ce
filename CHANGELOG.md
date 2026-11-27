@@ -21,6 +21,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Security
 
+- **Users are isolated by the database (#1697).** Migration 0282 enables forced row-level security on
+  `users`, keyed on `ownership_tenant_id`, so a default-tenant user stored with `tenant_id ''` is read
+  under `default` and no backfill is needed. The authentication lookup (0278), the identity projection
+  writer and the identity backfill's API-key uniqueness count run as owner functions and reach every
+  tenant through a policy that admits only the table's owner; the runtime role never owns an RLS table.
+  The count moves into `synapse_users_api_key_hash_counts`, which `synapse-migrate` and `synapse-api`
+  grant to the runtime role after migrating. **Rollout:** run v0.3.0 or later while 0282 applies.
+
 - **The engagement secret vault is isolated by the database (#1687).** Migration 0281 enables forced
   row-level security on `credentials` and makes `tenant_id` NOT NULL, the contract half of 0277. A
   secret whose engagement was deleted before 0277 could not be attributed to a tenant and could not be
