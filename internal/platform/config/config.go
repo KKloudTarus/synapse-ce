@@ -165,6 +165,16 @@ type Config struct {
 	// MaxWorkspaceBytes caps the total size of a prepared SCA workspace: the
 	// acquirer rejects a target whose files exceed it. <=0 keeps the 2 GiB default.
 	MaxWorkspaceBytes int64
+	// LocalScanRoots are the directories a local scan target or a local project source may sit
+	// under. Empty, the default, refuses every local target: the engagement scope is written by the
+	// tenant it contains, so it cannot keep a tenant off the server's own disk, and this list is the
+	// operator's floor under it. SYNAPSE_LOCAL_SCAN_ROOTS, comma-separated absolute paths.
+	LocalScanRoots []string
+	// AllowPrivateAcquisitionOrigins admits a git or container registry origin that resolves to
+	// RFC 1918, CGNAT or IPv6 unique local space. Default false, so a tenant cannot use the server to
+	// probe the operator's internal network. Loopback, link-local and cloud metadata addresses stay
+	// refused either way. SYNAPSE_ALLOW_PRIVATE_ACQUISITION_ORIGINS.
+	AllowPrivateAcquisitionOrigins bool
 	// ProjectUploadDir retains uploaded Project source archives for repeat analysis.
 	ProjectUploadDir string
 	// EngagementSourceDir is the durable operator-owned upload object root used
@@ -934,29 +944,31 @@ func Load() Config {
 		// Grype/Trivy/OSV-Scanner – a higher floor silently hides detected vulns and reads as
 		// "missing vulns". Prioritization is done by risk priority (KEV→EPSS×CVSS), not by
 		// dropping findings; raise this floor explicitly to trim a report's actionable set.
-		FindingMinSeverity:            getenv("SYNAPSE_FINDING_MIN_SEVERITY", "info"),
-		IgnoreUnfixed:                 getbool("SYNAPSE_IGNORE_UNFIXED", false),
-		Offline:                       getbool("SYNAPSE_OFFLINE", false),
-		MaxWorkspaceBytes:             getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
-		ProjectUploadDir:              getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
-		EngagementSourceDir:           engagementSourceDir(),
-		ProjectSourceArtifactDir:      projectSourceArtifactDir(),
-		ProjectSourceRetention:        getduration("SYNAPSE_PROJECT_SOURCE_RETENTION", 90*24*time.Hour),
-		ProjectAnalysisShortLivedKeep: getint("SYNAPSE_PROJECT_ANALYSIS_SHORTLIVED_KEEP", 20),
-		ProjectSourceMaxFileBytes:     getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
-		ProjectSourceMaxFiles:         getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),
-		ProjectSourceMaxBytes:         getint64("SYNAPSE_PROJECT_SOURCE_MAX_BYTES", 500<<20),
-		SASTSourceBudgetBytes:         getint64("SYNAPSE_SAST_SOURCE_BUDGET_BYTES", 0),
-		ProjectGitComparisonDepth:     getint("SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH", 256),
-		BlobEndpoint:                  getenv("SYNAPSE_BLOB_ENDPOINT", ""),
-		BlobAccessKey:                 getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),
-		BlobSecretKey:                 getenv("SYNAPSE_BLOB_SECRET_KEY", ""),
-		BlobBucket:                    getenv("SYNAPSE_BLOB_BUCKET", "synapse-evidence"),
-		BlobUseSSL:                    getbool("SYNAPSE_BLOB_USE_SSL", false),
-		ReconTimeout:                  getduration("SYNAPSE_RECON_TIMEOUT", 3*time.Minute),
-		ReconMaxOutput:                getint("SYNAPSE_RECON_MAX_OUTPUT", 8<<20),
-		ReconConcurrency:              getint("SYNAPSE_RECON_CONCURRENCY", 3),
-		ReconQueueSize:                getint("SYNAPSE_RECON_QUEUE", 64),
+		FindingMinSeverity:             getenv("SYNAPSE_FINDING_MIN_SEVERITY", "info"),
+		IgnoreUnfixed:                  getbool("SYNAPSE_IGNORE_UNFIXED", false),
+		Offline:                        getbool("SYNAPSE_OFFLINE", false),
+		MaxWorkspaceBytes:              getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
+		LocalScanRoots:                 splitList(getenv("SYNAPSE_LOCAL_SCAN_ROOTS", "")),
+		AllowPrivateAcquisitionOrigins: getbool("SYNAPSE_ALLOW_PRIVATE_ACQUISITION_ORIGINS", false),
+		ProjectUploadDir:               getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
+		EngagementSourceDir:            engagementSourceDir(),
+		ProjectSourceArtifactDir:       projectSourceArtifactDir(),
+		ProjectSourceRetention:         getduration("SYNAPSE_PROJECT_SOURCE_RETENTION", 90*24*time.Hour),
+		ProjectAnalysisShortLivedKeep:  getint("SYNAPSE_PROJECT_ANALYSIS_SHORTLIVED_KEEP", 20),
+		ProjectSourceMaxFileBytes:      getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
+		ProjectSourceMaxFiles:          getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),
+		ProjectSourceMaxBytes:          getint64("SYNAPSE_PROJECT_SOURCE_MAX_BYTES", 500<<20),
+		SASTSourceBudgetBytes:          getint64("SYNAPSE_SAST_SOURCE_BUDGET_BYTES", 0),
+		ProjectGitComparisonDepth:      getint("SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH", 256),
+		BlobEndpoint:                   getenv("SYNAPSE_BLOB_ENDPOINT", ""),
+		BlobAccessKey:                  getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),
+		BlobSecretKey:                  getenv("SYNAPSE_BLOB_SECRET_KEY", ""),
+		BlobBucket:                     getenv("SYNAPSE_BLOB_BUCKET", "synapse-evidence"),
+		BlobUseSSL:                     getbool("SYNAPSE_BLOB_USE_SSL", false),
+		ReconTimeout:                   getduration("SYNAPSE_RECON_TIMEOUT", 3*time.Minute),
+		ReconMaxOutput:                 getint("SYNAPSE_RECON_MAX_OUTPUT", 8<<20),
+		ReconConcurrency:               getint("SYNAPSE_RECON_CONCURRENCY", 3),
+		ReconQueueSize:                 getint("SYNAPSE_RECON_QUEUE", 64),
 
 		ReconAllowCapabilitySensitive: getbool("SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE", false),
 

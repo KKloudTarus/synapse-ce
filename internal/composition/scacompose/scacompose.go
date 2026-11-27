@@ -96,13 +96,32 @@ func validateProductionNetworkedTools(cfg config.Config) error {
 	return fmt.Errorf("production networked SCA tools require authoritative signed scan grants and are not yet supported: %s", strings.Join(enabled, ", "))
 }
 
+// TargetFloor builds the operator's acquisition floor from configuration. The project upload
+// directory is the one archive store the server acquires from directly; uploads to an engagement
+// are materialized behind acquire.GuardPaths and never meet it.
+func TargetFloor(cfg config.Config) (acquire.TargetFloor, error) {
+	serverDirs := []string{cfg.EngagementSourceDir, cfg.ProjectSourceArtifactDir, cfg.ScanCacheDir}
+	if cfg.AuditFile != "" {
+		serverDirs = append(serverDirs, filepath.Dir(cfg.AuditFile))
+	}
+	floor, err := acquire.NewTargetFloor(cfg.LocalScanRoots, []string{cfg.ProjectUploadDir}, serverDirs, cfg.AllowPrivateAcquisitionOrigins)
+	if err != nil {
+		return acquire.TargetFloor{}, fmt.Errorf("SYNAPSE_LOCAL_SCAN_ROOTS: %w", err)
+	}
+	return floor, nil
+}
+
 func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.AdvisoryStore, gitCreds ports.GitCredentialResolver) (Execution, error) {
 	if err := validateProductionNetworkedTools(cfg); err != nil {
 		return Execution{}, err
 	}
+	floor, err := TargetFloor(cfg)
+	if err != nil {
+		return Execution{}, err
+	}
 	// gitCreds authenticates a server-initiated clone of a PRIVATE repository from a tenant
 	// source-control connector; nil (no connector store wired) clones public repos only.
-	localAcquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth).WithGitCredentialResolver(gitCreds)
+	localAcquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth).WithGitCredentialResolver(gitCreds).WithTargetFloor(floor)
 	var acquirer ports.Acquirer = localAcquirer
 	var scaSandbox *sandbox.Runner
 	var sbomGen ports.SBOMGenerator

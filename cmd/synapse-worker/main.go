@@ -37,6 +37,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/accuracyprobe"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
@@ -624,7 +625,13 @@ func main() {
 		}
 		scaAcquirer, scaSBOMGen, scaSources, scaSandbox = scaExecution.Acquirer, scaExecution.SBOMGen, scaExecution.Sources, scaExecution.Sandbox
 	}
-	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, sourceupload.NewAcquirer(scaAcquirer, uploadedSources),
+	// The operator's floor on local paths and archives sits in front of the whole chain (#1701).
+	targetFloor, ferr := scacompose.TargetFloor(cfg)
+	if ferr != nil {
+		log.Error(ferr.Error())
+		os.Exit(1)
+	}
+	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.GuardPaths(sourceupload.NewAcquirer(scaAcquirer, uploadedSources), targetFloor),
 		enry.New(), scaSBOMGen, scaSources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
 	if cfg.AssessmentSnapshotEnabled {

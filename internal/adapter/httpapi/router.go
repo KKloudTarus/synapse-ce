@@ -150,11 +150,12 @@ type Router struct {
 	inboundWebhooks          *inboundWebhookPlane       // separate header-HMAC auth plane, no human fallback
 	inboundWebhookAdmin      *scmwebhookuc.Service      // tenant-authorized SCM endpoint provision/rotation
 	jiraWebhookAdmin         jiraWebhookAdmin
-	fleetAdmin               fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
-	fleetKeys                fleetKeyAdmin         // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
-	qualityGates             qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles          qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
-	rules                    rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	fleetAdmin               fleetAdminService       // optional; nil ⇒ operator agent-admin routes not registered
+	fleetKeys                fleetKeyAdmin           // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
+	qualityGates             qualityGateService      // optional; nil ⇒ quality-gate routes are not registered
+	localTargetCheck         func(path string) error // optional; the operator floor on local scan targets (#1701)
+	qualityProfiles          qualityProfileService   // optional; nil ⇒ quality-profile routes are not registered
+	rules                    rulesService            // optional; nil ⇒ rule catalog routes are not registered
 	dastScan                 dastScanService
 	vulnerabilitySources     *vulnerabilitysourceuc.Service
 	vulnerabilityMonitor     *vulnerabilitymonitor.Service
@@ -287,6 +288,11 @@ type qualityGateService interface {
 
 // SetQualityGates wires quality gate management endpoints.
 func (rt *Router) SetQualityGates(s qualityGateService) { rt.qualityGates = s }
+
+// SetLocalTargetCheck installs the operator's floor on local scan targets, so a scan naming a path
+// the server will refuse is answered 400 at submit. The acquirer enforces the same floor at execution
+// whether or not this is set.
+func (rt *Router) SetLocalTargetCheck(check func(path string) error) { rt.localTargetCheck = check }
 
 // SetRules wires the rule catalog endpoints. nil ⇒ not registered.
 func (rt *Router) SetRules(s rulesService) { rt.rules = s }

@@ -50,6 +50,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	alertwebhook "github.com/KKloudTarus/synapse-ce/internal/infrastructure/alertsink/webhook"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
@@ -1241,7 +1242,14 @@ func main() {
 		sbomGen = execution.SBOMGen
 		detectionSources = execution.Sources
 	}
-	acquirer = sourceupload.NewAcquirer(acquirer, uploadedSources)
+	// The floor goes in front of the whole chain. The engagement scope is written by the tenant it
+	// contains; this is the operator's limit under it on local paths and archives (#1701).
+	targetFloor, err := scacompose.TargetFloor(cfg)
+	if err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
+	acquirer = acquire.GuardPaths(sourceupload.NewAcquirer(acquirer, uploadedSources), targetFloor)
 	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquirer,
 		enry.New(), sbomGen,
 		detectionSources,
@@ -2529,6 +2537,9 @@ func main() {
 		log.Info("source-control connectors ENABLED (manage at /api/v1/connectors; private-repo clone auth)")
 	}
 	router.SetQualityGates(qualityGateService)
+	router.SetLocalTargetCheck(targetFloor.CheckLocal)
+	engService.SetLocalScopeCheck(targetFloor.CheckLocalScope)
+	transferService.SetLocalScopeCheck(targetFloor.CheckLocalScope)
 	router.SetQualityProfiles(qualityProfileService)
 	if memoryAssets, ok := assetStore.(*memory.AssetStore); ok {
 		memoryAssets.SetEngagementRepository(repo)

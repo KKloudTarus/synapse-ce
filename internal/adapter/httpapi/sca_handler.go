@@ -242,6 +242,14 @@ func (rt *Router) runSCAScan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: msg})
 		return
 	}
+	// The operator's floor on local paths (#1701). The acquirer enforces it again at execution; this
+	// copy answers 400 at submit instead of accepting the scan and failing it asynchronously.
+	if !usingImportedSBOM && (req.Kind == "" || req.Kind == ports.TargetLocal) && rt.localTargetCheck != nil {
+		if err := rt.localTargetCheck(strings.TrimSpace(req.Target)); err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+	}
 	if msg := validateScanMode(req.Mode); msg != "" {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: msg})
 		return
