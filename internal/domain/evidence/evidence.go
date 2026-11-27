@@ -115,6 +115,10 @@ type Evidence struct {
 	CreatedBy    string    // human/agent id that produced this evidence (attribution)
 	CreatedAt    time.Time
 	HashScheme   int // the scheme Hash was computed with; zero reads as HashSchemeLegacy
+	// Imported marks a link that arrived in an engagement bundle rather than being sealed on this
+	// instance. It is not part of the hash. Its StorageRef was chosen by whoever built the bundle, so it
+	// never authorizes a read of the blob that sha names.
+	Imported bool
 }
 
 // evSep terminates each field of the legacy preimage.

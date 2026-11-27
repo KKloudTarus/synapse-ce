@@ -92,6 +92,13 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 				}
 				return fmt.Errorf("insert evidence: %w", err)
 			}
+			if e.Imported {
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO evidence_imports (tenant_id, engagement_id, evidence_id) VALUES ($1, $2, $3)`,
+					tenantID.String(), e.EngagementID.String(), e.ID.String()); err != nil {
+					return fmt.Errorf("mark imported evidence: %w", err)
+				}
+			}
 		}
 		return nil
 	})
@@ -101,8 +108,11 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID shared.ID) (out []evidence.Evidence, err error) {
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT id, COALESCE(finding_id,''), engagement_id, kind, sha256, COALESCE(previous_hash,''), COALESCE(storage_ref,''), content, COALESCE(created_by,''), created_at, hash_scheme
-		 FROM evidence WHERE engagement_id=$1 ORDER BY seq ASC`, engagementID.String())
+			`SELECT e.id, COALESCE(e.finding_id,''), e.engagement_id, e.kind, e.sha256, COALESCE(e.previous_hash,''), COALESCE(e.storage_ref,''), e.content, COALESCE(e.created_by,''), e.created_at, e.hash_scheme,
+		        i.evidence_id IS NOT NULL
+		 FROM evidence e
+		 LEFT JOIN evidence_imports i ON i.tenant_id = e.tenant_id AND i.evidence_id = e.id
+		 WHERE e.engagement_id=$1 ORDER BY e.seq ASC`, engagementID.String())
 		if err != nil {
 			return fmt.Errorf("list evidence: %w", err)
 		}
@@ -112,7 +122,7 @@ func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID share
 				e            evidence.Evidence
 				id, fid, eid string
 			)
-			if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme); err != nil {
+			if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme, &e.Imported); err != nil {
 				return fmt.Errorf("scan evidence: %w", err)
 			}
 			e.ID = shared.ID(id)

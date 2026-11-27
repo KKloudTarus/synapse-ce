@@ -892,3 +892,27 @@ func TestVerifyChainBrokenAlertSurvivesOuterTransactionRollback(t *testing.T) {
 		t.Fatalf("independent tamper audit missing: %+v", audit.entries)
 	}
 }
+
+// TestImportedLinkDoesNotAuthorizeArtifactRead: blobs share one content-addressed namespace, so an imported
+// bundle whose link names another engagement's artifact sha must not make that artifact readable. A link
+// sealed on this instance still does.
+func TestImportedLinkDoesNotAuthorizeArtifactRead(t *testing.T) {
+	blobs := newMemBlobs()
+	svc, _, _ := newVault(t, blobs)
+	ctx := context.Background()
+	victim, err := svc.CaptureArtifact(ctx, "victim", "op", "screenshot", "secret.png", []byte("secret-bytes"), "")
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	forged := evdom.Evidence{ID: "imp-1", EngagementID: "attacker", Kind: "artifact", Content: []byte(`{"sha256":"` + victim.StorageRef + `"}`),
+		StorageRef: victim.StorageRef, CreatedBy: "bundle", CreatedAt: time.Unix(5, 0).UTC()}.Seal()
+	if err := svc.ImportVerified(ctx, []evdom.Evidence{forged}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if _, err := svc.ArtifactForEngagement(ctx, "attacker", victim.StorageRef); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("an imported link must not authorize the read, got %v", err)
+	}
+	if got, err := svc.ArtifactForEngagement(ctx, "victim", victim.StorageRef); err != nil || string(got) != "secret-bytes" {
+		t.Fatalf("the capturing engagement must still read its artifact: %q, %v", got, err)
+	}
+}

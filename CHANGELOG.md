@@ -19,6 +19,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   exported as `synapse.engagement-bundle/v2`, which importers older than this release refuse by
   version; a bundle of scheme 1 links stays v1, and import accepts both.
 
+### Security
+
+- **An imported evidence link no longer authorizes an artifact read.** Artifact blobs are
+  content-addressed in one store shared by every tenant, and an engagement could read any blob its
+  chain referenced, including through links that arrived in an imported bundle. Only a link sealed on
+  this instance authorizes a read now. Migration 0280 adds `evidence_imports` and marks the links of
+  engagements imported earlier from their `engagement.imported` audit records; an artifact reached only
+  through an imported link returns not found.
+
 ### Fixed
 
 - **An advisory that aliases several CVEs is reported under its own id (#1665).** Every detection
