@@ -501,7 +501,8 @@ func TestHostileHarness(t *testing.T) {
 	analysisStore := memory.NewProjectAnalysisStore()
 	projectSvc.SetHotspotStore(analysisStore)
 	projectSvc.SetAnalysisStore(analysisStore)
-	usersSvc, err := usersuc.NewService(memory.NewUserRepository(), &fakeAudit{}, fixedClock{}, &seqIDs{})
+	userRepo := memory.NewUserRepository()
+	usersSvc, err := usersuc.NewService(userRepo, &fakeAudit{}, fixedClock{}, &seqIDs{})
 	if err != nil {
 		t.Fatalf("users svc: %v", err)
 	}
@@ -643,7 +644,7 @@ func TestHostileHarness(t *testing.T) {
 	// route table is built, so the routes they enable are part of the sweep below.
 	seedMarkers := runHarnessSeeds(&harnessWorld{
 		t: t, rt: rt, engagements: engRepo, engSvc: engagementService, projectRepo: projectRepo,
-		projects: projectSvc, analyses: analysisStore, assets: attackAssets, users: usersSvc, audit: audit,
+		projects: projectSvc, analyses: analysisStore, assets: attackAssets, users: usersSvc, userRepo: userRepo, audit: audit,
 		siem: siemStore, assessmentCycleAPI: lifecycleAPI, assessmentCycles: lifecycleCycles, state: map[string]any{},
 	})
 	mux := rt.routes()
@@ -1519,8 +1520,8 @@ var harnessKnownUnaddressable = map[string]string{
 	"GET /api/v1/engagements/{id}/observation-bindings": "the fixture's binding stand-in (harnessObservationBindings) answers every caller with no bindings",
 
 	// Ticket metadata (#1702): the ticket workflow the engagement seed wires has no Jira integration.
-	"GET /api/v1/integrations/{integrationID}/jira-metadata":   "ticket metadata family not seeded yet (#1702)",
-	"GET /api/v1/integrations/{integrationID}/ticket-metadata": "ticket metadata family not seeded yet (#1702)",
+	"GET /api/v1/integrations/{integrationID}/jira-metadata":   "addressed at the seeded tenantA Jira integration; the harness provider registry has no Jira descriptor, so tenantA's metadata read is refused too",
+	"GET /api/v1/integrations/{integrationID}/ticket-metadata": "addressed at the seeded tenantA Jira integration; the harness provider registry has no Jira descriptor, so tenantA's metadata read is refused too",
 
 	// Document publications, links and schedules (#1702): "{id}" falls back to engA, and the
 	// engagement seed's document stand-in (engmiscDocuments) serves engagement and project links only.
@@ -1531,13 +1532,11 @@ var harnessKnownUnaddressable = map[string]string{
 	// Fleet (#1702): "{id}" falls back to engA, which names no agent, key or incident. The fixture's
 	// coverage stand-in knows agent ag1, but it filters by tenant itself, so serving ag1 here would
 	// prove the stand-in rather than a guard; the hand-written fleet checks cover that route.
-	"GET /api/v1/agents/{id}/keys":     "fleet family not seeded yet (#1702)",
 	"GET /api/v1/fleet/agents/{id}":    "fleet family not seeded yet (#1702)",
 	"GET /api/v1/fleet/incidents/{id}": "fleet incident family not seeded yet (#1702)",
 
 	// Scan jobs and users (#1702): "{id}" falls back to engA, which names neither.
-	"GET /api/v1/sca/scans/{id}":        "scan job family not seeded yet (#1702)",
-	"GET /api/v1/users/{id}/oidc-links": "user family not seeded yet (#1702)",
+	"GET /api/v1/sca/scans/{id}": "scan job family not seeded yet (#1702)",
 
 	// Quality gates and profiles (#1702): "{key}" falls back to the project key project-a.
 	"GET /api/v1/quality-gates/{key}":    "quality gate family not seeded yet (#1702)",
@@ -1554,7 +1553,7 @@ var harnessKnownUnaddressable = map[string]string{
 
 // harnessUnaddressableCeiling is how many routes harnessKnownUnaddressable may list. It only goes
 // down: the seed that takes routes off the list lowers it by as many.
-const harnessUnaddressableCeiling = 18
+const harnessUnaddressableCeiling = 16
 
 // The real root Router keeps tenant resolution entirely on the endpoint ID.
 // The hostile harness exercises both directions with an otherwise valid MAC.

@@ -29,6 +29,7 @@ var integrationsNow = time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
 // comes back under another id, rather than leaving the routes addressed at nothing.
 const (
 	integrationsIntegration = shared.ID("integrations-seed-id-1")
+	integrationsBinding     = shared.ID("integrations-seed-id-2")
 	integrationsOperation   = shared.ID("integrations-seed-id-3")
 	integrationsProject     = shared.ID("integrations-seed-project")
 	integrationsProvider    = integration.Provider("harness-ci")
@@ -46,6 +47,9 @@ func init() {
 	// "{id}" is an engagement on most routes; on these it is the integration.
 	for _, route := range byID {
 		values[route] = map[string]string{"{id}": integrationsIntegration.String()}
+	}
+	values["DELETE /api/v1/integrations/{id}/bindings/{bindingID}"] = map[string]string{
+		"{id}": integrationsIntegration.String(), "{bindingID}": integrationsBinding.String(),
 	}
 	registerHarnessSeed(harnessSeed{
 		Name:            "integrations",
@@ -106,8 +110,12 @@ func seedIntegrations(w *harnessWorld) []string {
 	if err != nil {
 		t.Fatalf("seed integration: %v", err)
 	}
-	if _, err := service.CreateBinding(ctx, "tenantA", item.ID, integrationsProject, "pipelines/"+integrationsMarker, "pipeline "+integrationsMarker, integrationsMarker); err != nil {
+	binding, err := service.CreateBinding(ctx, "tenantA", item.ID, integrationsProject, "pipelines/"+integrationsMarker, "pipeline "+integrationsMarker, integrationsMarker)
+	if err != nil {
 		t.Fatalf("seed integration binding: %v", err)
+	}
+	if binding.ID != integrationsBinding {
+		t.Fatalf("seed integration binding id = %s, want %s", binding.ID, integrationsBinding)
 	}
 	enabled, err := service.SetEnabled(ctx, "tenantA", item.ID, true, item.Version, integrationsMarker)
 	if err != nil {

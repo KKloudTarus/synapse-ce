@@ -71,6 +71,7 @@ type harnessWorld struct {
 	analyses    *memory.ProjectAnalysisStore
 	assets      *memory.AssetStore
 	users       *usersuc.Service
+	userRepo    *memory.UserRepository
 	audit       *harnessAudit
 	// siem is the store behind the fixture's SIEM service. The fixture wires that service itself,
 	// because its own SIEM checks read a sealed secret back out of this store, so a seed plants a

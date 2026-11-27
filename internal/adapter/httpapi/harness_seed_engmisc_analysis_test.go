@@ -24,7 +24,7 @@ import (
 func seedEngmiscImportedFindings(w *harnessWorld) {
 	store := memory.NewImportedFindingStore()
 	item := importedfinding.ImportedFinding{
-		ID: "engmisc-imported", TenantID: "tenantA", EngagementID: engmiscEngagement,
+		ID: engmiscImportedFinding, TenantID: "tenantA", EngagementID: engmiscEngagement,
 		Severity: shared.SeverityHigh, Title: "title " + engmiscMarker, Message: "message " + engmiscMarker,
 		Location: importedfinding.Location{Path: "src/handler.go", StartLine: 12},
 		Provenance: importedfinding.Provenance{
