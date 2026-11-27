@@ -422,6 +422,10 @@ func appendOnWithFirstObservation(ctx context.Context, tx pgx.Tx, tenantID share
 
 // appendAudit extends the audit chain within an existing transaction.
 func appendAudit(ctx context.Context, tx pgx.Tx, e ports.AuditEntry) error {
+	e, err := normalizeAuditEntry(e)
+	if err != nil {
+		return err
+	}
 	meta, err := json.Marshal(e.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal audit metadata: %w", err)
@@ -453,6 +457,10 @@ func appendAudit(ctx context.Context, tx pgx.Tx, e ports.AuditEntry) error {
 // chain; tenant_id only scopes the immutable idempotency key and is not a chain
 // selector in this mode.
 func appendGlobalAuditWithFirstObservation(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry) error {
+	e, err := normalizeAuditEntry(e)
+	if err != nil {
+		return err
+	}
 	meta, err := json.Marshal(e.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal audit metadata: %w", err)
@@ -509,6 +517,10 @@ func appendTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, e ports.
 }
 
 func appendTenantAuditWithFirstObservation(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry, firstObservation bool) error {
+	e, err := normalizeAuditEntry(e)
+	if err != nil {
+		return err
+	}
 	meta, err := json.Marshal(e.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal audit metadata: %w", err)
@@ -571,6 +583,20 @@ func sameIdempotentAuditPayload(ctx context.Context, tx pgx.Tx, tenantID string,
 	default:
 		return false, nil
 	}
+}
+
+// normalizeAuditEntry replaces invalid UTF-8 in every hashed field before the entry is compared, hashed or
+// stored (#1723). JSON encoding turns an invalid byte in metadata into U+FFFD, so a hash over the raw bytes
+// never recomputes from the stored row; a text column refuses the bytes outright. Normalizing first makes
+// the hashed and the stored entry one value.
+func normalizeAuditEntry(e ports.AuditEntry) (ports.AuditEntry, error) {
+	metadata, err := audit.NormalizeMetadata(e.Metadata)
+	if err != nil {
+		return ports.AuditEntry{}, fmt.Errorf("normalize audit metadata: %w", err)
+	}
+	e.Metadata = metadata
+	e.Actor, e.Action, e.Target = audit.NormalizeText(e.Actor), audit.NormalizeText(e.Action), audit.NormalizeText(e.Target)
+	return e, nil
 }
 
 // toRecords maps oldest-first audit entries to chain records for verification.

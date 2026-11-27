@@ -304,3 +304,29 @@ func TestAuditLogTenantEndpointsHideLegacyEntries(t *testing.T) {
 		t.Fatalf("tenant verify legacy chain = %+v, %v", rep, err)
 	}
 }
+
+// TestAuditLogVerifiesInvalidUTF8Metadata (#1723): JSON encoding turns an invalid byte into U+FFFD, so the
+// writer must hash the normalized metadata or the line read back never recomputes to its hash. A retry with
+// the same raw bytes is the same entry.
+func TestAuditLogVerifiesInvalidUTF8Metadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	ctx := shared.WithTenant(context.Background(), "tenant-a")
+	a := NewAuditLog(path)
+	e := ports.AuditEntry{Actor: "op\xff", Action: "scan.archive", Target: "t", At: time.Unix(1, 0).UTC(),
+		Metadata: map[string]string{"path": "a\xffb", "idempotency_key": "k1"}}
+	for i := 0; i < 2; i++ {
+		if err := a.RecordOnce(ctx, e); err != nil {
+			t.Fatalf("record attempt %d: %v", i, err)
+		}
+	}
+	rep, err := NewAuditLog(path).Verify(ctx)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if !rep.Intact || rep.Verified != 1 {
+		t.Fatalf("report = %+v, want one intact entry", rep)
+	}
+	if err := a.Record(ctx, ports.AuditEntry{Action: "x", At: time.Unix(2, 0).UTC(), Metadata: map[string]string{"a\xff": "1", "a\xfe": "2"}}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("colliding keys: err = %v, want ErrValidation", err)
+	}
+}

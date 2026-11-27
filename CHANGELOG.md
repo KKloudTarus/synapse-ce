@@ -37,6 +37,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   advisory id the report shows. Alias matching follows the source's own record and never the
   transitive alias closure. `CorrelationVersion` is 8.
 
+- **An audit entry with invalid UTF-8 now verifies (#1723).** The Postgres and file audit writers hashed
+  metadata as given and stored its JSON encoding, which replaces an invalid byte with U+FFFD, so the
+  stored row never recomputed to its hash and read as tampered; an idempotent retry of the same entry
+  also failed as a conflict. Both writers now replace invalid UTF-8 in the actor, action, target and
+  metadata with U+FFFD before comparing, hashing and storing. Metadata whose keys collide once
+  normalized is refused. Rows written before this change keep failing verification.
+
 ## [0.3.0] - 2026-11-27
 
 ### Fixed
