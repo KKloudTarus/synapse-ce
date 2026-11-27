@@ -49,6 +49,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   evidence stayed when the `engagement.imported` audit record failed to write; the import now deletes
   them, as it already did when materializing failed.
 
+- **Ownership notifications name the assignee in the default tenant (#1724).** The before and after
+  assignee names were resolved with `users.tenant_id`, which is `''` for default-tenant users while
+  ownership decisions carry `'default'`, so both names came back empty. They now resolve through
+  `users.ownership_tenant_id`, as every other ownership join does.
+
 ## [0.3.0] - 2026-11-27
 
 ### Fixed
