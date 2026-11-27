@@ -527,7 +527,7 @@ live and offline sources.
 
 The reusable action installs the released `synapse-cli` and runs the gate, so a whole scan step is three
 lines. `v1` is the action's INTERFACE version and moves with every release; pin a release tag such as
-`@v0.3.0` instead when you want the action itself frozen.
+`@v0.4.0` instead when you want the action itself frozen.
 
 ```yaml
 - uses: KKloudTarus/synapse-ce@v1
