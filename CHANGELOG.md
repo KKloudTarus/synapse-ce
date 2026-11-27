@@ -176,14 +176,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
-- **The actions a repository's CI runs are dependencies (#1665).** Every `uses: owner/repo@ref` in a
-  workflow under `.github/workflows` and in a composite `action.yml` becomes a component
-  (`pkg:githubactions/owner/repo@version`), scoped development, so OSV's GitHub Actions advisories match.
-  OSV.dev does not version-match that ecosystem, so the adapter queries the action by name and places the
-  version against each advisory's range itself. Only a release tag with at least `major.minor` is a version:
-  a commit SHA, a branch or a floating tag such as `v4` stays visible as a component and matches nothing,
-  rather than being guessed into a range. Measured against live OSV: `actions/download-artifact@v4.1.2`
-  reports GHSA-cxww-7g56-2vh6 (fixed in 4.1.3), and `@v4.1.3` reports nothing.
+- **The actions a repository's CI runs are dependencies (#1665).** Every action a workflow in the root
+  `.github/workflows` or a composite `action.yml` uses (a job step, or a job's reusable workflow) becomes a
+  component (`pkg:githubactions/owner/repo@version`, lower-cased), scoped development, so OSV's GitHub
+  Actions advisories match. The workflow is read as YAML, so text inside `run:` scripts and `with:` inputs
+  is not mistaken for a step. OSV.dev does not version-match that ecosystem, so the adapter queries the
+  action by name and places the version against each advisory's range itself. Only a release tag with at
+  least `major.minor` is a version: a commit SHA, a branch or a floating tag such as `v4` stays visible and
+  matches nothing, rather than being guessed into a range, and actions do not count toward the
+  completeness ratio, so pinning by SHA never marks a scan incomplete. Matching needs the live OSV source:
+  the owned advisory store does not sync this ecosystem, so an `--offline` scan lists the actions without
+  matching them. This can change an exit code: a workflow pinned to a vulnerable action release is a
+  gated finding. Measured against live OSV: `actions/download-artifact@v4.1.2` reports
+  GHSA-cxww-7g56-2vh6 (fixed in 4.1.3), and `@v4.1.3` reports nothing.
 
 - **An external observation no longer merges with a first-party finding on a coincidence of line number (#1184).**
   The SARIF deduplicator sets an imported finding's `finding_id` when a result lands on the same file and
@@ -266,7 +271,9 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   pipeline could not tell "findings over threshold" from "the scanner broke" without parsing the
   output, because both exited `1`. A gate result keeps `1`: a finding at or above `--fail-on`,
   incomplete coverage under `--require-complete`, a failed quality gate, coverage or rating below its
-  threshold, or a failed rule-pack gate. A runtime failure is now `3`. Usage errors stay `2`. A
+  threshold, a failed rule-pack gate or replay, complexity or duplication over its limit, or SARIF results
+  refused by `validate-sarif`. A runtime failure is now `3`. Usage errors stay `2`, and an option error in
+  any subcommand now exits `2` as well instead of `1`. A
   pipeline that treats any non-zero exit as a failure is unaffected; one that matched `1` to mean
   "scanner error" must match `3`.
 
@@ -274,7 +281,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   pins versions at scan time and the result read `confident: true` with no caveat; the notice reached
   stderr only. The completeness record now carries `resolved_at_scan` naming each ecosystem resolved
   that way, and a warning that the versions are today's resolution of the manifest's ranges rather than
-  a committed lockfile. The scan stays confident about the versions it scanned.
+  a committed lockfile. The scan stays confident about the versions it scanned; the CLI report prints it as
+  a note under the confident line rather than as an incomplete scan.
 
 - **`--sarif-out` combines with `--json` or `--sbom` (#1665).** `--sarif-out` writes a file, so one scan
   can print the JSON result or the SBOM and still write the SARIF for a code-scanning upload. The

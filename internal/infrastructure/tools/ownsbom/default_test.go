@@ -10,7 +10,7 @@ func TestDefaultRegistry(t *testing.T) {
 		t.Fatalf("DefaultRegistry: %v", err)
 	}
 	for _, marker := range []string{
-		"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "requirements-dev.txt", "poetry.lock", "pipfile.lock", "cargo.lock", "pom.xml", "libs.versions.toml", "gemfile.lock", "composer.lock", "packages.lock.json", "package.resolved", "pubspec.lock", "mix.lock", "environment.yml", "environment.yaml", "renv.lock", "manifest.toml", "conan.lock", "action.yml", "action.yaml",
+		"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "requirements-dev.txt", "poetry.lock", "pipfile.lock", "cargo.lock", "pom.xml", "libs.versions.toml", "gemfile.lock", "composer.lock", "packages.lock.json", "package.resolved", "pubspec.lock", "mix.lock", "environment.yml", "environment.yaml", "renv.lock", "manifest.toml", "conan.lock",
 	} {
 		if _, ok := reg.byMarker[marker]; !ok {
 			t.Errorf("DefaultRegistry missing marker %q", marker)

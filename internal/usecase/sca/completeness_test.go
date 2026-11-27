@@ -142,3 +142,15 @@ func TestCompletenessCaveatsVersionsResolvedAtScanTime(t *testing.T) {
 		t.Fatalf("a committed lockfile must carry no caveat: %+v", locked)
 	}
 }
+
+func TestCompletenessIgnoresWorkflowActions(t *testing.T) {
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "ms", Version: "2.1.3", PURL: "pkg:npm/ms@2.1.3"},
+		{Name: "actions/checkout", Version: "b4ffde65f46336ab88eb53be808477a3936bae11", PURL: "pkg:githubactions/actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11"},
+		{Name: "actions/setup-node", Version: "main", PURL: "pkg:githubactions/actions/setup-node@main"},
+	}}
+	c := computeCompleteness(doc, []string{"package-lock.json"}, nil)
+	if !c.Confident || c.Warning != "" || c.ComponentsTotal != 1 || c.ComponentsResolved != 1 {
+		t.Fatalf("SHA- and branch-pinned actions changed completeness: %+v", c)
+	}
+}

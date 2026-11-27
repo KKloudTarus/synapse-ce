@@ -6018,9 +6018,17 @@ func attachDependencyPaths(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) 
 const resolvedTreeSuffix = "-resolved-tree"
 
 func computeCompleteness(doc *sbom.SBOM, lockfiles, unresolvedEco []string) ports.Completeness {
-	total := len(doc.Components)
+	total := 0
 	resolved, osPkgs, appTotal, appResolved := 0, 0, 0, 0
 	for _, c := range doc.Components {
+		// A GitHub Action a workflow uses is pinned by tag or commit, not by a lockfile, and a SHA pin is
+		// the safest form there is. Counting it here marked a fully locked repository incomplete because its
+		// workflows pin actions by SHA (#1665). Actions are reported; they do not measure dependency
+		// resolution.
+		if strings.HasPrefix(c.PURL, "pkg:githubactions/") {
+			continue
+		}
+		total++
 		pinned := isPinnedVersion(c.Version)
 		if pinned {
 			resolved++
