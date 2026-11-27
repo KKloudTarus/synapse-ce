@@ -261,6 +261,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   pipeline that treats any non-zero exit as a failure is unaffected; one that matched `1` to mean
   "scanner error" must match `3`.
 
+- **A scan that pinned versions itself says so (#1665).** With only a `package.json`, the npm resolver
+  pins versions at scan time and the result read `confident: true` with no caveat; the notice reached
+  stderr only. The completeness record now carries `resolved_at_scan` naming each ecosystem resolved
+  that way, and a warning that the versions are today's resolution of the manifest's ranges rather than
+  a committed lockfile. The scan stays confident about the versions it scanned.
+
 - **`--sarif-out` combines with `--json` or `--sbom` (#1665).** `--sarif-out` writes a file, so one scan
   can print the JSON result or the SBOM and still write the SARIF for a code-scanning upload. The
   GitHub Action accepts `--json` or `--sbom` in `args` together with `sarif: true`.

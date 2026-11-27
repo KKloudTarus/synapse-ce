@@ -120,3 +120,25 @@ func TestUnresolvedRemediation(t *testing.T) {
 		t.Errorf("unknown ecosystem must get the generic fallback, got: %q", fb)
 	}
 }
+
+func TestCompletenessCaveatsVersionsResolvedAtScanTime(t *testing.T) {
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21"},
+		{Name: "express", Version: "4.19.2", PURL: "pkg:npm/express@4.19.2"},
+	}}
+	resolved := computeCompleteness(doc, []string{"npm-resolved-tree"}, nil)
+	if !resolved.Confident {
+		t.Fatalf("pinned versions from a resolver should stay confident: %+v", resolved)
+	}
+	if len(resolved.ResolvedAtScan) != 1 || resolved.ResolvedAtScan[0] != "npm" {
+		t.Fatalf("resolved_at_scan = %v, want [npm]", resolved.ResolvedAtScan)
+	}
+	if !strings.Contains(resolved.Warning, "resolved at scan time") || !strings.Contains(resolved.Warning, "npm") {
+		t.Fatalf("no caveat for versions resolved at scan time: %q", resolved.Warning)
+	}
+
+	locked := computeCompleteness(doc, []string{"package-lock.json"}, nil)
+	if !locked.Confident || locked.Warning != "" || len(locked.ResolvedAtScan) != 0 {
+		t.Fatalf("a committed lockfile must carry no caveat: %+v", locked)
+	}
+}

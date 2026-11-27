@@ -34,8 +34,10 @@ func TestCompletenessAcceptsAResolvedTreeAsASource(t *testing.T) {
 		if !c.Confident {
 			t.Fatalf("a fully resolved tree must read confident, got warning %q", c.Warning)
 		}
-		if c.Warning != "" {
-			t.Errorf("a confident scan must carry no warning, got %q", c.Warning)
+		// Confident about the versions it scanned, and says those versions are today's resolution
+		// rather than a committed lock (#1665).
+		if !strings.Contains(c.Warning, "resolved at scan time") {
+			t.Errorf("warning = %q, want the resolved-at-scan caveat", c.Warning)
 		}
 		if c.ComponentsResolved != c.ComponentsTotal {
 			t.Errorf("resolved %d of %d, want all", c.ComponentsResolved, c.ComponentsTotal)
