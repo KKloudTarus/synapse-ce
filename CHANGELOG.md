@@ -74,10 +74,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   `users` follows in the next release.
 
 - **Agent signing-key routes now answer not-found for another tenant's agent (#1702).** `GET
-  /api/v1/agents/{id}/keys` and the key revoke route took the agent id from the path and no engagement
-  to resolve a tenant from, so a foreign agent id read as an agent with no keys: an empty `200` decided
-  by the store's tenant partition rather than by the route. The key registry now resolves the agent
-  inside the caller's tenant first and answers `404` when it is not there. The hostile harness found it
+  /api/v1/agents/{id}/keys` took the agent id from the path and no engagement to resolve a tenant from,
+  so a foreign agent id read as an agent with no keys: an empty `200` decided by the store's tenant
+  partition rather than by the route. The key registry now resolves the agent inside the caller's tenant
+  first, for listing and for revoking, and answers `404` when it is not there. Revoke was already refused
+  by the store's partition; it now has its own check as well. The hostile harness found the listing case
   once it could address these routes.
 
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to

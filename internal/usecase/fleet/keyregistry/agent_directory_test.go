@@ -1,8 +1,10 @@
 package keyregistry
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -44,5 +46,40 @@ func TestOperatorRoutesNameAnAgentOfTheCallersTenant(t *testing.T) {
 	}
 	if err := svc.Revoke(ctx, "agent:1", key.KeyID, "op"); err != nil {
 		t.Fatalf("own revoke: %v", err)
+	}
+}
+
+// TestRevokeRefusesAForeignAgentEvenWhenTheStoreWouldNot pins the revoke guard on its own. The memory store
+// partitions by tenant, so a foreign revoke already found nothing there; this plants a key with the same
+// agent id inside the caller's own partition, for an agent that exists only in another tenant, so only the
+// directory check can refuse it.
+func TestRevokeRefusesAForeignAgentEvenWhenTheStoreWouldNot(t *testing.T) {
+	store := memory.NewAgentSigningKeyStore()
+	svc, err := NewService(store, &fakeAudit{}, fakeClock{t: time.Unix(1_000_000, 0).UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1 := shared.WithTenant(context.Background(), "t1")
+	t2 := shared.WithTenant(context.Background(), "t2")
+	agents := memory.NewFleetAgentStore()
+	if err := agents.CreateAgent(t1, &fleetagent.Agent{ID: "agent:1", TenantID: "t1", Name: "t1 agent"}); err != nil {
+		t.Fatal(err)
+	}
+	req, _, _ := proofFor(t, "agent:1", fleetagent.PurposeDetectionBatch)
+	stray, err := svc.Register(t2, "agent:1", req) // lands in t2's partition
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetAgentDirectory(agents)
+
+	if err := svc.Revoke(t2, "agent:1", stray.KeyID, "op"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("t2 revoking under an agent it does not hold: err = %v, want not found", err)
+	}
+	if _, err := svc.List(t2, "agent:1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("t2 listing an agent it does not hold: err = %v, want not found", err)
+	}
+	keys, err := store.ListByAgent(t2, "agent:1")
+	if err != nil || len(keys) != 1 || !keys[0].RevokedAt.IsZero() {
+		t.Fatalf("the stray key changed: %+v %v", keys, err)
 	}
 }
