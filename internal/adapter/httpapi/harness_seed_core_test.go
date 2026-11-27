@@ -45,6 +45,9 @@ import (
 func init() {
 	registerHarnessSeed(harnessSeed{
 		Name: "core",
+		// The credential vault scopes by the tenant on the request context, as the Postgres vault does
+		// (#1687); the route still has to refuse a foreign caller itself, which TenantBound requires.
+		TenantBound: []string{"GET /api/v1/engagements/{id}/credentials"},
 		Routes: []string{
 			"GET /api/v1/engagements/{id}/bundle",
 			"GET /api/v1/engagements/{id}/credentials",
@@ -210,7 +213,7 @@ func seedCore(w *harnessWorld) []string {
 	if err != nil {
 		t.Fatalf("core credentials service: %v", err)
 	}
-	if err := credentials.Set(ctx, "core-seed", coreEngID, coreCredentialMarker, []byte("not-a-real-secret")); err != nil {
+	if err := credentials.Set(shared.WithTenant(ctx, "tenantA"), "core-seed", coreEngID, coreCredentialMarker, []byte("not-a-real-secret")); err != nil {
 		t.Fatalf("seed core credential: %v", err)
 	}
 	w.rt.credentials = credentials

@@ -20,7 +20,7 @@ func newMemVault(t *testing.T) *MemoryVault {
 
 func TestMemoryVaultPutResolve(t *testing.T) {
 	v := newMemVault(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "t1")
 	if err := v.Put(ctx, "eng1", "github_pat", []byte("ghp_secret")); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestMemoryVaultPutResolve(t *testing.T) {
 
 func TestMemoryVaultUpsertReplacesSecret(t *testing.T) {
 	v := newMemVault(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "t1")
 	_ = v.Put(ctx, "eng1", "tok", []byte("old"))
 	metas, _ := v.List(ctx, "eng1")
 	created := metas[0].CreatedAt
@@ -56,7 +56,7 @@ func TestMemoryVaultUpsertReplacesSecret(t *testing.T) {
 
 func TestMemoryVaultListNamesOnly(t *testing.T) {
 	v := newMemVault(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "t1")
 	_ = v.Put(ctx, "eng1", "b_tok", []byte("x"))
 	_ = v.Put(ctx, "eng1", "a_tok", []byte("y"))
 	_ = v.Put(ctx, "eng2", "other", []byte("z"))
@@ -71,7 +71,7 @@ func TestMemoryVaultListNamesOnly(t *testing.T) {
 
 func TestMemoryVaultDelete(t *testing.T) {
 	v := newMemVault(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "t1")
 	_ = v.Put(ctx, "eng1", "tok", []byte("x"))
 	if err := v.Delete(ctx, "eng1", "tok"); err != nil {
 		t.Fatal(err)
@@ -87,8 +87,34 @@ func TestMemoryVaultDelete(t *testing.T) {
 func TestMemoryVaultRejectsBadName(t *testing.T) {
 	v := newMemVault(t)
 	for _, bad := range []string{"", "has space", "semi;colon", "$(inject)", "a/b"} {
-		if err := v.Put(context.Background(), "eng1", bad, []byte("x")); !errors.Is(err, shared.ErrValidation) {
+		if err := v.Put(shared.WithTenant(context.Background(), "t1"), "eng1", bad, []byte("x")); !errors.Is(err, shared.ErrValidation) {
 			t.Errorf("name %q must be rejected, got %v", bad, err)
 		}
+	}
+}
+
+// TestMemoryVaultIsTenantBound keeps the test twin honest: a context without a tenant is refused and
+// another tenant naming the same engagement reads nothing, as with the Postgres vault (#1687).
+func TestMemoryVaultIsTenantBound(t *testing.T) {
+	v := newMemVault(t)
+	a := shared.WithTenant(context.Background(), "ta")
+	b := shared.WithTenant(context.Background(), "tb")
+	if err := v.Put(a, "eng1", "token", []byte("a-secret")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Resolve(context.Background(), "eng1", "token"); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("an unscoped resolve: %v, want a validation refusal", err)
+	}
+	if _, err := v.Resolve(b, "eng1", "token"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("another tenant resolved the secret: %v", err)
+	}
+	if list, err := v.List(b, "eng1"); err != nil || len(list) != 0 {
+		t.Fatalf("another tenant listed %d secrets (%v)", len(list), err)
+	}
+	if err := v.Delete(b, "eng1", "token"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("another tenant deleted the secret: %v", err)
+	}
+	if got, err := v.Resolve(a, "eng1", "token"); err != nil || string(got) != "a-secret" {
+		t.Fatalf("own resolve = %q, %v", got, err)
 	}
 }

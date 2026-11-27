@@ -104,8 +104,8 @@ var rawPoolExceptions = map[string]rawPoolException{
 	"timestamp_store.go:LatestHead":                                {1, rawProcessControl},
 	"timestamp_store.go:Put":                                       {1, rawProcessControl},
 	"user_repo.go:Bootstrap":                                       {1, rawUserLegacy},
-	"user_repo.go:GetByAPIKeyHash":                                 {1, rawUserAPIKey},
 	"user_repo.go:GetByID":                                         {1, rawUserLegacy},
+	"user_repo.go:GetByAPIKeyHash":                                 {1, rawUserAPIKey},
 	"vulnerability_retention_store.go:RunVulnerabilityRetention":   {1, rawLegacyGlobal},
 	"vulnerability_source_store.go:Archive":                        {1, rawGlobalCatalog},
 	"vulnerability_source_store.go:Create":                         {1, rawGlobalCatalog},
@@ -247,6 +247,7 @@ var securityDefinerExceptions = map[string]string{
 	"synapse_rotate_jira_inbound_webhook":                     "callable: tenant-bound Jira webhook secret rotation",
 	"synapse_offer_teams_link":                                "callable: Teams bot link-code offer with a per-conversation cap",
 	"synapse_claim_teams_link":                                "callable: Teams link-code exact-digest single-use claim",
+	"fn_assign_credential_tenant":                             "trigger: credentials tenant from the scan run engagement bridge (#1687)",
 }
 
 // runtimeExecuteGrants is the complete set of function EXECUTE grants GrantRuntimePrivileges gives

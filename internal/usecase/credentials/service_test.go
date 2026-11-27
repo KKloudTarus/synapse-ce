@@ -40,7 +40,7 @@ func newSvc(t *testing.T) (*Service, *vault.MemoryVault, *fakeAudit) {
 
 func TestSetStoresAndAuditsWithoutValue(t *testing.T) {
 	svc, mv, audit := newSvc(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "t1")
 	if err := svc.Set(ctx, "alice", "eng1", "github_pat", []byte("ghp_TOPSECRET")); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestSetStoresAndAuditsWithoutValue(t *testing.T) {
 
 func TestSetValidation(t *testing.T) {
 	svc, _, audit := newSvc(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "t1")
 	if err := svc.Set(ctx, "alice", "eng1", "name", nil); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("empty secret must be ErrValidation, got %v", err)
 	}
@@ -82,7 +82,7 @@ func TestSetValidation(t *testing.T) {
 
 func TestListAndDelete(t *testing.T) {
 	svc, _, audit := newSvc(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "t1")
 	_ = svc.Set(ctx, "alice", "eng1", "tok_a", []byte("a"))
 	_ = svc.Set(ctx, "alice", "eng1", "tok_b", []byte("b"))
 	metas, err := svc.List(ctx, "eng1")

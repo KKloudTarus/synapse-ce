@@ -61,6 +61,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   and neither migration locks `engagements`. **Rollout:** run v0.2.4 or later while it applies. Every
   `scan_runs` statement in v0.2.4 binds its tenant and names `tenant_id`; an older binary does not.
 
+- **The engagement secret vault reads and writes only inside the caller's tenant (#1687).** Migration
+  0277 gives every `credentials` row the tenant of its engagement; a trigger fills it for a writer that
+  does not name it and refuses one that names another tenant, so a caller in one tenant can no longer
+  overwrite another tenant's secret through the `(engagement_id, name)` upsert. The vault binds the
+  caller's tenant, filters by it, and refuses a context without one. Forced row-level security on the
+  table follows in the next release, once no deployed binary reads it unscoped.
+
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
   (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
   served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator

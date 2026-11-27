@@ -77,7 +77,8 @@ func TestCSPMFullRunDoesNotLeakCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultStore := vault.NewMemoryVault(cipher, func() time.Time { return now })
-	if err := vaultStore.Put(context.Background(), "eng", "aws-prod", []byte(secret)); err != nil {
+	// The vault is tenant-bound like the Postgres one; the run resolves the secret inside tenant "tenant".
+	if err := vaultStore.Put(shared.WithTenant(context.Background(), "tenant"), "eng", "aws-prod", []byte(secret)); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.WithValue(context.Background(), principalKey, Principal{ID: "operator", TenantID: "tenant", Credential: authz.KindBootstrap})

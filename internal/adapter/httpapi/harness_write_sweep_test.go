@@ -78,7 +78,8 @@ var harnessWriteRequests = map[string]harnessWriteRequest{
 	// refused too: source publication is not configured in this fixture.
 	"POST /api/v1/projects/{key}/analyses/{id}/source": {headers: map[string]string{"Content-Type": "application/x-tar", "X-Synapse-Tool-Version": "write-sweep"}},
 	// Engagement child writes behind withEngTenant. The core seed leaves finding f1 at version 2.
-	"POST /api/v1/engagements/{id}/credentials":             {body: `{"name":"n1","value":"write-sweep-secret"}`},
+	"POST /api/v1/engagements/{id}/credentials":             {body: `{"name":"n1","value":"write-sweep-secret"}`, tenantBound: true},
+	"DELETE /api/v1/engagements/{id}/credentials/{name}":    {tenantBound: true},
 	"POST /api/v1/engagements/{id}/evidence":                {body: `{"content_base64":"d3JpdGUgc3dlZXA=","filename":"sweep.txt"}`},
 	"POST /api/v1/engagements/{id}/findings":                {body: `{"title":"write sweep","severity":"high"}`},
 	"POST /api/v1/engagements/{id}/findings/{fid}/comments": {body: `{"body":"write sweep"}`},
