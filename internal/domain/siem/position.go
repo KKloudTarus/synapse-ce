@@ -80,6 +80,7 @@ type AuditFact struct {
 	Hash          string
 	PreviousHash  string
 	HashVersion   int
+	HashScheme    int // audit.HashScheme* the row was hashed with; zero reads as legacy
 	Severity      string
 	EngagementID  string
 	AdvisoryID    string

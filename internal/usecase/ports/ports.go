@@ -1332,6 +1332,10 @@ type AuditEntry struct {
 	At           time.Time         `json:"at"`
 	Hash         string            `json:"hash,omitempty"`
 	PreviousHash string            `json:"previous_hash,omitempty"`
+	// HashScheme is the audit.HashScheme* Hash was computed with. The audit log assigns it on
+	// append alongside Hash; zero, which every record written before schemes existed carries,
+	// reads as the legacy scheme.
+	HashScheme int `json:"hash_scheme,omitempty"`
 }
 
 // AuditLogger appends immutable, attributable audit records. The implementation

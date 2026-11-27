@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -113,32 +114,77 @@ type Evidence struct {
 	PreviousHash string    // the prior item's Hash; empty for the first link
 	CreatedBy    string    // human/agent id that produced this evidence (attribution)
 	CreatedAt    time.Time
+	HashScheme   int // the scheme Hash was computed with; zero reads as HashSchemeLegacy
 }
 
-// evSep separates fields in the hash preimage so distinct field boundaries can't collide.
+// evSep terminates each field of the legacy preimage.
 const evSep = "\x1e"
 
-// ComputeHash returns the chain hash binding an evidence link to its predecessor. It binds
-// not just previous_hash + content but ALSO the attribution + metadata (kind, finding_id,
-// storage_ref, created_by, created_at) – so a rewrite of WHO produced the evidence or WHEN
-// is detected by VerifyChain, not just a content edit. The timestamp is
-// truncated to µs (matching Postgres timestamptz) so the hash is stable across a DB
-// round-trip. Including previous_hash links the chain: any earlier change cascades.
+// Hash schemes. A scheme fixes how a link's fields become the bytes that are hashed. It is stored
+// with every link, and verification recomputes each link under the scheme it was written with, so
+// one chain may hold links of both schemes and still verify end to end.
+const (
+	// HashSchemeLegacy terminates each field with a record separator. Field contents are neither
+	// escaped nor length-prefixed, so Kind "a\x1eb" with no finding and Kind "a" with finding "b"
+	// share a preimage. Links written under it keep verifying under it after writers move to
+	// HashSchemeFramed.
+	HashSchemeLegacy = 1
+	// HashSchemeFramed prefixes the preimage with a domain tag and writes every field, Content
+	// included, as its byte length followed by its bytes.
+	HashSchemeFramed = 2
+	// CurrentHashScheme is the scheme Seal writes. It stays legacy for one release, for the reason
+	// audit.CurrentHashScheme gives: a binary from before hash_scheme existed would recompute a
+	// framed link as legacy and report the chain tampered. The next release moves Seal to framed.
+	CurrentHashScheme = HashSchemeLegacy
+)
+
+// framedDomain separates evidence preimages from every other framed preimage in the product.
+const framedDomain = "synapse-evidence-link:v2"
+
+// ComputeHash returns the chain hash binding an evidence link to its predecessor under the link's
+// HashScheme. It binds not just previous_hash + content but ALSO the attribution + metadata (kind,
+// finding_id, storage_ref, created_by, created_at), so a rewrite of WHO produced the evidence or
+// WHEN is detected by VerifyChain, not just a content edit. The timestamp is truncated to µs
+// (matching Postgres timestamptz) so the hash is stable across a DB round-trip. Including
+// previous_hash links the chain: any earlier change cascades. An unknown scheme returns "", which
+// no stored hash equals, so a link claiming one never verifies.
 func ComputeHash(e Evidence) string {
+	stamp := e.CreatedAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
 	h := sha256.New()
-	write := func(s string) { h.Write([]byte(s)); h.Write([]byte(evSep)) }
-	write(e.PreviousHash)
-	write(e.Kind)
-	write(e.FindingID.String())
-	write(e.StorageRef)
-	write(e.CreatedBy)
-	write(e.CreatedAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano))
-	h.Write(e.Content)
+	switch e.HashScheme {
+	case 0, HashSchemeLegacy:
+		write := func(s string) { h.Write([]byte(s)); h.Write([]byte(evSep)) }
+		write(e.PreviousHash)
+		write(e.Kind)
+		write(e.FindingID.String())
+		write(e.StorageRef)
+		write(e.CreatedBy)
+		write(stamp)
+		h.Write(e.Content)
+	case HashSchemeFramed:
+		field := func(b []byte) {
+			var n [8]byte
+			binary.BigEndian.PutUint64(n[:], uint64(len(b)))
+			h.Write(n[:])
+			h.Write(b)
+		}
+		field([]byte(framedDomain))
+		field([]byte(e.PreviousHash))
+		field([]byte(e.Kind))
+		field([]byte(e.FindingID.String()))
+		field([]byte(e.StorageRef))
+		field([]byte(e.CreatedBy))
+		field([]byte(stamp))
+		field(e.Content)
+	default:
+		return ""
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Seal returns a copy of e with Hash computed from its chained fields.
+// Seal returns a copy of e under CurrentHashScheme with Hash computed from its chained fields.
 func (e Evidence) Seal() Evidence {
+	e.HashScheme = CurrentHashScheme
 	e.Hash = ComputeHash(e)
 	return e
 }
@@ -152,7 +198,8 @@ func VerifyChain(items []Evidence) error {
 		if e.PreviousHash != prev {
 			return fmt.Errorf("%w: item %d previous_hash does not match the prior item", ErrChainBroken, i)
 		}
-		if e.Hash != ComputeHash(e) {
+		// An unknown scheme computes "", which must not match a link stored with an empty hash.
+		if want := ComputeHash(e); want == "" || e.Hash != want {
 			return fmt.Errorf("%w: item %d hash does not match its content/attribution (tampered)", ErrChainBroken, i)
 		}
 		prev = e.Hash

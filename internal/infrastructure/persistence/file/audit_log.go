@@ -257,7 +257,8 @@ func (a *AuditLog) recordLocked(entry auditFileEntry) error {
 	e := entry.AuditEntry
 	previous := a.heads[entry.TenantID]
 	e.PreviousHash = previous
-	e.Hash = audit.ComputeHash(previous, e.Actor, e.Action, e.Target, e.Metadata, e.At)
+	e.HashScheme = audit.CurrentHashScheme
+	e.Hash = audit.ComputeHash(e.HashScheme, previous, e.Actor, e.Action, e.Target, e.Metadata, e.At)
 	entry.AuditEntry = e
 
 	b, err := json.Marshal(entry)
@@ -284,6 +285,7 @@ func toRecords(entries []auditFileEntry) []audit.Record {
 		recs[i] = audit.Record{
 			Actor: e.Actor, Action: e.Action, Target: e.Target,
 			Metadata: e.Metadata, At: e.At, Hash: e.Hash, PreviousHash: e.PreviousHash,
+			Scheme: e.HashScheme,
 		}
 	}
 	return recs

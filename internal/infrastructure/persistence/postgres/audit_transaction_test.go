@@ -395,7 +395,7 @@ func TestVerifyGlobalAttributesABreakToOneTenantChain(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		action := "verify.chains." + stamp + "." + strconv.Itoa(i)
 		when := at.Add(time.Duration(i) * time.Second)
-		hash := audit.ComputeHash(prev, "operator", action, "t", nil, when)
+		hash := audit.ComputeHash(audit.HashSchemeLegacy, prev, "operator", action, "t", nil, when)
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version)
 			 VALUES ($1,'operator',$2,'t','{}',$3,$4,$5,2)`,
@@ -408,7 +408,7 @@ func TestVerifyGlobalAttributesABreakToOneTenantChain(t *testing.T) {
 	// A forged row whose previous_hash points at nothing in its own chain.
 	when := at.Add(time.Hour)
 	forgedAction := "verify.chains.forged." + stamp
-	forged := audit.ComputeHash("deadbeef", "mallory", forgedAction, "t", nil, when)
+	forged := audit.ComputeHash(audit.HashSchemeLegacy, "deadbeef", "mallory", forgedAction, "t", nil, when)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash, hash_version)
 		 VALUES ($1,'mallory',$2,'t','{}',$3,$4,'deadbeef',2)`,

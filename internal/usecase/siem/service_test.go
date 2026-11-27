@@ -385,7 +385,7 @@ func chain(actor, action, target, prev string, at time.Time, meta map[string]str
 	if meta == nil {
 		meta = map[string]string{}
 	}
-	hash := audit.ComputeHash(prev, actor, action, target, meta, at)
+	hash := audit.ComputeHash(audit.HashSchemeLegacy, prev, actor, action, target, meta, at)
 	return siem.AuditFact{
 		Actor: actor, Action: action, Target: target, AtUnixMicro: at.UnixMicro(),
 		Hash: hash, PreviousHash: prev, HashVersion: 2, Severity: meta["severity"],

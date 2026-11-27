@@ -29,28 +29,38 @@ type RestoreEvidenceChain = ports.RestoreEvidenceChain
 func NewEvidenceStore(pool *pgxpool.Pool) *EvidenceStore { return &EvidenceStore{pool: pool} }
 
 // NewReadOnlyEvidenceStore constructs a recovery-only reader. The connection
-// identity must have rolbypassrls, or be the explicitly verified database owner;
-// normal application identities fail closed rather than relying on row_security.
+// identity must be able to read past row-level security: a BYPASSRLS role or a
+// superuser. The database owner is not enough: evidence and audit_log force their
+// policies on the owner too, so it reads a filtered set that verifies as intact.
 // The returned reader opens every enumeration transaction READ ONLY.
 func NewReadOnlyEvidenceStore(ctx context.Context, pool *pgxpool.Pool) (*RestoreEvidenceStore, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("%w: restore evidence store requires database pool", shared.ErrValidation)
 	}
-	var bypassRLS, databaseOwner bool
-	if err := pool.QueryRow(ctx, `SELECT r.rolbypassrls, r.oid = d.datdba
+	var bypassRLS, superuser bool
+	if err := pool.QueryRow(ctx, `SELECT r.rolbypassrls, r.rolsuper
 		FROM pg_roles r
-		JOIN pg_database d ON d.datname = current_database()
-		WHERE r.rolname = current_user`).Scan(&bypassRLS, &databaseOwner); err != nil {
+		WHERE r.rolname = current_user`).Scan(&bypassRLS, &superuser); err != nil {
 		return nil, fmt.Errorf("restore evidence: inspect database identity: %w", err)
 	}
-	if !restoreRoleEligible(bypassRLS, databaseOwner) {
-		return nil, fmt.Errorf("restore evidence: database identity must have BYPASSRLS or own the restored database")
+	if !restoreRoleEligible(bypassRLS, superuser) {
+		return nil, fmt.Errorf("restore evidence: database identity must have BYPASSRLS or be a superuser")
 	}
 	return &RestoreEvidenceStore{pool: pool}, nil
 }
 
-func restoreRoleEligible(bypassRLS, databaseOwner bool) bool {
-	return bypassRLS || databaseOwner
+// storedHashScheme is the scheme column value for a link. Zero is how a link built before schemes
+// existed (a transfer bundle exported by an older release, say) names the legacy scheme, and the
+// column admits only the explicit value.
+func storedHashScheme(e evidence.Evidence) int {
+	if e.HashScheme == 0 {
+		return evidence.HashSchemeLegacy
+	}
+	return e.HashScheme
+}
+
+func restoreRoleEligible(bypassRLS, superuser bool) bool {
+	return bypassRLS || superuser
 }
 
 var _ ports.EvidenceStore = (*EvidenceStore)(nil)
@@ -73,9 +83,9 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 				findingID = e.FindingID.String()
 			}
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO evidence (id, tenant_id, finding_id, engagement_id, kind, sha256, previous_hash, storage_ref, content, created_by, created_at)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-				e.ID.String(), tenantID.String(), findingID, e.EngagementID.String(), e.Kind, e.Hash, e.PreviousHash, e.StorageRef, e.Content, e.CreatedBy, e.CreatedAt); err != nil {
+				`INSERT INTO evidence (id, tenant_id, finding_id, engagement_id, kind, sha256, previous_hash, storage_ref, content, created_by, created_at, hash_scheme)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+				e.ID.String(), tenantID.String(), findingID, e.EngagementID.String(), e.Kind, e.Hash, e.PreviousHash, e.StorageRef, e.Content, e.CreatedBy, e.CreatedAt, storedHashScheme(e)); err != nil {
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					return fmt.Errorf("evidence chain: parent already linked: %w", shared.ErrConflict)
@@ -91,7 +101,7 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID shared.ID) (out []evidence.Evidence, err error) {
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT id, COALESCE(finding_id,''), engagement_id, kind, sha256, COALESCE(previous_hash,''), COALESCE(storage_ref,''), content, COALESCE(created_by,''), created_at
+			`SELECT id, COALESCE(finding_id,''), engagement_id, kind, sha256, COALESCE(previous_hash,''), COALESCE(storage_ref,''), content, COALESCE(created_by,''), created_at, hash_scheme
 		 FROM evidence WHERE engagement_id=$1 ORDER BY seq ASC`, engagementID.String())
 		if err != nil {
 			return fmt.Errorf("list evidence: %w", err)
@@ -102,7 +112,7 @@ func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID share
 				e            evidence.Evidence
 				id, fid, eid string
 			)
-			if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt); err != nil {
+			if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme); err != nil {
 				return fmt.Errorf("scan evidence: %w", err)
 			}
 			e.ID = shared.ID(id)
@@ -117,7 +127,7 @@ func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID share
 
 func (r *EvidenceStore) LookupSealedByID(ctx context.Context, engagementID, evidenceID shared.ID) (out evidence.Evidence, found bool, err error) {
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT id,COALESCE(finding_id,''),engagement_id,kind,sha256,COALESCE(previous_hash,''),COALESCE(storage_ref,''),content,COALESCE(created_by,''),created_at FROM evidence WHERE engagement_id=$1 AND id=$2`, engagementID.String(), evidenceID.String()).Scan(&out.ID, &out.FindingID, &out.EngagementID, &out.Kind, &out.Hash, &out.PreviousHash, &out.StorageRef, &out.Content, &out.CreatedBy, &out.CreatedAt)
+		return tx.QueryRow(ctx, `SELECT id,COALESCE(finding_id,''),engagement_id,kind,sha256,COALESCE(previous_hash,''),COALESCE(storage_ref,''),content,COALESCE(created_by,''),created_at,hash_scheme FROM evidence WHERE engagement_id=$1 AND id=$2`, engagementID.String(), evidenceID.String()).Scan(&out.ID, &out.FindingID, &out.EngagementID, &out.Kind, &out.Hash, &out.PreviousHash, &out.StorageRef, &out.Content, &out.CreatedBy, &out.CreatedAt, &out.HashScheme)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return evidence.Evidence{}, false, nil
@@ -129,17 +139,22 @@ func (r *EvidenceStore) LookupSealedByID(ctx context.Context, engagementID, evid
 }
 
 // ListEvidenceChains enumerates every restored chain only inside a READ ONLY
-// transaction. It neither sets row_security nor assumes that a normal RLS role
-// can disable it; construction has already required the recovery identity.
+// transaction. Construction has already required the recovery identity, but the database owner is
+// still subject to a policy on a table that forces row-level security, and a filtered read would
+// return no chains, which verifies as intact. row_security off turns any policy that would apply
+// into an error, so the enumeration is either complete or refused.
 func (r *RestoreEvidenceStore) ListEvidenceChains(ctx context.Context) ([]RestoreEvidenceChain, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, fmt.Errorf("restore evidence: begin read-only transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('row_security', 'off', true)"); err != nil {
+		return nil, fmt.Errorf("restore evidence: require unfiltered read: %w", err)
+	}
 
 	rows, err := tx.Query(ctx, `SELECT id, COALESCE(finding_id,''), engagement_id, kind, sha256,
-		COALESCE(previous_hash,''), COALESCE(storage_ref,''), content, COALESCE(created_by,''), created_at
+		COALESCE(previous_hash,''), COALESCE(storage_ref,''), content, COALESCE(created_by,''), created_at, hash_scheme
 		FROM evidence ORDER BY engagement_id ASC, seq ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("restore evidence: list chains: %w", err)
@@ -153,7 +168,7 @@ func (r *RestoreEvidenceStore) ListEvidenceChains(ctx context.Context) ([]Restor
 			e            evidence.Evidence
 			id, fid, eid string
 		)
-		if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme); err != nil {
 			return nil, fmt.Errorf("restore evidence: scan chain: %w", err)
 		}
 		e.ID = shared.ID(id)
@@ -196,12 +211,12 @@ func (r *EvidenceStore) LookupSealedForFinding(ctx context.Context, engagementID
 	var out evidence.Evidence
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
-			`SELECT id, engagement_id, finding_id, kind, storage_ref, sha256, previous_hash, created_by, created_at
+			`SELECT id, engagement_id, finding_id, kind, storage_ref, sha256, previous_hash, created_by, created_at, hash_scheme
 			 FROM evidence
 			 WHERE engagement_id=$1 AND finding_id=$2 AND kind=$3
 			 ORDER BY seq DESC LIMIT 1`,
 			engagementID.String(), findingID.String(), kind,
-		).Scan(&out.ID, &out.EngagementID, &out.FindingID, &out.Kind, &out.StorageRef, &out.Hash, &out.PreviousHash, &out.CreatedBy, &out.CreatedAt)
+		).Scan(&out.ID, &out.EngagementID, &out.FindingID, &out.Kind, &out.StorageRef, &out.Hash, &out.PreviousHash, &out.CreatedBy, &out.CreatedAt, &out.HashScheme)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return evidence.Evidence{}, false, nil

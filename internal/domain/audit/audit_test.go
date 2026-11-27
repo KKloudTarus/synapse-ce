@@ -19,7 +19,7 @@ func chain(rows [][3]string, when time.Time) []Record {
 	prev := ""
 	out := make([]Record, len(rows))
 	for i, r := range rows {
-		h := ComputeHash(prev, r[0], r[1], r[2], nil, when)
+		h := ComputeHash(HashSchemeLegacy, prev, r[0], r[1], r[2], nil, when)
 		out[i] = Record{Actor: r[0], Action: r[1], Target: r[2], At: when, Hash: h, PreviousHash: prev}
 		prev = h
 	}
@@ -28,16 +28,16 @@ func chain(rows [][3]string, when time.Time) []Record {
 
 func TestComputeHashDeterministicAndOrderIndependentMetadata(t *testing.T) {
 	when := at("2026-06-21T12:00:00Z")
-	a := ComputeHash("prev", "alice", "recon.subfinder", "example.com",
+	a := ComputeHash(HashSchemeLegacy, "prev", "alice", "recon.subfinder", "example.com",
 		map[string]string{"tool": "subfinder", "kind": "domain"}, when)
 	// Same content, metadata inserted in a different order → same hash (keys sorted).
-	b := ComputeHash("prev", "alice", "recon.subfinder", "example.com",
+	b := ComputeHash(HashSchemeLegacy, "prev", "alice", "recon.subfinder", "example.com",
 		map[string]string{"kind": "domain", "tool": "subfinder"}, when)
 	if a != b {
 		t.Fatalf("metadata order must not change the hash:\n a=%s\n b=%s", a, b)
 	}
 	// A different previous hash → different chain hash (binds to history).
-	if c := ComputeHash("other", "alice", "recon.subfinder", "example.com",
+	if c := ComputeHash(HashSchemeLegacy, "other", "alice", "recon.subfinder", "example.com",
 		map[string]string{"tool": "subfinder", "kind": "domain"}, when); c == a {
 		t.Fatal("hash must depend on previousHash")
 	}
@@ -48,7 +48,7 @@ func TestComputeHashStableAcrossMicrosecondPrecision(t *testing.T) {
 	// (as Postgres stores it) must hash identically, else verification false-fails.
 	nanos := at("2026-06-21T12:00:00.123456789Z")
 	micros := nanos.Truncate(time.Microsecond)
-	if ComputeHash("p", "a", "x", "t", nil, nanos) != ComputeHash("p", "a", "x", "t", nil, micros) {
+	if ComputeHash(HashSchemeLegacy, "p", "a", "x", "t", nil, nanos) != ComputeHash(HashSchemeLegacy, "p", "a", "x", "t", nil, micros) {
 		t.Fatal("hash must be stable when the timestamp is truncated to microseconds")
 	}
 }

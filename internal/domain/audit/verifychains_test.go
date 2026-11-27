@@ -13,7 +13,7 @@ func chainOf(prefix string, n int) []Record {
 	for i := 0; i < n; i++ {
 		r := Record{Actor: "operator", Action: prefix + "." + string(rune('a'+i)), Target: "t", At: at.Add(time.Duration(i) * time.Second)}
 		r.PreviousHash = prev
-		r.Hash = ComputeHash(prev, r.Actor, r.Action, r.Target, r.Metadata, r.At)
+		r.Hash = ComputeHash(HashSchemeLegacy, prev, r.Actor, r.Action, r.Target, r.Metadata, r.At)
 		out = append(out, r)
 		prev = r.Hash
 	}

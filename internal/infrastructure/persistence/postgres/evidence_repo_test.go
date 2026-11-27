@@ -59,15 +59,17 @@ func TestPostgresEvidenceForkGuard(t *testing.T) {
 func TestRestoreRoleEligible(t *testing.T) {
 	for _, test := range []struct {
 		name                   string
-		bypassRLS, owner, want bool
+		bypassRLS, super, want bool
 	}{
 		{name: "bypass RLS role", bypassRLS: true, want: true},
-		{name: "database owner", owner: true, want: true},
-		{name: "normal application role", want: false},
+		{name: "superuser", super: true, want: true},
+		// The owner is subject to the forced policies on evidence and audit_log, so it reads a
+		// filtered set; it is not a recovery identity (#1703).
+		{name: "normal application role or database owner", want: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := restoreRoleEligible(test.bypassRLS, test.owner); got != test.want {
-				t.Fatalf("restoreRoleEligible(%v, %v) = %v, want %v", test.bypassRLS, test.owner, got, test.want)
+			if got := restoreRoleEligible(test.bypassRLS, test.super); got != test.want {
+				t.Fatalf("restoreRoleEligible(%v, %v) = %v, want %v", test.bypassRLS, test.super, got, test.want)
 			}
 		})
 	}

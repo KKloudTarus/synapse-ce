@@ -9,6 +9,29 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Audit and evidence chains now record the encoding each hash was made with, ahead of an
+  unambiguous one (#1703).** The hash preimage terminated each field with a separator but neither
+  escaped nor length-prefixed it, so two different records could share a hash: audit metadata
+  `{"a=b": "c"}` and `{"a": "b=c"}` both wrote `a=b=c`. Both tables refuse UPDATE and DELETE, so no
+  stored row could be swapped, but a sealed hash did not name one attribution. Migrations 0273 and 0274
+  add a validated `hash_scheme` column to `audit_log` and `evidence`, and every reader (the audit and
+  evidence verifiers, restore verification, the SIEM export, JSONL audit files and transfer bundles)
+  recomputes each row under its own scheme. Scheme 2 prefixes a domain tag and writes every field as its
+  length and its bytes. This release still writes scheme 1: a binary from before the column reads every
+  row as scheme 1, so a scheme 2 row written during a rolling deploy or after a rollback would read to it
+  as tampered. Writers move to scheme 2 in the next release. The column is separate from
+  `audit_log.hash_version`, which names the chain topology. A link whose scheme no reader knows now
+  fails verification even when its stored hash is empty.
+
+- **`VerifyGlobal` can no longer report a filtered read as an intact audit chain (#1703).** It set
+  `app.audit_global_read`, which no policy consults, so its visibility depended entirely on the
+  connecting role. A role that cannot bypass row-level security read zero rows, and zero rows verified
+  as `intact: true`. It now turns `row_security` off for its transaction, which makes Postgres raise an
+  error rather than apply a policy, so the verification either sees every row or refuses. Restore
+  evidence enumeration does the same. `synapse-verify-restore` now requires a `BYPASSRLS` role or a
+  superuser and refuses the database owner at startup, because both tables force their policies on
+  the owner.
+
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
   (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
   served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator
