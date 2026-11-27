@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
@@ -72,6 +72,22 @@ describe('InboxPage', () => {
     fireEvent.change(select, { target: { value: 'inherit' } })
     expect(await screen.findByDisplayValue('Use the default (on)')).toBeInTheDocument()
     expect(screen.queryByText('Use the default (off)')).not.toBeInTheDocument()
+  })
+
+  it('renders the preference catalogue through a windowed table (#1704)', async () => {
+    // One row for every configurable event on every personal channel: 33 x 4 = 132 rows today.
+    const prefs = Array.from({ length: 33 }, (_, event) => ['in_app', 'email', 'slack', 'teams'].map((channel) => ({
+      event_type: `event_${event}.happened`, channel, state: 'inherit' as const, revision: 0, mandatory: false, available: true,
+    }))).flat()
+    vi.mocked(api.inboxPage).mockResolvedValue({ items: [] })
+    vi.mocked(api.inboxPreferences).mockResolvedValue({ items: prefs })
+    render(<MemoryRouter><InboxPage /></MemoryRouter>)
+    const table = await screen.findByTestId('virtual-table')
+    expect(table).toHaveAttribute('aria-rowcount', String(prefs.length + 1))
+    const rendered = within(table).getAllByRole('row').length - 1
+    expect(rendered).toBeGreaterThan(0)
+    expect(rendered).toBeLessThan(prefs.length)
+    expect(within(table).getAllByRole('combobox')).toHaveLength(rendered)
   })
 
   it('keeps the newest page when an older request finishes last', async () => {

@@ -1,6 +1,7 @@
 import { BellRinging01, Copy01, FileCode02, Plus, RefreshCw01 } from '@untitledui/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { VirtualTable, type Column } from '../../../components/synapse/VirtualTable'
 import { Button, Card, EmptyState, ErrorState, InfoNote, Pill, Select, Spinner } from '../../../components/ui'
 import {
   api,
@@ -284,24 +285,50 @@ function BuiltinList({
       />
     )
   }
+  // One default per event type, channel family and language: 264 rows today, growing with the event
+  // catalogue rather than with anything the reader asked for. VirtualTable keeps the card at a fixed
+  // height and only the visible rows in the DOM (#1704).
+  const columns: Column<BuiltinNotificationTemplate>[] = [
+    {
+      header: 'Event',
+      className: 'flex-1 min-w-[12rem]',
+      cell: (builtin) => (
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-primary" title={eventLabel(catalog, builtin.event_type)}>
+            {eventLabel(catalog, builtin.event_type)}
+          </div>
+          {builtin.event_type !== ANY_EVENT && <div className="truncate font-mono text-[11px] text-tertiary">{builtin.event_type}</div>}
+        </div>
+      ),
+    },
+    { header: 'Family', className: 'w-28 shrink-0 text-secondary', cell: (builtin) => FAMILY_LABEL[builtin.family] },
+    { header: 'Language', className: 'w-28 shrink-0 text-secondary', cell: (builtin) => LOCALE_LABEL[builtin.locale] ?? builtin.locale },
+    {
+      header: <span className="sr-only">Clone</span>,
+      className: 'w-52 shrink-0 text-right',
+      cell: (builtin) => (
+        <Button variant="secondary" aria-label={`Clone ${builtinLabel(catalog, builtin)}`} onClick={() => onClone(builtin)}>
+          <Copy01 className="size-4" /> Clone to customize
+        </Button>
+      ),
+    },
+  ]
   return (
-    <ul className="divide-y divide-secondary rounded-lg border border-secondary">
-      {builtins.map((builtin) => {
-        const label = `${eventLabel(catalog, builtin.event_type)} · ${FAMILY_LABEL[builtin.family]} · ${LOCALE_LABEL[builtin.locale] ?? builtin.locale}`
-        return (
-          <li key={`${builtin.event_type}/${builtin.family}/${builtin.locale}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-primary">{label}</p>
-              <p className="text-xs text-tertiary">Read-only built-in default</p>
-            </div>
-            <Button variant="secondary" aria-label={`Clone ${label}`} onClick={() => onClone(builtin)}>
-              <Copy01 className="size-4" /> Clone to customize
-            </Button>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="rounded-lg border border-secondary">
+      <VirtualTable
+        items={builtins}
+        columns={columns}
+        rowKey={(builtin) => `${builtin.event_type}/${builtin.family}/${builtin.locale}`}
+        rowHeight={60}
+        maxHeightClass="max-h-[60vh]"
+        tableMinWidthClass="min-w-[40rem]"
+      />
+    </div>
   )
+}
+
+function builtinLabel(catalog: NotificationEventSpec[], builtin: BuiltinNotificationTemplate) {
+  return `${eventLabel(catalog, builtin.event_type)} · ${FAMILY_LABEL[builtin.family]} · ${LOCALE_LABEL[builtin.locale] ?? builtin.locale}`
 }
 
 interface TemplateGroup {
