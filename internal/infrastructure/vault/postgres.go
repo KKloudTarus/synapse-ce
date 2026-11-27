@@ -20,8 +20,8 @@ import (
 // Every operation runs inside the caller's tenant (withContextTenant) and names that tenant
 // in its predicate, so an engagement id from another tenant resolves to nothing. A context without a
 // tenant is refused, as every other tenant-scoped store refuses it. Migration 0277 gave credentials
-// its tenant_id; forced row-level security on the table follows in the contract release (#1687), and
-// until then this predicate is the database-side floor under rt.withEngTenant.
+// its tenant_id and 0281 enforces it with forced row-level security (#1687), so the predicate and the
+// policy are two floors under rt.withEngTenant.
 type PostgresVault struct {
 	pool   *pgxpool.Pool
 	cipher *Cipher

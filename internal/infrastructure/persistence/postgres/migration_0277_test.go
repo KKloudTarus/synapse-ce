@@ -87,25 +87,8 @@ func TestMigration0277CredentialsCarryTheirTenant(t *testing.T) {
 		t.Fatal("a credential for an unknown engagement was stored")
 	}
 
-	// A row the backfill could not attribute (its engagement was deleted before 0277) has no tenant. A put
-	// that meets it writes nothing, and must say so rather than report a rotation that did not happen.
-	orphanEng := "cred-orphan-" + stamp
-	if _, err := pool.Exec(ctx, `ALTER TABLE credentials DISABLE TRIGGER trg_assign_credential_tenant`); err != nil {
-		t.Fatal(err)
-	}
-	_, seedErr := pool.Exec(ctx, `INSERT INTO credentials (engagement_id, name, ciphertext) VALUES ($1,'orphan','x')`, orphanEng)
-	if _, err := pool.Exec(ctx, `ALTER TABLE credentials ENABLE TRIGGER trg_assign_credential_tenant`); err != nil {
-		t.Fatal(err)
-	}
-	if seedErr != nil {
-		t.Fatalf("seed orphan row: %v", seedErr)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1,$2,'orphan')`, orphanEng, tenantA); err != nil {
-		t.Fatalf("seed orphan engagement: %v", err)
-	}
-	if err := v.Put(inA, shared.ID(orphanEng), "orphan", []byte("new")); !errors.Is(err, shared.ErrConflict) {
-		t.Fatalf("a put that wrote nothing reported %v, want a conflict", err)
-	}
+	// Rows the backfill could not attribute are removed by 0281, which also makes tenant_id NOT NULL;
+	// TestMigration0281EnforcesCredentialsTenantRLS covers them.
 
 	// The vulnerability feed keys live under the default tenant's "default" namespace.
 	inDefault := shared.WithTenant(ctx, shared.DefaultTenant)

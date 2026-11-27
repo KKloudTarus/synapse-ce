@@ -61,14 +61,14 @@ Synapse is a security tool. Changes must preserve these:
    reached through a `WithTenant` transaction; global reference data (e.g. `advisories`) is the
    deliberate exception. Cross-tenant access must be rejected by the hostile harness.
 
-   Two tables are mid-migration onto this rule. `credentials` (the engagement secret vault) and
-   `users` carry their tenant and are read inside a bound tenant, but forced RLS on them lands one
-   release after migrations 0277 and 0278, because the release before cannot read them under it.
-   Until then their isolation rests on the tenant predicate in `internal/infrastructure/vault/postgres.go`
-   and `userTenantPredicate`. **A new reader of either table must bind a tenant and filter by it**;
-   the authentication lookup goes through `synapse_user_by_api_key_hash`. Two reads still cross tenants on
-   purpose and must move behind an owner function before the contract release: the identity backfill's
-   API-key uniqueness count and the functions migrations 0253 and 0255 define. Tracked in #1687 and #1697.
+   `credentials` (the engagement secret vault) is enforced since migration 0281. `users` is the one table
+   still mid-migration onto this rule: it carries its tenant and is read inside a bound tenant, but forced
+   RLS lands one release after migration 0278, because the release before cannot read it under it. Until
+   then its isolation rests on `userTenantPredicate`. **A new reader of `users` must bind a tenant and
+   filter by it**; the authentication lookup goes through `synapse_user_by_api_key_hash`. Two reads still
+   cross tenants on purpose and must move behind an owner function before the contract release: the
+   identity backfill's API-key uniqueness count and the functions migrations 0253 and 0255 define.
+   Tracked in #1697.
 
 If a change would weaken any of these, please open an issue to discuss first.
 
