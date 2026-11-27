@@ -106,3 +106,27 @@ func TestEnrichBestEffort(t *testing.T) {
 		t.Errorf("hit-rate must be 0/0 on outage, got %+v", res.Matches)
 	}
 }
+
+// TestEnrichMatchesCVEViaAlias: an advisory reported under its GHSA id because it aliases two CVEs (pillow's
+// GHSA-j7hp-h8jx-5ppr: CVE-2023-4863 and its rejected duplicate CVE-2023-5129) still gets the KEV flag and
+// EPSS of the CVE in the catalogue.
+func TestEnrichMatchesCVEViaAlias(t *testing.T) {
+	kev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"catalogVersion":"2026.06.20","vulnerabilities":[{"cveID":"CVE-2023-4863"}]}`))
+	}))
+	defer kev.Close()
+	epss := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"cve":"CVE-2023-4863","epss":"0.9","date":"2026-06-20"}]}`))
+	}))
+	defer epss.Close()
+
+	e := New(kev.URL, epss.URL, nil)
+	res := e.Enrich(context.Background(), []vulnerability.Vulnerability{{
+		ID:         "GHSA-j7hp-h8jx-5ppr",
+		Aliases:    []string{"CVE-2023-4863", "CVE-2023-5129"},
+		Detections: []vulnerability.Detection{{Source: "osv", AdvisoryID: "GHSA-j7hp-h8jx-5ppr"}},
+	}})
+	if !res.Vulns[0].KEV || res.Vulns[0].EPSS != 0.9 {
+		t.Errorf("KEV=%v EPSS=%v, want true and 0.9 via the CVE alias", res.Vulns[0].KEV, res.Vulns[0].EPSS)
+	}
+}

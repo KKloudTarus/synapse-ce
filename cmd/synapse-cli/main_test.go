@@ -15,6 +15,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/suppression"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coverage"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
@@ -150,6 +152,26 @@ func TestScopeToNewCodeKeepsUnanchoredFindings(t *testing.T) {
 	}
 }
 
+// TestApplySuppressionsMatchesAdvisoryAlias: a .synapseignore rule naming CVE-2024-1001 drops the finding
+// reported under GHSA-aaaa-bbbb-cccc, whose only CVE it is, and leaves an unrelated advisory.
+func TestApplySuppressionsMatchesAdvisoryAlias(t *testing.T) {
+	v := vulnerability.Vulnerability{ID: "GHSA-aaaa-bbbb-cccc", Aliases: []string{"CVE-2024-1001"}, Component: "pillow", Version: "10.0.0"}
+	key := vulnerability.DedupKey(v.ID, v.Component, v.Version)
+	findings := []finding.Finding{
+		{Title: "pillow", AdvisoryID: v.ID, DedupKey: key},
+		{Title: "other", AdvisoryID: "CVE-2023-9999", DedupKey: vulnerability.DedupKey("CVE-2023-9999", "pillow", "10.0.0")},
+	}
+	rs := suppression.Ruleset{{RuleKey: "CVE-2024-1001", Reason: "not reachable", Expires: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}}
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	kept, n := applySuppressions(findings, rs, vulnerability.MatchIDsByDedupKey([]vulnerability.Vulnerability{v}), now)
+	if n != 1 || len(kept) != 1 || kept[0].Title != "other" {
+		t.Fatalf("want the aliased finding dropped and the other kept: kept=%+v n=%d", kept, n)
+	}
+	if _, n := applySuppressions(findings, rs, nil, now); n != 0 {
+		t.Errorf("without the alias map the rule must match the reported id only, suppressed %d", n)
+	}
+}
+
 func TestLoadAndApplySynapseignore(t *testing.T) {
 	dir := t.TempDir()
 	yaml := "suppress:\n  - rule: github-token\n    reason: \"rotated test token\"\n    expires: \"2099-12-31\"\n  - rule: old-rule\n    reason: \"stale\"\n    expires: \"2020-01-01\"\n"
@@ -167,7 +189,7 @@ func TestLoadAndApplySynapseignore(t *testing.T) {
 		{Title: "gh", RuleKey: "github-token"},
 		{Title: "kept", RuleKey: "aws-access-key-id"},
 	}
-	kept, n := applySuppressions(findings, rs, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	kept, n := applySuppressions(findings, rs, nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
 	if n != 1 || len(kept) != 1 || kept[0].RuleKey != "aws-access-key-id" {
 		t.Fatalf("active suppression must drop github-token only: kept=%+v n=%d", kept, n)
 	}

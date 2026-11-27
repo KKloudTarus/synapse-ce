@@ -1341,6 +1341,10 @@ func main() {
 		log.Error("vex service init failed", "err", err)
 		os.Exit(1)
 	}
+	if aliasStore, ok := advisoryStore.(ports.AdvisoryAliasStore); ok {
+		// A statement naming a CVE matches the finding reported under the GHSA whose record aliases it.
+		vexService.SetAliasStore(aliasStore)
+	}
 	if vulnerabilityTransactions != nil {
 		// One VEX document retires many findings. Without a transaction each retirement commits
 		// on its own, so a failure part way through leaves some findings retired and the rest not.

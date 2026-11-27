@@ -77,6 +77,12 @@ func (s Statement) MatchesFinding(advisory, component, version string) bool {
 	if s.Vulnerability == "" || s.Vulnerability != advisory {
 		return false
 	}
+	return s.targetsProduct(component, version)
+}
+
+// targetsProduct reports whether one of the statement's products is component at version: the product names
+// the component (directly or by PURL name) and its version is absent (all versions) or equal.
+func (s Statement) targetsProduct(component, version string) bool {
 	for _, p := range s.Products {
 		pComp, pVer := splitProduct(p)
 		if !componentMatches(component, pComp) {
@@ -87,6 +93,36 @@ func (s Statement) MatchesFinding(advisory, component, version string) bool {
 		}
 	}
 	return false
+}
+
+// AdvisoryIndex maps an advisory id, case-folded, to the positions of the findings that go by it: the id each
+// finding is reported under and any alias it may be matched by. A statement then reaches its candidate
+// findings with one map read instead of a pass over every finding.
+type AdvisoryIndex map[string][]int
+
+// Add records that the finding at pos goes by ids. Empty and repeated ids are skipped.
+func (x AdvisoryIndex) Add(pos int, ids ...string) {
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		key := strings.ToUpper(strings.TrimSpace(id))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		x[key] = append(x[key], pos)
+	}
+}
+
+// Candidates returns, in ascending order, the positions of the findings that go by this statement's advisory
+// id. A candidate is a target when TargetsProduct also holds for its component and version.
+func (s Statement) Candidates(x AdvisoryIndex) []int {
+	return x[strings.ToUpper(strings.TrimSpace(s.Vulnerability))]
+}
+
+// TargetsProduct reports whether one of the statement's products is component at version: the product names
+// the component (directly or by PURL name) and its version is absent (all versions) or equal.
+func (s Statement) TargetsProduct(component, version string) bool {
+	return s.targetsProduct(component, version)
 }
 
 func splitProduct(id string) (component, version string) {

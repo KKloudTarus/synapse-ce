@@ -3,9 +3,11 @@ package vex
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
@@ -497,5 +499,59 @@ func TestReapplyDoesNotSuppressJudgmentReachable(t *testing.T) {
 	}
 	if repo.list[0].Status != finding.StatusOpen {
 		t.Errorf("a persisted not_affected must NOT re-suppress a JUDGMENT-reachable SCA finding on reapply, got %s", repo.list[0].Status)
+	}
+}
+
+type fakeAliasStore struct {
+	edges []advisory.AliasEdge
+	err   error
+}
+
+func (s fakeAliasStore) AdvisoryAliasEdges(context.Context, []string) ([]advisory.AliasEdge, error) {
+	return s.edges, s.err
+}
+
+// TestApplyMatchesStatementByAdvisoryAlias: a statement naming GHSA-aaaa-aaaa-aaaa retires the finding stored
+// under CVE-2030-0001, whose only record aliases it. A record that aliases two CVEs bridges nothing: a true
+// "fixed" for CVE-2030-0002 must not retire the CVE-2030-0001 finding. A failed alias lookup matches the stored
+// id only.
+func TestApplyMatchesStatementByAdvisoryAlias(t *testing.T) {
+	doc := []byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+		{"vulnerability":{"name":"GHSA-aaaa-aaaa-aaaa"},"products":[{"@id":"pkg@1.0.0"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"},
+		{"vulnerability":{"name":"CVE-2030-0002"},"products":[{"@id":"other@1.0.0"}],"status":"fixed"}]}`)
+	edges := []advisory.AliasEdge{
+		{AliasID: "GHSA-aaaa-aaaa-aaaa", CanonicalID: "CVE-2030-0001"},
+		// GHSA-bbbb aliases both CVEs: a follow-up advisory, or a CVE and its duplicate.
+		{AliasID: "CVE-2030-0001", CanonicalID: "GHSA-bbbb-bbbb-bbbb"},
+		{AliasID: "CVE-2030-0002", CanonicalID: "GHSA-bbbb-bbbb-bbbb"},
+	}
+	findings := func() []finding.Finding {
+		return []finding.Finding{
+			{ID: "f1", EngagementID: "e1", DedupKey: "vuln:CVE-2030-0001:pkg:1.0.0", Status: finding.StatusOpen, Version: 1},
+			{ID: "f2", EngagementID: "e1", DedupKey: "vuln:CVE-2030-0001:other:1.0.0", Status: finding.StatusOpen, Version: 1},
+		}
+	}
+
+	svc, repo := newSvc(t, findings())
+	svc.SetAliasStore(fakeAliasStore{edges: edges})
+	res, err := svc.Apply(context.Background(), "alice", "", "e1", doc)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if res.Matched != 1 || repo.list[0].Status != finding.StatusFalsePos || repo.list[1].Status != finding.StatusOpen {
+		t.Fatalf("res=%+v statuses=%s,%s; want only f1 retired, through its own record", res, repo.list[0].Status, repo.list[1].Status)
+	}
+
+	svc, repo = newSvc(t, findings())
+	svc.SetAliasStore(fakeAliasStore{err: errors.New("advisory store down")})
+	res, err = svc.Apply(context.Background(), "alice", "", "e1", doc)
+	if err != nil {
+		t.Fatalf("apply with a failing alias store: %v", err)
+	}
+	if res.Matched != 0 || repo.list[0].Status != finding.StatusOpen {
+		t.Fatalf("a failed alias lookup must match the stored id only: res=%+v status=%s", res, repo.list[0].Status)
+	}
+	if !strings.Contains(res.AliasesUnavailable, "advisory store down") {
+		t.Errorf("AliasesUnavailable = %q, want the lookup failure named", res.AliasesUnavailable)
 	}
 }

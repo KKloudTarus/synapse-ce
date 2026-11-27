@@ -2,8 +2,10 @@ package sca
 
 import (
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 )
@@ -118,5 +120,51 @@ func TestApplyVEXDoesNotDoubleAnnotate(t *testing.T) {
 	applyVEX(res, doc)
 	if len(res.SuppressedFindings) != 1 {
 		t.Errorf("a finding already accepted must not be annotated twice, got %d", len(res.SuppressedFindings))
+	}
+}
+
+// TestApplyVEXMatchesAlias: an in-repo statement naming CVE-2024-1001 targets the finding reported under
+// GHSA-aaaa-bbbb-cccc, whose only CVE it is, and nothing else.
+func TestApplyVEXMatchesAlias(t *testing.T) {
+	v := vulnerability.Vulnerability{ID: "GHSA-aaaa-bbbb-cccc", Aliases: []string{"CVE-2024-1001", "PYSEC-2024-1"}, Component: "pillow", Version: "10.0.0"}
+	other := vulnerability.Vulnerability{ID: "CVE-2023-9999", Component: "pillow", Version: "10.0.0"}
+	res := &ScanResult{
+		Vulnerabilities: []vulnerability.Vulnerability{v, other},
+		Findings: []finding.Finding{
+			{ID: "f1", Title: "pillow", DedupKey: vulnDedupKey(v)},
+			{ID: "f2", Title: "pillow other", DedupKey: vulnDedupKey(other)},
+		},
+	}
+	doc, err := vex.Parse([]byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+        {"vulnerability":{"name":"CVE-2024-1001"},"products":[{"@id":"pkg:pypi/pillow@10.0.0"}],"status":"not_affected","justification":"vulnerable_code_not_in_execute_path"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyVEX(res, doc)
+	if len(res.SuppressedFindings) != 1 || res.SuppressedFindings[0].DedupKey != vulnDedupKey(v) {
+		t.Fatalf("want only the aliased finding accepted, got %+v", res.SuppressedFindings)
+	}
+}
+
+// TestApplyVEXDoesNotBridgeFollowUpAdvisory: path-to-regexp 0.1.12 fixes CVE-2024-45296 but still has
+// CVE-2026-4867, and both are aliases of GHSA-37ch-88jc-xwx2. A true "fixed" statement for the older CVE must
+// leave the finding on the gate.
+func TestApplyVEXDoesNotBridgeFollowUpAdvisory(t *testing.T) {
+	raws := []vulnerability.RawFinding{{
+		Source: "osv", AdvisoryID: vulnerability.PreferCVE("GHSA-37ch-88jc-xwx2", []string{"CVE-2024-45296", "CVE-2026-4867"}),
+		Aliases:   []string{"GHSA-37ch-88jc-xwx2", "CVE-2024-45296", "CVE-2026-4867"},
+		Component: "path-to-regexp", Version: "0.1.12",
+	}}
+	vulns := vulnerability.Correlate(raws)
+	res := &ScanResult{Vulnerabilities: vulns, Findings: []finding.Finding{{ID: "f1", Title: "path-to-regexp", DedupKey: vulnDedupKey(vulns[0])}}}
+	doc, err := vex.Parse([]byte(`{"@context":"https://openvex.dev/ns/v0.2.0","statements":[
+        {"vulnerability":{"name":"CVE-2024-45296"},"products":[{"@id":"pkg:npm/path-to-regexp@0.1.12"}],"status":"fixed"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyVEX(res, doc)
+	applySuppressions(res, ignore.Parse([]byte("CVE-2024-45296 # fixed in 0.1.12\n")), time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC))
+	if len(res.SuppressedFindings) != 0 {
+		t.Fatalf("a statement about the superseded CVE must not exempt the follow-up advisory: %+v", res.SuppressedFindings)
 	}
 }

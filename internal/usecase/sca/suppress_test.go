@@ -90,3 +90,22 @@ func TestApplySuppressionsExpiredDoesNotSuppress(t *testing.T) {
 		t.Errorf("an expired rule must not suppress; finding must re-surface. findings=%d suppressed=%d", len(res.Findings), len(res.SuppressedFindings))
 	}
 }
+
+// TestApplySuppressionsMatchesAlias: a .synapseignore rule naming CVE-2024-1001 exempts the finding reported
+// under GHSA-aaaa-bbbb-cccc, whose only CVE it is.
+func TestApplySuppressionsMatchesAlias(t *testing.T) {
+	now := time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	v := vulnerability.Vulnerability{ID: "GHSA-aaaa-bbbb-cccc", Aliases: []string{"CVE-2024-1001", "PYSEC-2024-1"}, Component: "pillow", Version: "10.0.0"}
+	other := vulnerability.Vulnerability{ID: "CVE-2023-9999", Component: "pillow", Version: "10.0.0"}
+	res := &ScanResult{
+		Vulnerabilities: []vulnerability.Vulnerability{v, other},
+		Findings: []finding.Finding{
+			{ID: "f1", Title: "pillow", DedupKey: vulnDedupKey(v), Severity: shared.SeverityHigh},
+			{ID: "f2", Title: "pillow other", DedupKey: vulnDedupKey(other), Severity: shared.SeverityHigh},
+		},
+	}
+	applySuppressions(res, ignore.Parse([]byte("CVE-2024-1001 # not reachable\n")), now)
+	if len(res.SuppressedFindings) != 1 || res.SuppressedFindings[0].DedupKey != vulnDedupKey(v) {
+		t.Fatalf("want only the aliased finding accepted, got %+v", res.SuppressedFindings)
+	}
+}

@@ -10,7 +10,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -36,7 +38,15 @@ type Service struct {
 	transactions ports.TenantTransactionRunner
 	statements   ports.VEXStatementRepository
 	judgments    judgmentReader
+	aliases      ports.AdvisoryAliasStore
 }
+
+// SetAliasStore lets a statement match a finding reported under another id of the same advisory record: a
+// statement naming CVE-2023-4863 then targets the finding stored as GHSA-j7hp-h8jx-5ppr, whose record aliases
+// it. Matching follows one advisory record (advisory.RecordAliases), never a chain of records. Optional; nil
+// matches the stored advisory id only. A failed alias lookup also falls back to that, which can leave a
+// finding open but never retires one a statement does not name.
+func (s *Service) SetAliasStore(aliases ports.AdvisoryAliasStore) { s.aliases = aliases }
 
 // SetTransactionRunner makes one Apply atomic. Without it each status change commits on its own
 // connection and the audit entry opens a separate transaction, so an audit failure part way through
@@ -72,6 +82,9 @@ type ApplyResult struct {
 	Statements int `json:"statements"` // statements in the document
 	Matched    int `json:"matched"`    // findings a statement matched
 	Applied    int `json:"applied"`    // findings whose status actually changed
+	// AliasesUnavailable names why the advisory alias lookup failed, when it did. Statements then matched the
+	// stored advisory id only, so a statement naming another id of the same advisory left its finding open.
+	AliasesUnavailable string `json:"aliases_unavailable,omitempty"`
 }
 
 // Apply parses a VEX document (OpenVEX or CSAF 2.0, auto-detected) and applies each statement to the matching
@@ -198,16 +211,19 @@ func (s *Service) apply(ctx context.Context, actor string, engagementID shared.I
 		return ApplyResult{}, fmt.Errorf("resolve reachability winners: %w", err)
 	}
 
+	keys, index, aliasErr := s.indexFindings(ctx, findings)
 	res := ApplyResult{Statements: len(doc.Statements)}
+	if aliasErr != nil {
+		res.AliasesUnavailable = aliasErr.Error()
+	}
 	for _, st := range doc.Statements {
 		target, ok := vexTargetStatus(st.Status)
 		if !ok {
 			continue // a status we don't map (e.g. unknown) – leave findings untouched
 		}
-		for i := range findings {
+		for _, i := range st.Candidates(index) {
 			f := &findings[i]
-			a, comp, ver, ok := vulnerability.ParseDedupKey(f.DedupKey)
-			if !ok || !st.MatchesFinding(a, comp, ver) {
+			if !st.TargetsProduct(keys[i].component, keys[i].version) {
 				continue
 			}
 			res.Matched++
@@ -290,4 +306,59 @@ func vexTargetStatus(s string) (finding.Status, bool) {
 	default:
 		return "", false
 	}
+}
+
+// findingKey is the component and version parsed from a stored finding's dedup key.
+type findingKey struct{ component, version string }
+
+// aliasLookupTimeout bounds the alias query. It runs on its own pool connection while the apply holds a
+// transaction, so a slow corpus query must not hold both for long; on timeout matching falls back to the
+// stored id.
+const aliasLookupTimeout = 5 * time.Second
+
+// indexFindings parses each finding's dedup key once and indexes the findings by the advisory ids they go by:
+// the stored id, plus the other ids of the advisory records naming it (advisory.RecordAliases) when an alias
+// store is set. The alias store is queried once for every distinct id. Without a store, or when the lookup
+// fails, statements match the stored id only, which can leave a finding open but never retires one a
+// statement does not name; the returned error names the failure so the caller can report it. Matching a
+// document then costs one map read per statement plus its candidates.
+func (s *Service) indexFindings(ctx context.Context, findings []finding.Finding) ([]findingKey, vex.AdvisoryIndex, error) {
+	keys := make([]findingKey, len(findings))
+	stored := make([]string, len(findings))
+	var ids []string
+	seen := map[string]bool{}
+	for i, f := range findings {
+		a, comp, ver, ok := vulnerability.ParseDedupKey(f.DedupKey)
+		if !ok {
+			continue
+		}
+		keys[i], stored[i] = findingKey{comp, ver}, a
+		if a != "" && !seen[a] {
+			seen[a] = true
+			ids = append(ids, a)
+		}
+	}
+	lookup := func(string) []string { return nil }
+	var lookupErr error
+	if s.aliases != nil && len(ids) > 0 {
+		lookupCtx, cancel := context.WithTimeout(ctx, aliasLookupTimeout)
+		edges, err := s.aliases.AdvisoryAliasEdges(lookupCtx, ids)
+		cancel()
+		if err != nil {
+			lookupErr = fmt.Errorf("advisory alias lookup: %w", err)
+		} else {
+			lookup = advisory.RecordAliases(edges)
+		}
+	}
+	aliases := make(map[string][]string, len(ids))
+	for _, a := range ids {
+		aliases[a] = lookup(a)
+	}
+	index := vex.AdvisoryIndex{}
+	for i, a := range stored {
+		if a != "" {
+			index.Add(i, append([]string{a}, aliases[a]...)...)
+		}
+	}
+	return keys, index, lookupErr
 }

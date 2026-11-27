@@ -101,3 +101,20 @@ func TestComponentMatchScopeAware(t *testing.T) {
 		t.Error("a non-npm namespaced purl still collapses to its bare leaf")
 	}
 }
+
+func TestAdvisoryIndexCandidates(t *testing.T) {
+	x := AdvisoryIndex{}
+	x.Add(0, "GHSA-aaaa-bbbb-cccc", "cve-2024-1001", "CVE-2024-1001", "")
+	x.Add(1, "CVE-2024-9999")
+	x.Add(2, " CVE-2024-1001 ")
+	st := Statement{Vulnerability: "CVE-2024-1001", Products: []string{"pkg:pypi/pillow@10.0.0"}}
+	if got := st.Candidates(x); len(got) != 2 || got[0] != 0 || got[1] != 2 {
+		t.Errorf("Candidates = %v, want [0 2]: each finding once, case and space folded", got)
+	}
+	if (Statement{Vulnerability: ""}).Candidates(x) != nil {
+		t.Error("an empty statement vulnerability must reach no finding")
+	}
+	if !st.TargetsProduct("pillow", "10.0.0") || st.TargetsProduct("pillow", "9.0.0") {
+		t.Error("TargetsProduct must require the product version")
+	}
+}

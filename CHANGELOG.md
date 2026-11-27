@@ -7,6 +7,24 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Fixed
+
+- **An advisory that aliases several CVEs is reported under its own id (#1665).** Every detection
+  source reported a GHSA under its first CVE alias. A follow-up advisory lists the CVE it supersedes
+  first, so `path-to-regexp` 0.1.12 showed as CVE-2024-45296 for GHSA-37ch-88jc-xwx2, whose fix is
+  0.1.13 under CVE-2026-4867, and the finding read like a false positive against the older CVE's
+  range. An advisory with exactly one CVE alias is still reported under that CVE. One with several,
+  such as pillow's GHSA-j7hp-h8jx-5ppr (CVE-2023-4863 and its rejected duplicate CVE-2023-5129), keeps
+  its GHSA id. Such a finding gets a new dedup key, so the next scan reports it as a new finding and
+  the one stored under the CVE key stops being detected; a status set on the old finding by hand does
+  not carry over. KEV and EPSS take the strongest signal across every CVE alias, so pillow keeps its
+  KEV flag. In-repo and control-plane VEX statements and both `.synapseignore` formats match an alias
+  only when the advisory's ids name at most one CVE: a true `fixed` statement for CVE-2024-45296 must
+  not exempt GHSA-37ch-88jc-xwx2, which 0.1.12 still has under CVE-2026-4867. A rule that named one CVE
+  of a multi-CVE advisory, such as `CVE-2023-4863` for pillow, no longer applies and has to name the
+  advisory id the report shows. Alias matching follows the source's own record and never the
+  transitive alias closure. `CorrelationVersion` is 8.
+
 ## [0.3.0] - 2026-11-27
 
 ### Fixed
