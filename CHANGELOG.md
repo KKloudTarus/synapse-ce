@@ -9,6 +9,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- **Archiving an Assessment Cycle closed through the governed closure now says why it is refused
+  (#1712).** The state machine allows `completed -> archived`, but a Cycle carrying an active closure
+  manifest cannot be stored as archived: the manifest pins the exact Cycle version the closure
+  describes and archiving bumps it, so the aggregate's own invariant and the column check from
+  migration 0154 both refuse the row. The request reached the store and came back as a generic
+  validation failure, which the route answered `400` with nothing to act on. It is now `409` with the
+  code `governed_closure_terminal`. The refusal is about the manifest and not the status: a Cycle
+  abandoned while open, or completed through the legacy path with no manifest, is still archivable,
+  and that is what archiving is for.
+
 - **The inbox and the template library no longer render about 17,500 px of fixed catalogue (#1704).**
   Delivery preferences hold one row per configurable event per personal channel (132 today), and the
   built-in templates one per event, channel family and language (264). Both rendered every row at

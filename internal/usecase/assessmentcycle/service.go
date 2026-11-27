@@ -786,7 +786,19 @@ type ArchiveCycleInput struct {
 	Actor                string
 }
 
-// ArchiveCycle transitions an open or completed AssessmentCycle to archived.
+// ArchiveCycle transitions an AssessmentCycle to archived.
+//
+// A cycle closed through the governed closure is refused. Its sealed manifest IS its terminal record:
+// ActiveClosureCycleVersion pins the exact version the closure describes, and archiving bumps the
+// version, so an archived cycle carrying the manifest fails the aggregate's own invariant and the
+// column check migration 0154 added. Before this refusal the request reached UpdateCycleCAS and came
+// back as a generic validation failure, which the handler answered 400, telling the caller nothing.
+//
+// Refusing is the semantics rather than a workaround. Archiving is for a cycle that never got a
+// governed closure: one abandoned, or completed through the legacy path with no manifest. Both are
+// still archivable, because the refusal is about the manifest and not about the status. The route a
+// caller might reach for instead, a governed reopen, would clear the manifest by undoing the closure,
+// which is not a way to archive a closed cycle.
 func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error {
 	tenantID := shared.TenantOrDefault(in.TenantID)
 	if tenantID.IsZero() || in.CycleID.IsZero() {
@@ -797,6 +809,11 @@ func (s *Service) ArchiveCycle(ctx context.Context, in ArchiveCycleInput) error 
 		cycle, err := s.cycles.LockCycleForUpdate(txCtx, tenantID, in.CycleID)
 		if err != nil {
 			return err
+		}
+		// Checked on the locked row, so a closure committing concurrently cannot slip between the read
+		// and the write.
+		if !cycle.ActiveClosureManifestID.IsZero() {
+			return &APIError{Code: CodeGovernedClosureTerminal, Cause: shared.ErrConflict}
 		}
 
 		now := s.clock.Now().UTC()

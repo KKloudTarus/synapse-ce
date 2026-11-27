@@ -312,3 +312,78 @@ func closureHasBlocker(blockers []closuredom.Blocker, code string) bool {
 	}
 	return false
 }
+
+// TestArchivingAGovernedClosureIsRefusedWithItsOwnCode pins the answer a caller gets for a cycle closed
+// through the governed closure. The sealed manifest pins the exact cycle version it describes, and
+// archiving bumps that version, so the aggregate's own invariant and the column check from migration
+// 0154 both refuse the row. Before this, the request reached UpdateCycleCAS and came back as a generic
+// validation failure the handler answered 400, which told the caller neither what was wrong nor what to
+// do (#1712).
+func TestArchivingAGovernedClosureIsRefusedWithItsOwnCode(t *testing.T) {
+	harness := newClosureHarness(t)
+	ctx := context.Background()
+
+	preview, err := harness.api.PreviewClosure(ctx, cycleuc.ClosurePreviewInput{
+		TenantID: harness.tenantID, Actor: "reviewer", CycleID: harness.cycleID, Reason: "release accepted",
+	})
+	if err != nil || !preview.Policy.CommitAllowed {
+		t.Fatalf("closure preview=%+v err=%v", preview, err)
+	}
+	response, err := harness.api.CommitClosure(ctx, cycleuc.ClosureCommitInput{
+		Request: cycleuc.RetainedRequest{TenantID: harness.tenantID, Actor: "reviewer", Route: "/closure-commits", IdempotencyKey: "archive-close-1"},
+		CycleID: harness.cycleID, ExpectedVersion: preview.CycleVersion, PreviewToken: preview.PreviewToken, Reason: "release accepted",
+	})
+	if err != nil || response.StatusCode != 201 {
+		t.Fatalf("closure commit=%+v err=%v", response, err)
+	}
+	var committed cycleuc.ClosureCommitResult
+	if err := json.Unmarshal(response.Body, &committed); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = harness.api.ArchiveCycle(ctx, cycleuc.ArchiveCycleRequest{
+		Request: cycleuc.RetainedRequest{TenantID: harness.tenantID, Actor: "reviewer", Route: "/archive", IdempotencyKey: "archive-closed-1"},
+		CycleID: harness.cycleID, ExpectedVersion: committed.Cycle.Version,
+	})
+	if !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("archiving a sealed closure = %v, want a conflict rather than a validation failure", err)
+	}
+	if code := cycleuc.ErrorCode(err); code != cycleuc.CodeGovernedClosureTerminal {
+		t.Fatalf("error code = %q, want %q so the caller knows what was refused", code, cycleuc.CodeGovernedClosureTerminal)
+	}
+
+	// The refusal must leave the cycle exactly as the closure left it.
+	detail, err := harness.api.GetCycle(ctx, harness.tenantID, harness.cycleID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if detail.Cycle.Status != cycledom.StatusCompleted {
+		t.Fatalf("status after the refusal = %q, want it still completed", detail.Cycle.Status)
+	}
+	if detail.Cycle.Version != committed.Cycle.Version || detail.Cycle.ActiveClosureManifestID != committed.Manifest.ID {
+		t.Fatalf("the refused archive moved the cycle: %+v", detail.Cycle)
+	}
+}
+
+// TestArchivingIsStillAllowedWithoutAGovernedClosure keeps the refusal narrow. It is about the manifest,
+// not the status: a cycle that never went through the governed closure is exactly what archiving is for,
+// and refusing those too would have traded one bug for a worse one.
+func TestArchivingIsStillAllowedWithoutAGovernedClosure(t *testing.T) {
+	harness := newClosureHarness(t)
+	ctx := context.Background()
+
+	detail, err := harness.api.GetCycle(ctx, harness.tenantID, harness.cycleID)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if detail.Cycle.ActiveClosureManifestID != "" {
+		t.Fatalf("fixture cycle already carries a manifest: %+v", detail.Cycle)
+	}
+	archived, err := harness.api.ArchiveCycle(ctx, cycleuc.ArchiveCycleRequest{
+		Request: cycleuc.RetainedRequest{TenantID: harness.tenantID, Actor: "reviewer", Route: "/archive", IdempotencyKey: "archive-open-1"},
+		CycleID: harness.cycleID, ExpectedVersion: detail.Cycle.Version,
+	})
+	if err != nil || archived.StatusCode != 200 {
+		t.Fatalf("archiving a cycle with no closure = %+v err=%v", archived, err)
+	}
+}
