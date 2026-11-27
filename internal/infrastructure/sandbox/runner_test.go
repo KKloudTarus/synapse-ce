@@ -443,11 +443,12 @@ func TestChildEnvResolvesSecretsCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	mv := vault.NewMemoryVault(c, nil)
-	if err := mv.Put(context.Background(), "eng1", "API_KEY", []byte("s3cr3t")); err != nil {
+	tenantCtx := shared.WithTenant(context.Background(), "t1") // a tool run carries its engagement's tenant
+	if err := mv.Put(tenantCtx, "eng1", "API_KEY", []byte("s3cr3t")); err != nil {
 		t.Fatal(err)
 	}
 	r := &Runner{bwrap: "/usr/bin/bwrap", vault: mv}
-	env, secrets, err := r.childEnv(context.Background(), ports.ToolSpec{
+	env, secrets, err := r.childEnv(tenantCtx, ports.ToolSpec{
 		EngagementID: "eng1",
 		Workdir:      "/work",
 		Env:          []string{"TOOL_TOKEN={{secret:API_KEY}}", "PLAIN=value"},

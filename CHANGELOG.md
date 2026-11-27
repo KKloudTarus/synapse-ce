@@ -53,6 +53,26 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   their re-tests may copy it; a scan of that path is refused at execution. A project whose archive
   binding names another project's upload must be uploaded again. `synapse-cli` is unchanged.
 
+- **`scan_runs` is isolated by the database (#1697).** Measured with a role that cannot bypass RLS and
+  tenant A bound, `scan_runs` returned tenant B's runs too: its isolation rested on every query
+  remembering its predicate. Migrations 0275 and 0276 complete the contract 0144 deferred: `tenant_id` is
+  `NOT NULL`, a composite key ties each new run to its engagement's tenant, and forced row-level security
+  refuses the cross-tenant read and write. The not-null check is validated without blocking scan writes,
+  and neither migration locks `engagements`. **Rollout:** run v0.2.4 or later while it applies. Every
+  `scan_runs` statement in v0.2.4 binds its tenant and names `tenant_id`; an older binary does not.
+
+- **The engagement secret vault reads and writes only inside the caller's tenant (#1687).** Migration
+  0277 gives every `credentials` row the tenant of its engagement; a trigger fills it for a writer that
+  does not name it and refuses one that names another tenant, so a caller in one tenant can no longer
+  overwrite another tenant's secret through the `(engagement_id, name)` upsert. The vault binds the
+  caller's tenant, filters by it, and refuses a context without one. Forced row-level security on the
+  table follows in the next release, once no deployed binary reads it unscoped.
+
+- **The API-key lookup no longer needs an unscoped read of `users` (#1697).** It was the one `users`
+  query that could not bind a tenant. Migration 0278 moves it behind a function that runs as the table
+  owner, and the bootstrap and the unbound user read now bind their tenant. Forced row-level security on
+  `users` follows in the next release.
+
 - **A failed vulnerability feed request no longer discloses the feed URL or the address it resolved to
   (#1699).** A transport error from an upstream feed was stored verbatim as a sync-run error sample and
   served unchanged. Go's `*url.Error` quotes the whole request URL, and a feed endpoint is operator

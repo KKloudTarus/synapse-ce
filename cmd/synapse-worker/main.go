@@ -928,7 +928,9 @@ func main() {
 		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
 		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,
 		ResolveSecret: func(ctx context.Context, reference string) ([]byte, error) {
-			return credVault.Resolve(ctx, shared.DefaultTenant, reference)
+			// Feed provider keys live under the default tenant's operator namespace (engagement id
+			// "default"); a feed sync runs outside any tenant request, so it binds that tenant here.
+			return credVault.Resolve(shared.WithTenant(ctx, shared.DefaultTenant), shared.DefaultTenant, reference)
 		},
 	}); err != nil {
 		log.Error("vulnerability provider registry init failed", "err", err)
