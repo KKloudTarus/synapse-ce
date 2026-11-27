@@ -577,8 +577,8 @@ var _ ports.ReportEvidenceProvider = (*Service)(nil)
 
 // ListArtifacts returns the captured binary artifacts in the engagement's chain
 // (oldest first), parsed from their sealed payloads – for the report's evidence
-// exhibits. Only links that reference an out-of-line blob (StorageRef set) are
-// artifacts; sealed scan/summary links are skipped.
+// exhibits. Only links sealed on this instance that reference an out-of-line blob
+// (StorageRef set) are artifacts; sealed scan/summary links and imported links are skipped.
 func (s *Service) ListArtifacts(ctx context.Context, engagementID shared.ID) ([]ports.EvidenceArtifact, error) {
 	items, err := s.store.ListByEngagement(ctx, engagementID)
 	if err != nil {
@@ -586,7 +586,9 @@ func (s *Service) ListArtifacts(ctx context.Context, engagementID shared.ID) ([]
 	}
 	var out []ports.EvidenceArtifact
 	for _, it := range items {
-		if it.StorageRef == "" {
+		// An imported link's blob is not served (ArtifactForEngagement), so it is not an exhibit either:
+		// listing it would make every consumer fail to read it.
+		if it.StorageRef == "" || it.Imported {
 			continue
 		}
 		var p artifactPayload
@@ -636,14 +638,19 @@ func (s *Service) ImportVerified(ctx context.Context, items []evdom.Evidence) er
 	if head != "" {
 		return fmt.Errorf("%w: cannot import an evidence chain onto an engagement that already has evidence", shared.ErrConflict)
 	}
-	if err := s.store.Append(ctx, items); err != nil {
+	imported := make([]evdom.Evidence, len(items))
+	for i, it := range items {
+		it.Imported = true
+		imported[i] = it
+	}
+	if err := s.store.Append(ctx, imported); err != nil {
 		return fmt.Errorf("append imported evidence: %w", err)
 	}
 	return nil
 }
 
-// ArtifactForEngagement returns a captured artifact's bytes – but ONLY if a sealed
-// link in that engagement's chain references the blob. This scopes reads to the
+// ArtifactForEngagement returns a captured artifact's bytes – but ONLY if a link sealed
+// on this instance in that engagement's chain references the blob; an imported link does not count. This scopes reads to the
 // engagement (no cross-engagement custody leak) and closes the existence oracle a
 // global-by-sha lookup would expose. The sha must be a 64-char lowercase hex
 // digest; the bytes are re-verified against it on read (tamper check).
@@ -658,9 +665,12 @@ func (s *Service) ArtifactForEngagement(ctx context.Context, engagementID shared
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)
 	}
+	// Only a link sealed on this instance counts. Blobs share one content-addressed namespace across
+	// tenants, and an imported link's StorageRef was chosen by the bundle's author, so it could name an
+	// artifact another tenant captured.
 	referenced := false
 	for _, it := range items {
-		if it.StorageRef == sha256hex {
+		if it.StorageRef == sha256hex && !it.Imported {
 			referenced = true
 			break
 		}

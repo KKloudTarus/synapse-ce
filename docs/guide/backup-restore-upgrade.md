@@ -126,6 +126,24 @@ deploy/operations/recovery/forward-upgrade.sh \
 
 Audit rows and evidence links written after the upgrade use hash scheme 2. A binary older than v0.3.0 recomputes every row as scheme 1 and reports a scheme 2 row as tampered, so no such binary may run against the upgraded database. This runbook keeps writers quiesced and deploys only current artifacts, which satisfies that. A rolling deploy, where old and new binaries run side by side, has to pass through v0.3.0 first.
 
+Migration 0280 marks evidence links that arrived in an imported engagement bundle, so they never authorize reading an artifact blob. Its backfill reads each tenant's `engagement.imported` audit records under row-level security, which hides audit rows written before migration 0086. On a deployment that imported engagements before then, run this once with a maintenance role that has BYPASSRLS:
+
+```sql
+INSERT INTO evidence_imports (tenant_id, engagement_id, evidence_id)
+SELECT e.tenant_id, e.engagement_id, e.id
+  FROM (SELECT id, tenant_id, engagement_id,
+               row_number() OVER (PARTITION BY engagement_id ORDER BY seq) AS rn
+          FROM evidence) e
+  JOIN (SELECT target,
+               max(CASE WHEN metadata->>'evidence_links' ~ '^[0-9]{1,9}$'
+                        THEN (metadata->>'evidence_links')::INT ELSE 0 END) AS links
+          FROM audit_log
+         WHERE action = 'engagement.imported'
+         GROUP BY target) a ON a.target = e.engagement_id
+ WHERE e.rn <= a.links AND e.tenant_id <> ''
+ON CONFLICT DO NOTHING;
+```
+
 Do not run a down migration. Do not remove migration records, edit migration files, or attempt to make a newer database appear older. The deployed current service configuration must keep SYNAPSE_DB_AUTO_MIGRATE=false; production migration authority belongs to the separate owner-level migration credential.
 
 ## 5. Rollback rehearsal and recovery
