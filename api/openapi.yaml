@@ -7092,6 +7092,13 @@ paths:
       tags: [assessment-cycles]
       operationId: archiveAssessmentCycle
       summary: Archive an Assessment Cycle with optimistic concurrency
+      description: >-
+        Archiving is for a Cycle that never went through the governed closure: one abandoned, or
+        completed through the legacy path with no manifest. A Cycle closed through the governed
+        closure is refused with 409 and the code governed_closure_terminal, because its sealed
+        manifest pins the exact version the closure describes and is already the Cycle's terminal
+        record. A governed reopen is not a way around this: it would clear the manifest by undoing
+        the closure.
       parameters:
       - name: Idempotency-Key
         in: header
@@ -7108,7 +7115,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Idempotency body mismatch or Cycle version conflict}
+        "409": {description: "Idempotency body mismatch, Cycle version conflict, or governed_closure_terminal when the Cycle was closed through the governed closure"}
         "428": {description: If-Match is missing or invalid}
 
   /api/v1/assessment-cycles/{cycleId}/reopen:

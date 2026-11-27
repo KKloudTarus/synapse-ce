@@ -30,6 +30,7 @@ const (
 	CodeIdempotencyRequestPending  = "idempotency_request_in_progress"
 	CodeCycleReopenRequired        = "cycle_reopen_required"
 	CodeCycleArchived              = "cycle_archived"
+	CodeGovernedClosureTerminal    = "governed_closure_terminal"
 	CodeHiddenProjectContext       = "hidden_project_context_ineligible"
 	CodeInvalidCursor              = "invalid_cursor"
 	CodeInvalidFilter              = "invalid_filter"
