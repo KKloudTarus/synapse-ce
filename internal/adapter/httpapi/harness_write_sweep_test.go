@@ -103,6 +103,18 @@ var harnessWriteRequests = map[string]harnessWriteRequest{
 	"POST /api/v1/notifications/channels/{nid}/resume": {body: `{"revision":2}`, tenantBound: true},
 	"POST /api/v1/notifications/channels/{nid}/test":   {body: `{}`, tenantBound: true},
 	"DELETE /api/v1/notifications/channels/{nid}":      {query: "?revision=3", tenantBound: true},
+	// Rule, template and delivery planted by the notification records seed. The rule is at revision 1
+	// and the update moves it to 2 before the delete. The template is at revision 3, with version 1
+	// active and version 2 added: the update adds version 3, the activation makes it render, the
+	// rollback goes back to version 1, and the archive ends it, each moving the revision by one. The
+	// delivery is dead and its job was dead-lettered at fence 1, which is what a redrive names.
+	"PATCH /api/v1/notifications/rules/{nid}":             {body: `{"name":"write sweep rule","enabled":true,"event_type":"scan.completed","cadence":"immediate","channel_ids":["notifications-id-2"],"revision":1}`, tenantBound: true},
+	"DELETE /api/v1/notifications/rules/{nid}":            {query: "?revision=2", tenantBound: true},
+	"PATCH /api/v1/notifications/templates/{nid}":         {body: `{"fields":{"body":"{\"write\":\"sweep\"}"},"revision":3}`, tenantBound: true},
+	"POST /api/v1/notifications/templates/{nid}/activate": {body: `{"revision":4}`, tenantBound: true},
+	"POST /api/v1/notifications/templates/{nid}/rollback": {body: `{"version":1,"revision":5}`, tenantBound: true},
+	"POST /api/v1/notifications/templates/{nid}/archive":  {body: `{"revision":6}`, tenantBound: true},
+	"POST /api/v1/notifications/deliveries/{nid}/redrive": {body: `{"reason":"write sweep","expected_fence":1}`, tenantBound: true},
 	// Integration planted by the integrations seed, which leaves it at version 2. Each write that names
 	// a version moves it by one; the archive ends it, so it runs last.
 	"POST /api/v1/integrations/{id}/bindings":   {body: `{"project_id":"integrations-seed-project","external_key":"pipelines/write-sweep","external_name":"write sweep"}`},
@@ -225,6 +237,14 @@ var harnessWriteProven = []string{
 	"POST /api/v1/notifications/channels/{nid}/resume",
 	"POST /api/v1/notifications/channels/{nid}/test",
 	"PUT /api/v1/notifications/engagements/{nid}/settings",
+	// Notification rule, template and delivery (notification records seed).
+	"DELETE /api/v1/notifications/rules/{nid}",
+	"PATCH /api/v1/notifications/rules/{nid}",
+	"PATCH /api/v1/notifications/templates/{nid}",
+	"POST /api/v1/notifications/deliveries/{nid}/redrive",
+	"POST /api/v1/notifications/templates/{nid}/activate",
+	"POST /api/v1/notifications/templates/{nid}/archive",
+	"POST /api/v1/notifications/templates/{nid}/rollback",
 	// SIEM sink (siem seed).
 	"PATCH /api/v1/siem/sinks/{id}",
 	"POST /api/v1/siem/sinks/{id}/origin",
@@ -255,16 +275,6 @@ var harnessKnownUnaddressableWrites = map[string]string{
 	"POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding": "no seed declares a value for {observationId}",
 	"PUT /api/v1/fleet/assets/{id}/response-observers/{agentID}":              "no seed declares a value for {agentID}",
 	"PUT /api/v1/projects/{key}/profiles/{language}":                          "no seed declares a value for {language}",
-
-	// Notification rules, templates and deliveries: the notifications seed plants an engagement
-	// setting and a channel only.
-	"PATCH /api/v1/notifications/rules/{nid}":             "notification rule family not seeded yet (#1702)",
-	"DELETE /api/v1/notifications/rules/{nid}":            "notification rule family not seeded yet (#1702)",
-	"PATCH /api/v1/notifications/templates/{nid}":         "notification template family not seeded yet (#1702)",
-	"POST /api/v1/notifications/templates/{nid}/activate": "notification template family not seeded yet (#1702)",
-	"POST /api/v1/notifications/templates/{nid}/archive":  "notification template family not seeded yet (#1702)",
-	"POST /api/v1/notifications/templates/{nid}/rollback": "notification template family not seeded yet (#1702)",
-	"POST /api/v1/notifications/deliveries/{nid}/redrive": "notification delivery family not seeded yet (#1702)",
 
 	// Ticket mappings, intents and the Jira breaker: the ticket workflow the engagement seed wires has
 	// no Jira integration, mapping or intent.
