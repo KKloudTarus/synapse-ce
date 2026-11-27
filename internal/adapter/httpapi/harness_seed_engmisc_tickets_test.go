@@ -1,12 +1,17 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	ticketuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 )
 
@@ -40,14 +45,18 @@ func seedEngmiscTickets(w *harnessWorld) {
 	if err != nil {
 		w.t.Fatalf("ticket store: %v", err)
 	}
-	workflow, err := ticketuc.NewWorkflow(store, manualTicketIntegrations{}, manualTicketProviders{}, findings, w.engagements,
+	workflow, err := ticketuc.NewWorkflow(store, engmiscTicketIntegrations{}, manualTicketProviders{}, findings, w.engagements,
 		manualTicketPolicy{}, &harnessAudit{}, &engmiscIDs{}, engmiscClock{})
 	if err != nil {
 		w.t.Fatalf("ticket workflow: %v", err)
 	}
 	// The store keys a link by finding id alone, so one link serves every engagement that carries f1.
-	if _, _, err := workflow.LinkManual(ctx, "tenantA", engmiscEngagement, engmiscFinding, "https://jira.example/browse/"+engmiscMarker); err != nil {
+	link, _, err := workflow.LinkManual(ctx, "tenantA", engmiscEngagement, engmiscFinding, "https://jira.example/browse/"+engmiscMarker)
+	if err != nil {
 		w.t.Fatalf("link ticket: %v", err)
+	}
+	if link.ID != engmiscTicketLink {
+		w.t.Fatalf("ticket link id = %s, want %s", link.ID, engmiscTicketLink)
 	}
 	for index, engagementID := range engagements {
 		comment := ticketing.ExternalTicketComment{
@@ -59,5 +68,44 @@ func seedEngmiscTickets(w *harnessWorld) {
 			w.t.Fatalf("seed inbound ticket comment under %s: %v", engagementID, err)
 		}
 	}
+	seedEngmiscTicketRecords(w, store)
 	w.rt.SetTicketing(workflow)
+}
+
+// seedEngmiscTicketRecords plants one tenantA Jira mapping and one pending write intent under fixed
+// ids, so the mapping, intent and breaker routes are addressed at real tenantA records.
+func seedEngmiscTicketRecords(w *harnessWorld, store *memory.TicketStore) {
+	ctx := engmiscTenantCtx()
+	mapping := ticketing.Mapping{
+		ID: engmiscTicketMapping, TenantID: "tenantA", IntegrationID: engmiscTicketIntegration,
+		Scope: ticketing.Engagement, ScopeID: engmiscEngagement, ProjectKey: "SEC", IssueType: "Bug",
+		Version: 1, CreatedAt: engmiscNow, UpdatedAt: engmiscNow,
+	}
+	if err := store.CreateMapping(ctx, "tenantA", mapping); err != nil {
+		w.t.Fatalf("seed ticket mapping: %v", err)
+	}
+	intent := ticketing.Intent{
+		ID: engmiscTicketIntent, TenantID: "tenantA", IntegrationID: engmiscTicketIntegration, MappingID: engmiscTicketMapping,
+		FindingID: engmiscFinding, EngagementID: engmiscEngagement, Action: ticketing.Create, RequestKey: "engmisc-request",
+		PayloadDigest: strings.Repeat("a", 64), Marker: "synapse-intent-" + engmiscTicketIntent.String(),
+		State: writeintent.Pending, Version: 1, CreatedAt: engmiscNow, UpdatedAt: engmiscNow,
+	}
+	if _, _, err := store.CreateOrGetIntent(ctx, "tenantA", intent); err != nil {
+		w.t.Fatalf("seed ticket intent: %v", err)
+	}
+}
+
+// engmiscTicketIntegrations answers the one tenantA Jira integration for every caller, whatever tenant
+// asks. It stands for a store that does not scope: the workflow's own check that the integration
+// belongs to the requesting tenant is then the guard the sweep tests on the metadata and breaker routes.
+type engmiscTicketIntegrations struct{ ports.IntegrationStore }
+
+func (engmiscTicketIntegrations) GetIntegration(_ context.Context, id shared.ID) (integration.Integration, error) {
+	if id != engmiscTicketIntegration {
+		return integration.Integration{}, shared.ErrNotFound
+	}
+	return integration.Integration{
+		ID: engmiscTicketIntegration, TenantID: "tenantA", Provider: "jira", Name: "jira " + engmiscMarker,
+		Endpoint: "https://jira-a.example", Enabled: true, Version: 1, ConnectionRevision: 1,
+	}, nil
 }

@@ -30,6 +30,15 @@ const (
 	// engmiscSnapshot is the snapshot the seed plants behind the router's snapshot service, under the
 	// id the hand-written cross-tenant cases already address. Its actor is the marker.
 	engmiscSnapshot = shared.ID("snapshot-A")
+	// engmiscTicketLink is the id the ticket workflow's own generator gives the one manual link the
+	// seed creates; seedEngmiscTickets fails if the link comes back under another id.
+	engmiscTicketLink = shared.ID("engmisc-id-1")
+	// engmiscImportedFinding is the imported observation seedEngmiscImportedFindings plants.
+	engmiscImportedFinding = shared.ID("engmisc-imported")
+	// The Jira mapping, intent and integration seedEngmiscTicketRecords plants.
+	engmiscTicketMapping     = shared.ID("engmisc-ticket-mapping-A")
+	engmiscTicketIntent      = shared.ID("engmisc-ticket-intent-A")
+	engmiscTicketIntegration = shared.ID("engmisc-jira-integration-A")
 )
 
 func init() {
@@ -62,7 +71,18 @@ func init() {
 		},
 		PathValues: map[string]string{"{did}": engmiscDetection.String()},
 		RoutePathValues: map[string]map[string]string{
-			"GET /api/v1/assessment-snapshots/{snapshotId}": {"{snapshotId}": engmiscSnapshot.String()},
+			"GET /api/v1/assessment-snapshots/{snapshotId}":                           {"{snapshotId}": engmiscSnapshot.String()},
+			"POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding": {"{observationId}": engmiscImportedFinding.String()},
+			"PUT /api/v1/ticket-mappings/{mappingID}":                                 {"{mappingID}": engmiscTicketMapping.String()},
+			"DELETE /api/v1/ticket-mappings/{mappingID}":                              {"{mappingID}": engmiscTicketMapping.String()},
+			"POST /api/v1/ticket-intents/{intentID}/reconcile":                        {"{intentID}": engmiscTicketIntent.String()},
+			"POST /api/v1/ticket-intents/{intentID}/retry":                            {"{intentID}": engmiscTicketIntent.String()},
+			"POST /api/v1/integrations/{integrationID}/jira-breaker/reset":            {"{integrationID}": engmiscTicketIntegration.String()},
+			"GET /api/v1/integrations/{integrationID}/jira-metadata":                  {"{integrationID}": engmiscTicketIntegration.String()},
+			"GET /api/v1/integrations/{integrationID}/ticket-metadata":                {"{integrationID}": engmiscTicketIntegration.String()},
+			// One link serves both contexts: the store keys it by finding id alone.
+			"DELETE /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}":      {"{linkID}": engmiscTicketLink.String()},
+			"DELETE /api/v1/projects/{key}/source-findings/{fid}/tickets/{linkID}": {"{linkID}": engmiscTicketLink.String()},
 		},
 		Run: seedEngmisc,
 	})

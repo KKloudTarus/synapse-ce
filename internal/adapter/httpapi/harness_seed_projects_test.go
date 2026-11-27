@@ -47,7 +47,11 @@ func init() {
 		// The behavioral-hotspots route names the analysis with its own parameter. It is the analysis
 		// this seed saves, which the other analysis routes address as {id}.
 		PathValues: map[string]string{"{analysisID}": harnessPathValues["{id}"]},
-		Run:        seedProjects,
+		RoutePathValues: map[string]map[string]string{
+			// A profile assignment names a language the quality catalog knows.
+			"PUT /api/v1/projects/{key}/profiles/{language}": {"{language}": "go"},
+		},
+		Run: seedProjects,
 	})
 }
 

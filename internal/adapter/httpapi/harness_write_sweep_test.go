@@ -53,6 +53,10 @@ var harnessWriteDefault = harnessWriteRequest{body: `{}`}
 // route that needs more than harnessWriteDefault has an entry. Where a record carries a version,
 // the routes that move it name the version the previous route in the sweep's order left behind.
 var harnessWriteRequests = map[string]harnessWriteRequest{
+	// A mapping delete names the version it removes (engmisc tickets seed).
+	"DELETE /api/v1/ticket-mappings/{mappingID}": {query: "?version=1"},
+	// The signing-key store scopes by the tenant on the request context (fleet keys seed).
+	"POST /api/v1/agents/{id}/keys/{keyID}/revoke": {tenantBound: true},
 	// Engagement-row writes. No withEngTenant: the engagement service scopes them. Moving engA to
 	// the status it already has succeeds without changing it, so later routes still find it active.
 	"PATCH /api/v1/engagements/{id}":          {body: `{"status":"active"}`},
@@ -195,6 +199,18 @@ var harnessWriteProven = []string{
 	"POST /api/v1/engagements/{id}/findings/{fid}/comments",
 	"POST /api/v1/engagements/{id}/findings/{fid}/retests",
 	"POST /api/v1/engagements/{id}/findings/{fid}/tickets",
+	"DELETE /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}",
+	// Response observer assignment (response observer seed).
+	"PUT /api/v1/fleet/assets/{id}/response-observers/{agentID}",
+	// Fleet signing keys (fleet keys seed).
+	"POST /api/v1/agents/{id}/keys/{keyID}/revoke",
+	// Users (users seed).
+	"PATCH /api/v1/users/{id}",
+	"POST /api/v1/users/{id}/disable",
+	"POST /api/v1/users/{id}/enable",
+	"POST /api/v1/users/{id}/rotate-key",
+	"DELETE /api/v1/users/{id}/oidc-links/{linkId}",
+	"POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding",
 	"POST /api/v1/engagements/{id}/findings/{fid}/verify",
 	"POST /api/v1/engagements/{id}/judgments/{jid}/runtime-verification",
 	"POST /api/v1/engagements/{id}/judgments/{jid}/runtime-verification/proposals",
@@ -228,6 +244,7 @@ var harnessWriteProven = []string{
 	// Integration (integrations seed).
 	"POST /api/v1/integrations/{id}/archive",
 	"POST /api/v1/integrations/{id}/bindings",
+	"DELETE /api/v1/integrations/{id}/bindings/{bindingID}",
 	"POST /api/v1/integrations/{id}/disable",
 	"POST /api/v1/integrations/{id}/enable",
 	"POST /api/v1/integrations/{id}/operations",
@@ -271,24 +288,11 @@ var harnessWriteForeignNoEffect = map[string]string{
 // fails for a route missing here and for an entry it can address now. The routes are grouped by
 // family.
 var harnessKnownUnaddressableWrites = map[string]string{
-	"DELETE /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}":         "the tickets seed plants a link but declares no value for {linkID}",
-	"DELETE /api/v1/projects/{key}/source-findings/{fid}/tickets/{linkID}":    "the tickets seed plants a link but declares no value for {linkID}",
-	"POST /api/v1/engagements/{id}/imported-findings/{observationId}/binding": "no seed declares a value for {observationId}",
-	"PUT /api/v1/fleet/assets/{id}/response-observers/{agentID}":              "no seed declares a value for {agentID}",
-	"PUT /api/v1/projects/{key}/profiles/{language}":                          "no seed declares a value for {language}",
 
 	// Ticket mappings, intents and the Jira breaker: the ticket workflow the engagement seed wires has
 	// no Jira integration, mapping or intent.
-	"PUT /api/v1/ticket-mappings/{mappingID}":                      "ticket mapping family not seeded yet (#1702)",
-	"DELETE /api/v1/ticket-mappings/{mappingID}":                   "ticket mapping family not seeded yet (#1702)",
-	"POST /api/v1/ticket-intents/{intentID}/reconcile":             "ticket intent family not seeded yet (#1702)",
-	"POST /api/v1/ticket-intents/{intentID}/retry":                 "ticket intent family not seeded yet (#1702)",
-	"POST /api/v1/integrations/{integrationID}/jira-breaker/reset": "ticket metadata family not seeded yet (#1702)",
 
 	// Child records the seeds plant or could plant but do not name.
-	"DELETE /api/v1/integrations/{id}/bindings/{bindingID}": "the integrations seed plants a binding but declares no value for {bindingID}",
-	"POST /api/v1/agents/{id}/keys/{keyID}/revoke":          "fleet family not seeded yet (#1702)",
-	"DELETE /api/v1/users/{id}/oidc-links/{linkId}":         "user family not seeded yet (#1702)",
 }
 
 // harnessWritePathValue returns the value the write sweep substitutes for a parameter of a write

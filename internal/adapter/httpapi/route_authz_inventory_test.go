@@ -168,7 +168,7 @@ func TestTenantScopedRoutesAreCoveredByTheHostileHarness(t *testing.T) {
 
 	// The honest measurement when this guard was rewritten. The ratchet may only improve: raise the
 	// floor when you add coverage, never lower it.
-	const minimumCovered = 211
+	const minimumCovered = 222
 	if covered < minimumCovered {
 		t.Errorf("hostile harness covers %d of %d tenant-scoped routes, below the ratchet of %d; add cases rather than lowering the floor.\nUncovered:\n  %s",
 			covered, len(tenantScoped), minimumCovered, strings.Join(uncovered, "\n  "))
