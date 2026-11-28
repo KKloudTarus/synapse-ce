@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/url"
 	"os"
 	"testing"
@@ -116,7 +117,12 @@ func TestMigration0283ImportedLinksKeepTheirSealedFinding(t *testing.T) {
 		}
 		_ = tx.Rollback()
 	}
-	// A link sealed here carries no marker and no sealed id.
+	// A link sealed here carries no marker and no sealed id; one that claims a sealed id is refused.
+	forged := evidence.Evidence{ID: "nat-0", EngagementID: eng, Kind: "scan", PreviousHash: imported.Hash, CreatedBy: "ada", CreatedAt: at, Content: []byte("native")}.Seal()
+	forged.SealedFindingID = "claimed"
+	if err := store.Append(ctx, []evidence.Evidence{forged}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("a native link with a sealed id must be refused, got %v", err)
+	}
 	native := evidence.Evidence{ID: "nat-1", EngagementID: eng, Kind: "scan", PreviousHash: imported.Hash, CreatedBy: "ada", CreatedAt: at, Content: []byte("native"), SealedFindingID: "ignored"}.Seal()
 	if err := store.Append(ctx, []evidence.Evidence{native}); err != nil {
 		t.Fatalf("append native link: %v", err)

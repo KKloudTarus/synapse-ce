@@ -76,6 +76,13 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 	if !ok {
 		return fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
 	}
+	for _, e := range items {
+		// Only an import marker carries a sealed finding id. A native link that claimed one would hash over
+		// it in memory and over its FindingID once read back, so it is refused rather than stored broken.
+		if !e.Imported && !e.SealedFindingID.IsZero() {
+			return fmt.Errorf("%w: evidence %s carries a sealed finding id but is not imported", shared.ErrValidation, e.ID)
+		}
+	}
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		for _, e := range items {
 			var findingID any
