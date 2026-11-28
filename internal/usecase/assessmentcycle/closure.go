@@ -336,7 +336,7 @@ func (service *APIService) CommitClosure(ctx context.Context, input ClosureCommi
 		}
 		if err := service.audit.Record(txCtx, ports.AuditEntry{Actor: actor, Action: "assessment_cycle.closed", Target: cycle.ID.String(), Metadata: map[string]string{
 			"tenant_id": tenantID.String(), "manifest_id": manifest.ID.String(), "manifest_hash": manifest.ContentHash,
-			"cycle_version": fmt.Sprintf("%d", cycle.Version), "idempotency_key": strings.TrimSpace(input.Request.IdempotencyKey),
+			"cycle_version": fmt.Sprintf("%d", cycle.Version), "idempotency_key": closureAuditKey(cycle.ID, actor, input.Request.IdempotencyKey),
 		}, At: now}); err != nil {
 			return 0, nil, err
 		}
@@ -440,7 +440,7 @@ func (service *APIService) CommitReopen(ctx context.Context, input ReopenCommitI
 		reasonHash := sha256.Sum256([]byte(input.Reason))
 		if err := service.audit.Record(txCtx, ports.AuditEntry{Actor: actor, Action: "assessment_cycle.reopened", Target: reopened.ID.String(), Metadata: map[string]string{
 			"tenant_id": tenantID.String(), "manifest_id": superseded.ID.String(), "manifest_hash": superseded.ContentHash,
-			"cycle_version": fmt.Sprintf("%d", reopened.Version), "reason_sha256": hex.EncodeToString(reasonHash[:]), "idempotency_key": strings.TrimSpace(input.Request.IdempotencyKey),
+			"cycle_version": fmt.Sprintf("%d", reopened.Version), "reason_sha256": hex.EncodeToString(reasonHash[:]), "idempotency_key": closureAuditKey(reopened.ID, actor, input.Request.IdempotencyKey),
 		}, At: now}); err != nil {
 			return 0, nil, err
 		}
@@ -888,3 +888,11 @@ func mapClosureConflict(err error) error {
 }
 
 func noAssessmentCycleCompensation(context.Context) error { return nil }
+
+// closureAuditKey scopes a client's Idempotency-Key to the cycle and the actor before it becomes the audit
+// entry's idempotency key. The audit log deduplicates on (tenant, action, key), while the retained-request
+// store scopes the client key per actor and route, so two actors or two cycles reusing one client key would
+// otherwise collide on the audit write and the second commit would roll back (#1733).
+func closureAuditKey(cycleID shared.ID, actor, clientKey string) string {
+	return cycleID.String() + ":" + strings.TrimSpace(actor) + ":" + strings.TrimSpace(clientKey)
+}

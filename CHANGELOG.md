@@ -7,6 +7,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two assessment-cycle closes may reuse one `Idempotency-Key` (#1733).** The closure and reopen
+  commits recorded the client's key unchanged as the audit entry's idempotency key, and the audit log
+  deduplicates on tenant, action and key, so a second actor or a second cycle reusing a key failed with
+  a conflict on the audit write and the commit rolled back. The key is now scoped to the cycle and the
+  actor before it is recorded. A retry of the same commit still records one entry.
+
 ## [0.4.0] - 2026-11-27
 
 ### Changed

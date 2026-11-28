@@ -102,6 +102,27 @@ func TestClosurePreviewCommitReplayReopenAndStaleSafety(t *testing.T) {
 	if reopened.Cycle.Status != cycledom.StatusOpen || reopened.Cycle.ActiveClosureManifestID != "" || reopened.SupersededManifest.Lifecycle != "superseded" {
 		t.Fatalf("reopen result=%+v", reopened)
 	}
+	// The audit log deduplicates on (tenant, action, key), so the client's key is scoped to the cycle and the
+	// actor before it is recorded (#1733); another actor or cycle reusing "close-1" must not collide.
+	wantKeys := map[string]string{
+		"assessment_cycle.closed":   harness.cycleID.String() + ":reviewer:close-1",
+		"assessment_cycle.reopened": harness.cycleID.String() + ":reviewer:reopen-1",
+	}
+	for action, want := range wantKeys {
+		found := false
+		for _, entry := range harness.audit.entries {
+			if entry.Action != action {
+				continue
+			}
+			found = true
+			if got := entry.Metadata["idempotency_key"]; got != want {
+				t.Fatalf("%s audit idempotency_key = %q, want %q", action, got, want)
+			}
+		}
+		if !found {
+			t.Fatalf("no %s audit entry recorded", action)
+		}
+	}
 	reopen.Request.IdempotencyKey = "reopen-reused-preview"
 	if _, err := harness.api.CommitReopen(ctx, reopen); !errors.Is(err, shared.ErrConflict) || cycleuc.ErrorCode(err) != cycleuc.CodeReopenPreviewStale {
 		t.Fatalf("reused reopen preview error=%v code=%s", err, cycleuc.ErrorCode(err))
@@ -143,6 +164,7 @@ func TestClosureCommitRejectsConcurrentCycleMutation(t *testing.T) {
 }
 
 type closureHarness struct {
+	audit       *recordAudit
 	api         *cycleuc.APIService
 	cycles      *memory.AssessmentCycleRepository
 	snapshots   *memory.AssessmentSnapshotRepository
@@ -236,7 +258,7 @@ func newClosureHarness(t *testing.T) closureHarness {
 	if err := api.SetClosureDependencies(cycles, snapshots, comparisons, closureDecisionReader{}, reporter, queue, []byte("0123456789abcdef0123456789abcdef")); err != nil {
 		t.Fatal(err)
 	}
-	return closureHarness{api: api, cycles: cycles, snapshots: snapshots, comparisons: comparisons, reporter: reporter, queue: queue, clock: clock, tenantID: tenantID, cycleID: cycle.ID}
+	return closureHarness{audit: audit, api: api, cycles: cycles, snapshots: snapshots, comparisons: comparisons, reporter: reporter, queue: queue, clock: clock, tenantID: tenantID, cycleID: cycle.ID}
 }
 
 func completedClosureEngagement(t *testing.T, tenantID, id shared.ID, now time.Time) *engdom.Engagement {
