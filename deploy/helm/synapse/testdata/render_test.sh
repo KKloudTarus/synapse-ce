@@ -1,5 +1,13 @@
 #!/usr/bin/env sh
 set -eu
+# `set -e` ignores a command negated with `!`, so `! grep ...` never fails the script. refute runs the
+# check and fails when it succeeds.
+refute() {
+  if "$@" >/dev/null; then
+    printf 'unexpected match: %s\n' "$*" >&2
+    exit 1
+  fi
+}
 chart_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 values="$chart_dir/tests/production-values.yaml"
 out=$(mktemp)
@@ -32,7 +40,7 @@ helm template synapse "$chart_dir" -f "$chart_dir/values-dev.yaml" --kube-versio
 # to the monitoring namespace when enabled; never routed through the ingress.
 worker_metrics=$(mktemp)
 trap 'rm -f "$out" "$in_cluster" "$cpo" "$worker_metrics"' EXIT
-! grep -Eq 'name: [^ ]*worker-metrics$' "$in_cluster"
+refute grep -Eq 'name: [^ ]*worker-metrics$' "$in_cluster"
 helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
   --set execution.mode=inClusterBroker \
   --set egressBroker.enabled=true \
@@ -58,16 +66,16 @@ awk '
   policy && /port: 9091/ {port=1}
   END {exit service && selector && monitor && port ? 0 : 1}
 ' "$worker_metrics"
-! awk '/^kind: Ingress$/{ingress=1} /^---$/{ingress=0} ingress && /9091|worker-metrics/{found=1} END{exit found ? 0 : 1}' "$worker_metrics"
+refute awk '/^kind: Ingress$/{ingress=1} /^---$/{ingress=0} ingress && /9091|worker-metrics/{found=1} END{exit found ? 0 : 1}' "$worker_metrics"
 grep -q 'value: development' "$cpo"
 awk '/name: SYNAPSE_SANDBOX_ENABLED/{getline; if ($0 ~ /value: "false"/) ok=1} END{exit ok?0:1}' "$cpo"
-! grep -q 'app.kubernetes.io/component: worker' "$cpo"
-! grep -q 'app.kubernetes.io/component: egress-broker' "$cpo"
-! grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR' "$cpo"
+refute grep -q 'app.kubernetes.io/component: worker' "$cpo"
+refute grep -q 'app.kubernetes.io/component: egress-broker' "$cpo"
+refute grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR' "$cpo"
 
 # Production policy: only digest-qualified images, no privileged containers/capability additions,
 # a private metrics listener, and migrations as an ordered Helm hook.
-! grep -E 'image: .+:(latest|[[:alnum:]._-]+)$' "$out"
+refute grep -E 'image: .+:(latest|[[:alnum:]._-]+)$' "$out"
 grep -q 'helm.sh/hook": pre-install,pre-upgrade' "$out"
 # The migration hook runs before normal resources, so its service account must be a hook with a
 # lower weight. Otherwise the Job is never scheduled: the API server refuses pod creation for a
@@ -110,7 +118,7 @@ if [ "$(grep -c 'hostUsers: true' "$out")" -ne 3 ]; then
   exit 1
 fi
 # The control plane (externalNative) must never carry a privileged container or SYS_ADMIN.
-! grep -E 'privileged: true|SYS_ADMIN' "$out"
+refute grep -E 'privileged: true|SYS_ADMIN' "$out"
 # In inClusterBroker, elevated capabilities appear ONLY on the egress-broker DaemonSet, never on the
 # api/web/worker. Assert every SYS_ADMIN/NET_ADMIN line belongs to the broker block.
 awk '
@@ -127,7 +135,7 @@ grep -q 'name: SYNAPSE_METRICS_ADDR' "$out"
 grep -q 'name: metrics' "$out"
 grep -q 'containerPort: 9090' "$out"
 grep -q 'kubernetes.io/metadata.name: "monitoring"' "$out"
-! awk '/^kind: Ingress$/{ingress=1} /^---$/{ingress=0} ingress && /9090|metrics/{found=1} END{exit found ? 0 : 1}' "$out"
+refute awk '/^kind: Ingress$/{ingress=1} /^---$/{ingress=0} ingress && /9090|metrics/{found=1} END{exit found ? 0 : 1}' "$out"
 grep -Fq 'nginx.ingress.kubernetes.io/ssl-redirect: "false"' "$out"
 grep -q 'kind: NetworkPolicy' "$out"
 # Grant issuance has a separate machine-only API listener. AWS Load Balancer Controller owns
@@ -148,7 +156,7 @@ done
 grep -q 'mountPath: /etc/synapse/response-command-signing' "$out"
 grep -q 'readOnly: true' "$out"
 grep -q 'secretName: synapse-response-command-signing' "$out"
-! awk '/^kind: (Secret|SealedSecret|ExternalSecret)$/{bad=1} END{exit bad?0:1}' "$out"
+refute awk '/^kind: (Secret|SealedSecret|ExternalSecret)$/{bad=1} END{exit bad?0:1}' "$out"
 grep -q 'name: SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN' "$out"
 grep -q 'name: SYNAPSE_EGRESS_GRANT_SIGNING_SEED' "$out"
 grep -q 'name: grant-authority' "$out"
@@ -165,8 +173,8 @@ grep -q 'service.beta.kubernetes.io/aws-load-balancer-ssl-cert:' "$out"
 grep -q 'cidr: "10.64.255.0/28"' "$out"
 grep -q 'cidr: "10.64.255.16/28"' "$out"
 grep -q 'cidr: "10.64.255.32/28"' "$out"
-! grep -q 'loadBalancerSourceRanges:' "$out"
-! awk '/^kind: Ingress$/{ingress=1} /^---$/{ingress=0} ingress && /8082|grant-authority|egress-grant/{found=1} END{exit found ? 0 : 1}' "$out"
+refute grep -q 'loadBalancerSourceRanges:' "$out"
+refute awk '/^kind: Ingress$/{ingress=1} /^---$/{ingress=0} ingress && /8082|grant-authority|egress-grant/{found=1} END{exit found ? 0 : 1}' "$out"
 if helm template synapse "$chart_dir" -f "$values" --set api.grantAuthority.networkPolicySourceCIDRs=null >/dev/null 2>&1; then
   printf '%s\n' 'expected an egress grant authority without dedicated NLB subnet sources to be refused' >&2
   exit 1
@@ -189,8 +197,8 @@ if helm template synapse "$chart_dir" -f "$values" --set 'api.grantAuthority.ann
 fi
 # Immutable image and explicitly scoped egress: no writable root filesystem, no shell in any
 # probe, and every runtime egress rule carries a destination rather than only a port.
-! grep -q 'readOnlyRootFilesystem: false' "$out"
-! grep -qE '"/bin/sh"|/bin/sh -c' "$out"
+refute grep -q 'readOnlyRootFilesystem: false' "$out"
+refute grep -qE '"/bin/sh"|/bin/sh -c' "$out"
 grep -q 'ipBlock' "$out"
 # Both long-lived workloads and the migration hook receive the operator-supplied database trust
 # anchor read-only. DSNs use sslmode=verify-full and point sslrootcert at this mounted path.
@@ -216,13 +224,13 @@ grep -q 'kind: PodDisruptionBudget' "$out"
 for component in api web; do
   grep -q "app.kubernetes.io/component: $component" "$out"
 done
-! grep -q 'labelSelector: {}' "$out"
+refute grep -q 'labelSelector: {}' "$out"
 grep -q 'kind: Ingress' "$out"
 # The production render must not contain an in-cluster execution worker. API scheduling remains
 # independent, while the optional development worker preserves its own selector and hardening.
-! grep -q 'app.kubernetes.io/component: worker' "$out"
+refute grep -q 'app.kubernetes.io/component: worker' "$out"
 grep -q 'synapse.example/runtime: control-plane' "$out"
-! grep -q 'synapse.example/runtime: execution' "$out"
+refute grep -q 'synapse.example/runtime: execution' "$out"
 grep -q 'app.kubernetes.io/component: worker' "$in_cluster"
 # The worker and broker co-schedule onto execution-capable nodes via the broker's node selector.
 grep -q 'synapse.dev/execution-node' "$in_cluster"
@@ -235,8 +243,8 @@ grep -q 'hostPID: true' "$in_cluster"
 grep -q 'SYNAPSE_EGRESS_BROKER_SOCKET' "$in_cluster"
 grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_URL' "$in_cluster"
 # The control-plane (externalNative) render never contains the execution tier.
-! grep -q 'app.kubernetes.io/component: worker' "$out"
-! grep -q 'app.kubernetes.io/component: egress-broker' "$out"
+refute grep -q 'app.kubernetes.io/component: worker' "$out"
+refute grep -q 'app.kubernetes.io/component: egress-broker' "$out"
 worker_strategy=$(awk '
   /^---$/ { worker=0; next }
   /app\.kubernetes\.io\/component: worker/ { worker=1 }
@@ -288,7 +296,7 @@ fi
 ephemeral=$(mktemp)
 trap 'rm -f "$out" "$in_cluster" "$cpo" "$worker_metrics" "$ephemeral"' EXIT
 helm template synapse "$chart_dir" -f "$chart_dir/values-dev.yaml" --kube-version 1.29.0 >"$ephemeral"
-! grep -q 'kind: PersistentVolumeClaim' "$ephemeral"
+refute grep -q 'kind: PersistentVolumeClaim' "$ephemeral"
 awk '
   /- name: synapse-data/ { data=1; next }
   data && /emptyDir:/ { ok=1 }
@@ -314,9 +322,9 @@ helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
   --show-only templates/worker.yaml >"$control_worker"
 grep -q 'value: "control"' "$control_worker"
 grep -q 'tier: control' "$control_worker"
-! grep -q 'synapse-sandbox-check' "$control_worker"
-! grep -q 'egress-broker-socket' "$control_worker"
-! grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN' "$control_worker"
+refute grep -q 'synapse-sandbox-check' "$control_worker"
+refute grep -q 'egress-broker-socket' "$control_worker"
+refute grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN' "$control_worker"
 grep -q 'egress-broker-socket' "$in_cluster"
 grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN' "$in_cluster"
 helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
@@ -327,8 +335,8 @@ helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
   --set egressBroker.privileged=true \
   --set worker.profile=integrations \
   --show-only templates/worker.yaml >"$control_worker"
-! grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN' "$control_worker"
-! grep -q 'egress-broker-socket' "$control_worker"
+refute grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN' "$control_worker"
+refute grep -q 'egress-broker-socket' "$control_worker"
 if helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 --set worker.profile=bogus >/dev/null 2>&1; then
   printf '%s\n' 'worker.profile must be validated by values.schema.json' >&2
   exit 1
