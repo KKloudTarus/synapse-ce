@@ -510,18 +510,25 @@ func TestWorkerHeartbeatHonorsParentCancellation(t *testing.T) {
 	}
 }
 
-func TestWorkerParksUnknownKind(t *testing.T) {
+func TestWorkerDeadLettersUnknownKind(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
 	ctx := shared.WithTenant(context.Background(), "tenant-test")
-	_, _ = q.Enqueue(ctx, "mystery", nil)
+	id, _ := q.Enqueue(ctx, "mystery", nil)
 	w := New(q, map[string]Handler{}, cfg(), nil) // no handlers
 
 	runFor(t, w, func(cancel context.CancelFunc) {
 		time.Sleep(100 * time.Millisecond)
 		cancel()
 	})
-	// An unknown kind is parked (Completed) so it doesn't spin forever.
+	// An unknown kind is dead-lettered: it neither spins nor reads as completed work.
 	if j, _ := q.Claim(ctx, time.Second); j != nil {
-		t.Errorf("an unknown-kind job must be parked, got %+v", j)
+		t.Errorf("an unknown-kind job must not be claimable again, got %+v", j)
+	}
+	status, err := q.JobStatus(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.DeadLettered {
+		t.Errorf("status = %+v, want the job dead-lettered, not completed", status)
 	}
 }

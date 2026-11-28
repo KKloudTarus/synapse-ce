@@ -151,10 +151,13 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 	jobCtx := shared.WithTenant(ctx, job.TenantID)
 	h, ok := w.handlers[job.Kind]
 	if !ok {
-		// Unknown kind: there is no handler in this build. Park it (Complete) so it does
-		// not spin forever, and log loudly – a silent drop would hide a misconfiguration.
-		w.log.Error("no handler for job kind – parking job", "kind", job.Kind, "job", job.ID)
-		w.complete(jobCtx, job.ID, job.Fence)
+		// Unknown kind: there is no handler in this build. The claim filters by the handler kinds, so
+		// this is a handler-set mismatch, not routing. Dead-letter it so it neither spins nor reads as
+		// done: a completed job that no handler ran would hide a misconfigured role (#1559).
+		w.log.Error("no handler for job kind, dead-lettering job", "reason", "unsupported_kind", "kind", job.Kind, "job", job.ID)
+		if err := w.queue.Deadletter(context.WithoutCancel(jobCtx), job.ID, job.Fence); err != nil {
+			w.log.Error("dead-letter unsupported job kind failed", "kind", job.Kind, "job", job.ID, "err", err)
+		}
 		return
 	}
 
