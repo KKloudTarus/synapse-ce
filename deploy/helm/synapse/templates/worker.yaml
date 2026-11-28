@@ -1,7 +1,8 @@
 {{- if eq (include "synapse.executionMode" .) "inClusterBroker" }}
-{{- /* The control role (#1559) runs no tool: it gets no broker socket, no grant token, no sandbox probe,
-       and schedules on the worker's own node selector instead of the broker nodes. */ -}}
-{{- $control := eq .Values.worker.profile "control" }}
+{{- /* A data-only role (#1559: control, and the retired integrations, lifecycle and notifications) runs
+       no tool: it gets no broker socket, no grant token, no sandbox probe, and schedules on the worker's
+       own node selector instead of the broker nodes. */ -}}
+{{- $control := has .Values.worker.profile (list "control" "integrations" "lifecycle" "notifications") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
