@@ -67,4 +67,9 @@ func TestWorkerProfilesHaveIndependentMaintenanceLeases(t *testing.T) {
 	if got := workerMaintenanceResource(config.Config{WorkerProfile: config.WorkerProfileAll, LeaderResource: "synapse"}); got != "synapse-worker-maintenance" {
 		t.Fatalf("all profile legacy lease changed: %s", got)
 	}
+	// control owns the same singletons as all (#1559), so it campaigns for the same lease: during a cutover
+	// only one of the two runs each singleton.
+	if got := workerMaintenanceResource(config.Config{WorkerProfile: config.WorkerProfileControl, LeaderResource: "synapse"}); got != "synapse-worker-maintenance" {
+		t.Fatalf("control lease = %s, want the all profile's lease", got)
+	}
 }

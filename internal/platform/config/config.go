@@ -1491,11 +1491,35 @@ const (
 	// WorkerProfileNotifications claims only notification delivery, contact verification,
 	// and personal inbox jobs. It never constructs an executable-tool handler.
 	WorkerProfileNotifications WorkerProfile = "notifications"
+	// WorkerProfileControl claims every data-only kind (integrations, lifecycle, notifications and
+	// vulnerability intelligence) and runs the control singletons under one lease. It never
+	// constructs an executable-tool handler, so it starts without a sandbox or grant credentials
+	// (#1559).
+	WorkerProfileControl WorkerProfile = "control"
+	// WorkerProfileExecution claims only the kinds that run tools (sca, recon, dast_run, cspm,
+	// agent) and campaigns for no lease. It is the native execution tier of #1559.
+	WorkerProfileExecution WorkerProfile = "execution"
 )
+
+// DataOnly reports whether the profile never constructs or claims an executable-tool handler, so
+// the production sandbox and egress-grant gates do not apply to it.
+func (p WorkerProfile) DataOnly() bool {
+	switch p {
+	case WorkerProfileIntegrations, WorkerProfileLifecycle, WorkerProfileNotifications, WorkerProfileControl:
+		return true
+	default:
+		return false
+	}
+}
 
 func (c Config) ValidateWorkerProfile() error {
 	switch c.WorkerProfile {
-	case WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle:
+	case WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle, WorkerProfileExecution:
+		return nil
+	case WorkerProfileControl:
+		if c.NotificationEnabled && strings.TrimSpace(c.VaultMasterKey) == "" {
+			return errors.New("SYNAPSE_WORKER_PROFILE=control with SYNAPSE_NOTIFICATIONS_ENABLED=true requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
+		}
 		return nil
 	case WorkerProfileNotifications:
 		if !c.NotificationEnabled {
@@ -1506,7 +1530,7 @@ func (c Config) ValidateWorkerProfile() error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q, %q, %q, or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle, WorkerProfileNotifications, c.WorkerProfile)
+		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q, %q, %q, %q, %q or %q (got %q)", WorkerProfileAll, WorkerProfileControl, WorkerProfileExecution, WorkerProfileIntegrations, WorkerProfileLifecycle, WorkerProfileNotifications, c.WorkerProfile)
 	}
 }
 
@@ -1514,7 +1538,7 @@ func (c Config) ValidateWorkerProfile() error {
 // sandbox gate while allowing data-only workers, which never construct or claim an
 // executable-tool handler.
 func (c Config) ValidateWorkerSandboxPosture() error {
-	if c.WorkerProfile == WorkerProfileIntegrations || c.WorkerProfile == WorkerProfileLifecycle || c.WorkerProfile == WorkerProfileNotifications {
+	if c.WorkerProfile.DataOnly() {
 		return nil
 	}
 	return c.ValidateSandboxPosture()
@@ -1537,7 +1561,7 @@ func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
 		if c.DBDSN == "" {
 			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
 		}
-		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations && c.WorkerProfile != WorkerProfileLifecycle && c.WorkerProfile != WorkerProfileNotifications {
+		if c.IsProduction() && !c.SandboxEnabled && !c.WorkerProfile.DataOnly() {
 			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
 		}
 		return ToolExecutionWorker, nil
@@ -1624,6 +1648,10 @@ func (c Config) ValidateEgressGrantPosture(role ProcessRole) error {
 			return errors.New("SYNAPSE_EGRESS_GRANT_SIGNING_SEED must not reuse SYNAPSE_EVIDENCE_SIGNING_SEED")
 		}
 	case ProcessRoleWorker:
+		if c.WorkerProfile.DataOnly() {
+			// A data-only worker never executes a tool, so it never asks the authority for a grant.
+			return nil
+		}
 		if strings.TrimSpace(c.EgressGrantAuthorityURL) == "" || strings.TrimSpace(c.EgressGrantAuthorityToken) == "" {
 			return errors.New("production synapse-worker requires SYNAPSE_EGRESS_GRANT_AUTHORITY_URL and SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN")
 		}
@@ -1643,6 +1671,9 @@ func (c Config) ValidateNetworkExecutionPosture(role ProcessRole) error {
 	}
 	switch role {
 	case ProcessRoleAPI, ProcessRoleWorker:
+		if role == ProcessRoleWorker && c.WorkerProfile.DataOnly() {
+			return nil // never claims the cspm kind
+		}
 		if c.CSPMEnabled {
 			if !c.SandboxEnabled {
 				return errors.New("production CSPM execution requires sandboxing")

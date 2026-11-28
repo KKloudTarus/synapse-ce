@@ -202,6 +202,7 @@ func configureNotificationWorkerRuntime(
 		return notificationWorkerRuntime{}, fmt.Errorf("set notification SLA reminders: %w", err)
 	}
 	source.SetVulnerabilityEnabled(cfg.VulnerabilityNotificationsEnabled && !cfg.VulnerabilityDryRunEnabled)
+	// topology: id=loop:notification-source-poll
 	runtime.maintenance = append(runtime.maintenance, func(taskCtx context.Context) {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -245,6 +246,7 @@ func startWorkerMetrics(ctx context.Context, stop context.CancelFunc, address st
 			}
 		})
 	}
+	// topology: exempt=metrics listener; serves /metrics, owns no work
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) && ctx.Err() == nil {
 			log.Error("worker metrics listener stopped", "err", err)

@@ -1,4 +1,8 @@
 {{- if eq (include "synapse.executionMode" .) "inClusterBroker" }}
+{{- /* A data-only role (#1559: control, and the retired integrations, lifecycle and notifications) runs
+       no tool: it gets no broker socket, no grant token, no sandbox probe, and schedules on the worker's
+       own node selector instead of the broker nodes. */ -}}
+{{- $control := has .Values.worker.profile (list "control" "integrations" "lifecycle" "notifications") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,12 +36,19 @@ spec:
         {{- include "synapse.podSecurityContext" . | nindent 8 }}
       topologySpreadConstraints:
         {{- include "synapse.topologySpreadConstraints" (list . "worker") | nindent 8 }}
+      {{- if $control }}
+      nodeSelector:
+        {{- toYaml .Values.worker.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.worker.tolerations | nindent 8 }}
+      {{- else }}
       # The worker must land on the SAME execution-capable nodes as the broker DaemonSet, so it inherits the
       # broker's node selector and tolerations and reads the node-local broker socket via hostPath.
       nodeSelector:
         {{- toYaml .Values.egressBroker.nodeSelector | nindent 8 }}
       tolerations:
         {{- toYaml .Values.egressBroker.tolerations | nindent 8 }}
+      {{- end }}
       affinity:
         {{- toYaml .Values.worker.affinity | nindent 8 }}
       containers:
@@ -54,9 +65,13 @@ spec:
             {{- include "synapse.containerSecurityContext" . | nindent 12 }}
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
+            {{- if not $control }}
             {{- include "synapse.workerEgressEnv" . | nindent 12 }}
+            {{- end }}
             - name: SYNAPSE_LEADER_ENABLED
               value: "true"
+            - name: SYNAPSE_WORKER_PROFILE
+              value: {{ .Values.worker.profile | quote }}
             - name: SYNAPSE_INTEGRATION_SCHEDULER_ENABLED
               value: {{ .Values.worker.integrationScheduler.enabled | quote }}
             - name: SYNAPSE_INTEGRATION_SCHEDULER_POLL
@@ -73,6 +88,7 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+          {{- if not $control }}
           startupProbe:
             # Runs the FULL production sandbox conformance suite (every strict control, not just the
             # host/kernel-dependent subset) before this worker can claim work; -strict fails closed
@@ -82,12 +98,15 @@ spec:
             periodSeconds: 15
             failureThreshold: 6
             timeoutSeconds: 30
+          {{- end }}
           volumeMounts:
             - {name: synapse-data, mountPath: /var/lib/synapse}
             - {name: tmp, mountPath: /tmp}
             - {name: database-ca, mountPath: /etc/synapse/database-ca, readOnly: true}
+            {{- if not $control }}
             # The node-local broker socket, shared with the privileged broker DaemonSet on this node.
             - {name: egress-broker-socket, mountPath: {{ .Values.egressBroker.socketHostPath }}}
+            {{- end }}
       volumes:
         - name: synapse-data
           emptyDir:
@@ -105,8 +124,10 @@ spec:
             items:
               - key: {{ required "externalDatabase.caBundle.key is required" .Values.externalDatabase.caBundle.key }}
                 path: ca.crt
+        {{- if not $control }}
         - name: egress-broker-socket
           hostPath:
             path: {{ .Values.egressBroker.socketHostPath }}
             type: DirectoryOrCreate
+        {{- end }}
 {{- end }}

@@ -101,6 +101,7 @@ func startIdentityMaintenance(ctx context.Context, cfg config.Config, pool *pgxp
 // Each tenant heartbeat and the delivery pass have independent scheduling. Slow
 // database or mail work cannot delay another tenant's writer liveness evidence.
 func startIdentityPeriodic(ctx context.Context, interval time.Duration, run func()) {
+	// topology: id=loop:identity-maintenance
 	go func() {
 		if ctx.Err() != nil {
 			return

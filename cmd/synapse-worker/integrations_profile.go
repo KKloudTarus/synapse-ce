@@ -20,7 +20,7 @@ func integrationsProfile(cfg config.Config) bool {
 }
 
 func usesDispatchOnlySCA(cfg config.Config) bool {
-	return integrationsProfile(cfg)
+	return integrationsProfile(cfg) || cfg.WorkerProfile == config.WorkerProfileControl
 }
 
 func workerMaintenanceResource(cfg config.Config) string {
@@ -32,6 +32,8 @@ func workerMaintenanceResource(cfg config.Config) string {
 	case config.WorkerProfileLifecycle:
 		return cfg.LeaderResource + "-worker-lifecycle-maintenance"
 	default:
+		// control shares the all profile's lease: it owns the same singletons, so during a cutover from
+		// all to control only one of them runs each singleton.
 		return cfg.LeaderResource + "-worker-maintenance"
 	}
 }
