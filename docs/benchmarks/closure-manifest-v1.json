@@ -1,0 +1,177 @@
+{
+  "schema_version": "synapse-benchmark-closure-manifest-v1",
+  "manifest_id": "synapse-benchmark-closure",
+  "revision": 1,
+  "claim": "Each enrolled engine receives a standalone absolute scorecard per profile, scored by one engine-neutral core that never sees engine identity.",
+  "population_statement": "Revision 1 enters the one profile whose truth, corpus and enrollment are frozen in the repository today: SCA component-advisory relations on three pinned container images. Every other task family enters by a later revision, disclosed through succession.",
+  "work_packages": {
+    "A": {
+      "summary": "Engine-neutral contracts, core and adapter boundary",
+      "required": true
+    },
+    "B": {
+      "summary": "Independent truth, sealed holdout and temporal cohorts",
+      "required": true
+    },
+    "C": {
+      "summary": "Absolute per-engine evaluation first; optional comparison modes",
+      "required": true
+    },
+    "D": {
+      "summary": "Validate the benchmark itself and its failure sensitivity",
+      "required": true
+    },
+    "E": {
+      "summary": "Authorized live acquisition and enforcement profiles",
+      "required": true
+    },
+    "F": {
+      "summary": "Operational fitness, reproducibility and economics",
+      "required": true
+    },
+    "G": {
+      "summary": "Automated acceptance and reproducible publication",
+      "required": true
+    }
+  },
+  "profiles": [
+    {
+      "id": "sca.component-advisory.v1",
+      "work_packages": [
+        "A",
+        "C"
+      ],
+      "task_family": "sca",
+      "unit_kinds": [
+        "component-advisory/deb",
+        "component-advisory/rpm"
+      ],
+      "closed_world": false,
+      "population": {
+        "subjects": 3,
+        "truth_units": 91,
+        "positives": 19,
+        "negatives": 72
+      },
+      "supported_scope": "OS packages (deb, rpm) of the three images in internal/usecase/scabench/corpus/catalog.json",
+      "corpus": {
+        "id": "scabench-catalog",
+        "version": "same-sbom-linux-20260922",
+        "digest": "sha256:2a900b7994d946acd0dbf9b90230cb56a1d21b54c5aae639172a1f625f953d0e"
+      },
+      "truth": {
+        "id": "scabench-oracle",
+        "version": "oracle@same-sbom-linux-20260922",
+        "digest": "sha256:a92f5c6a57cc47f87153bfdf93c531da6b5630d1d849e354cf8a82370f023a6a"
+      },
+      "scorer": {
+        "id": "benchcore",
+        "version": "1",
+        "digest": "sha256:b0ea5d7823e2a9072db07af7824b5dd30c2824b9b886b4411b88cdc5ee4edffc"
+      },
+      "matching_policy": {
+        "id": "scabench-structural-component-advisory-v1",
+        "version": "1",
+        "digest": "sha256:7f5485db31e66278346d61dcee75634000409fd5911a3a63b503f98b19b04011"
+      },
+      "thresholds": {
+        "minimum_recall": 1,
+        "minimum_precision": 1,
+        "maximum_unknown": 0,
+        "margin_rationale": "Every labelled relation is a published advisory fix or affected status; a pinned engine with current data has no tolerated miss or false report. The unknown ceiling does not apply to this open-world profile."
+      },
+      "minimum_truth_support": {
+        "positives": 30,
+        "negatives": 30,
+        "rationale": "With n of n positives found, the one-sided 95% Clopper-Pearson lower bound on recall is 0.05^(1/n); n = 30 keeps it at 0.905. The bound assumes independently sampled units and holds per unit kind, not jointly across kinds; units clustered on three images are fewer independent samples than their count. Below 30 positives or 30 negatives in any unit kind the profile is descriptive."
+      },
+      "required_enrollment": [
+        {
+          "engine_id": "grype",
+          "adapter_id": "scabench-grype",
+          "scored_component": {
+            "id": "grype",
+            "provenance": "pinned in internal/usecase/scabench/corpus/catalog.json and the capture manifests"
+          },
+          "declared_capabilities": [
+            "component-advisory/deb",
+            "component-advisory/rpm"
+          ]
+        },
+        {
+          "engine_id": "osv-scanner",
+          "adapter_id": "scabench-osv-scanner",
+          "scored_component": {
+            "id": "osv-scanner",
+            "provenance": "pinned in internal/usecase/scabench/corpus/catalog.json and the capture manifests"
+          },
+          "declared_capabilities": [
+            "component-advisory/deb"
+          ]
+        },
+        {
+          "engine_id": "owned",
+          "adapter_id": "scabench-owned",
+          "scored_component": {
+            "id": "owned",
+            "provenance": "pinned in internal/usecase/scabench/corpus/catalog.json and the capture manifests"
+          },
+          "declared_capabilities": [
+            "component-advisory/deb",
+            "component-advisory/rpm"
+          ]
+        },
+        {
+          "engine_id": "trivy",
+          "adapter_id": "scabench-trivy",
+          "scored_component": {
+            "id": "trivy",
+            "provenance": "pinned in internal/usecase/scabench/corpus/catalog.json and the capture manifests"
+          },
+          "declared_capabilities": [
+            "component-advisory/deb",
+            "component-advisory/rpm"
+          ]
+        }
+      ],
+      "disposition": "required",
+      "execution_authorization": {
+        "kind": "none",
+        "status": "none"
+      },
+      "legacy_evidence": {
+        "label": "migration/regression",
+        "source_path": "internal/usecase/scabench/corpus/ratchet.json",
+        "cells": 12,
+        "inventory_digest_claimed": "sha256:2355a4ffe386bd1a4e66d6360e9b94b8e684d08aa6746956196dc5b243e9fb49",
+        "inventory_digest_verified": true
+      }
+    }
+  ],
+  "control_suites": [
+    {
+      "id": "benchcore-identity-invariance",
+      "version": "1",
+      "work_package": "D",
+      "fixture_digest": "sha256:238c398b819db6fdc637b3fabfa304206b58f4205eaba464d02d0f37ebb6204f",
+      "expected_outcome_digest": "sha256:aa3033927af18302b07bacb5538a71d7a9b62dbae58c4e2dbc384c797307f843"
+    },
+    {
+      "id": "benchcore-known-outcome",
+      "version": "1",
+      "work_package": "D",
+      "fixture_digest": "sha256:238c398b819db6fdc637b3fabfa304206b58f4205eaba464d02d0f37ebb6204f",
+      "expected_outcome_digest": "sha256:aa3033927af18302b07bacb5538a71d7a9b62dbae58c4e2dbc384c797307f843"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "offline-sca",
+      "profile_ids": [
+        "sca.component-advisory.v1"
+      ],
+      "disposition": "required",
+      "authorization_status": "none"
+    }
+  ]
+}
