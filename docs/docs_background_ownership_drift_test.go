@@ -164,10 +164,28 @@ func loopSites(t *testing.T, file string) []loopSite {
 	add := func(pos token.Pos, what string) {
 		sites = append(sites, loopSite{line: fset.Position(pos).Line, what: what, lines: lines})
 	}
+	tasks := taskSliceNames(parsed)
+	isTaskSlice := func(e ast.Expr) bool {
+		name := exprName(e)
+		if strings.Contains(name, "aintenance") {
+			return true
+		}
+		if i := strings.LastIndexByte(name, '.'); i >= 0 {
+			name = name[i+1:]
+		}
+		return tasks[name]
+	}
 	ast.Inspect(parsed, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.GoStmt:
 			add(node.Pos(), "go statement")
+		case *ast.CompositeLit:
+			// A task slice literal registers each element; each needs its own marker.
+			if isTaskFuncSlice(node.Type) {
+				for _, elt := range node.Elts {
+					add(elt.Pos(), "task slice element")
+				}
+			}
 		case *ast.CallExpr:
 			switch fn := node.Fun.(type) {
 			case *ast.SelectorExpr:
@@ -175,12 +193,20 @@ func loopSites(t *testing.T, file string) []loopSite {
 					add(node.Pos(), "RunOnce barrier")
 				}
 			case *ast.Ident:
-				if fn.Name == "append" && len(node.Args) >= 2 && node.Ellipsis == token.NoPos && registersTask(node) {
-					if len(node.Args) > 2 {
-						t.Errorf("%s:%d: append registers %d tasks under one marker; register one task per append so each has its own row", file, fset.Position(node.Pos()).Line, len(node.Args)-1)
-					}
-					add(node.Pos(), "maintenance registration")
+				if fn.Name != "append" || len(node.Args) < 2 {
+					break
 				}
+				if !isTaskSlice(node.Args[0]) && !registersTask(node) {
+					break
+				}
+				if node.Ellipsis != token.NoPos {
+					add(node.Pos(), "task slice spread")
+					break
+				}
+				if len(node.Args) > 2 {
+					t.Errorf("%s:%d: append registers %d tasks under one marker; register one task per append so each has its own row", file, fset.Position(node.Pos()).Line, len(node.Args)-1)
+				}
+				add(node.Pos(), "maintenance registration")
 			}
 		}
 		return true
@@ -205,6 +231,61 @@ func registersTask(call *ast.CallExpr) bool {
 		}
 	}
 	return false
+}
+
+// isTaskFuncSlice matches the type []func(context.Context), the shape every background task list has.
+func isTaskFuncSlice(e ast.Expr) bool {
+	array, ok := e.(*ast.ArrayType)
+	if !ok || array.Len != nil {
+		return false
+	}
+	fn, ok := array.Elt.(*ast.FuncType)
+	if !ok || fn.Results != nil || fn.Params == nil || len(fn.Params.List) != 1 {
+		return false
+	}
+	return exprName(fn.Params.List[0].Type) == "context.Context"
+}
+
+// taskSliceNames collects the variables and struct fields declared as []func(context.Context), whatever
+// they are called, so an append to any of them is a registration.
+func taskSliceNames(file *ast.File) map[string]bool {
+	names := map[string]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.ValueSpec:
+			if node.Type != nil && isTaskFuncSlice(node.Type) {
+				for _, name := range node.Names {
+					names[name.Name] = true
+				}
+			}
+		case *ast.Field:
+			if isTaskFuncSlice(node.Type) {
+				for _, name := range node.Names {
+					names[name.Name] = true
+				}
+			}
+		case *ast.AssignStmt:
+			for i, rhs := range node.Rhs {
+				if i >= len(node.Lhs) {
+					break
+				}
+				if lit, ok := rhs.(*ast.CompositeLit); ok && isTaskFuncSlice(lit.Type) {
+					if id, ok := node.Lhs[i].(*ast.Ident); ok {
+						names[id.Name] = true
+					}
+				}
+				if call, ok := rhs.(*ast.CallExpr); ok && exprName(call.Fun) == "append" && len(call.Args) > 0 {
+					if lit, ok := call.Args[0].(*ast.CompositeLit); ok && isTaskFuncSlice(lit.Type) {
+						if id, ok := node.Lhs[i].(*ast.Ident); ok {
+							names[id.Name] = true
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+	return names
 }
 
 func exprName(e ast.Expr) string {
