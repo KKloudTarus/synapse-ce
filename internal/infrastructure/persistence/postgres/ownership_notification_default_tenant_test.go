@@ -12,7 +12,7 @@ import (
 )
 
 // TestOwnershipNotificationNamesDefaultTenantAssignees: users of the default tenant are stored with
-// tenant_id '' while ownership rows carry 'default', so the assignee names must be resolved through
+// an empty tenant_id while ownership rows carry 'default', so the assignee names must be resolved through
 // users.ownership_tenant_id. Before #1724 the subqueries compared tenant_id and returned empty names.
 func TestOwnershipNotificationNamesDefaultTenantAssignees(t *testing.T) {
 	pool, _ := ownershipTestDatabase(t, 163, nil)
