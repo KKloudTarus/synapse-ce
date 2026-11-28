@@ -1,0 +1,1854 @@
+{
+  "schema_version": "synapse-benchmark-control-fixture-v1",
+  "id": "benchcore-known-outcome",
+  "version": "1",
+  "description": "Hand-derived expected cells for every observation state the scorer distinguishes. The expected counts were written from the scoring rules, not captured from the scorer.",
+  "cases": [
+    {
+      "name": "correct",
+      "why": "both positives found and the negative not: two true positives, one true negative",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p2"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 2,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 2,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "missing-positive",
+      "why": "p2 not reported is a false negative",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 1,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 1,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "noisy-closed-world",
+      "why": "the reported negative is a false positive unit; the unlabelled finding is an unmatched finding in a closed world",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p2"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "n1"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "x1"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 2,
+            "false_negatives": 0,
+            "false_positives": 1,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 1,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 2,
+            "false_negatives": 0,
+            "false_positives": 1,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 1,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "noisy-open-world",
+      "why": "in an open world the unlabelled finding waits for adjudication; the reported negative is still a false positive",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": false,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p2"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "n1"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "x1"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 2,
+            "false_negatives": 0,
+            "false_positives": 1,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 1
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 2,
+            "false_negatives": 0,
+            "false_positives": 1,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 1
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "unsupported",
+      "why": "a kind the engine did not declare is unsupported end to end and absent from assessed-only",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 3,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 0,
+            "positives": 0,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "failed-execution",
+      "why": "a failed run counts every unit as execution_failed",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "failed",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [],
+          "execution_error": "timeout"
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 3,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 3,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "abstained",
+      "why": "no observation for the subject is an abstention",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 3,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 3,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "incomplete",
+      "why": "an incomplete run's findings are not evidence",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "incomplete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            },
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "x1"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 3,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 3,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "truncated",
+      "why": "a complete run whose output was truncated is incomplete, and its findings are not evidence",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": true,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 3,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "true_negatives": 0,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 3,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "alias",
+      "why": "a finding under an alternate identity matches its unit once",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers",
+            "alternate_identities": [
+              {
+                "id": "p1-alias"
+              }
+            ]
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1-alias"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 1,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 1,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "case-sensitive-value",
+      "why": "values are compared exactly; folding case is the adapter's normalization, so P1 is not p1",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "P1"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 2,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 1,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 0,
+            "false_negatives": 2,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 1,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "out-of-scope-kind",
+      "why": "a finding of a kind the truth does not contain lands in no cell",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            },
+            {
+              "unit_kind": "other",
+              "identity": {
+                "id": "p2"
+              }
+            }
+          ]
+        }
+      ],
+      "expected_cells": [
+        {
+          "unit_kind": "k",
+          "end_to_end": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 1,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          },
+          "assessed_only": {
+            "denominator": 3,
+            "positives": 2,
+            "true_positives": 1,
+            "false_negatives": 1,
+            "false_positives": 0,
+            "true_negatives": 1,
+            "unknown": 0,
+            "unsupported": 0,
+            "incomplete": 0,
+            "abstained": 0,
+            "execution_failed": 0,
+            "unmatched_findings": 0,
+            "unadjudicated_findings": 0
+          }
+        }
+      ],
+      "expect_error": false
+    },
+    {
+      "name": "non-canonical-key",
+      "why": "an identity key that is not lower-case is refused rather than folded",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "ID": "p1"
+              }
+            }
+          ]
+        }
+      ],
+      "expect_error": true,
+      "expected_cells": []
+    },
+    {
+      "name": "duplicate-subject",
+      "why": "two observations of one subject are refused",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p1"
+              }
+            }
+          ]
+        },
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "complete",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": [
+            {
+              "unit_kind": "k",
+              "identity": {
+                "id": "p2"
+              }
+            }
+          ]
+        }
+      ],
+      "expect_error": true,
+      "expected_cells": []
+    },
+    {
+      "name": "malformed",
+      "why": "an observation in an unknown state is refused, not scored",
+      "truth": {
+        "schema_version": "synapse-benchmark-truth-v1",
+        "profile_id": "control.k.v1",
+        "version": "1",
+        "closed_world": true,
+        "subjects": [
+          {
+            "id": "s1",
+            "digest": "sha256:s1"
+          }
+        ],
+        "units": [
+          {
+            "id": "p1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p1"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "p2",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "p2"
+            },
+            "label": "positive",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          },
+          {
+            "id": "n1",
+            "subject_id": "s1",
+            "unit_kind": "k",
+            "identity": {
+              "id": "n1"
+            },
+            "label": "negative",
+            "provenance": "authored control",
+            "authorship": "benchcore maintainers"
+          }
+        ]
+      },
+      "capabilities": [
+        "k"
+      ],
+      "observations": [
+        {
+          "schema_version": "synapse-benchmark-observation-v1",
+          "profile_id": "control.k.v1",
+          "engine": {
+            "engine_id": "control-engine",
+            "adapter_id": "control-adapter",
+            "adapter_version": "1",
+            "scored_component": {
+              "id": "control",
+              "provenance": "fixture"
+            }
+          },
+          "subject": {
+            "id": "s1",
+            "digest": "sha256:s1"
+          },
+          "state": "done",
+          "truncated": false,
+          "declared_capabilities": [
+            "k"
+          ],
+          "normalization": {
+            "id": "identity",
+            "digest": "sha256:n"
+          },
+          "raw_evidence_digest": "sha256:r",
+          "findings": []
+        }
+      ],
+      "expect_error": true,
+      "expected_cells": []
+    }
+  ]
+}

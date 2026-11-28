@@ -7,6 +7,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Added
+
+- **Engine-neutral benchmark core (#1640).** `internal/usecase/benchcore` scores any engine an adapter
+  describes through one scorer that never sees engine identity: a closure manifest freezes each
+  profile's corpus, truth, scorer, matching policy, thresholds, minimum truth support and enrolled
+  engines by digest; scorecards compute their own cells, run the two control suites (15 hand-derived
+  known-outcome cases and an identity-invariance check) and bind to the manifest, receipt, truth and
+  subject digests; closure needs a valid scorecard for every enrolled engine. `synapse-benchcore` runs
+  the flow, and the SCA bridge reproduces the legacy reduction's counts for all four engines. Revision 1 of
+  `docs/benchmarks/closure-manifest-v1.json` enters the SCA oracle with four enrolled engines, which
+  grade `descriptive` because each unit kind has fewer than 30 labelled positives. See
+  `docs/guide/benchmark-core.md`.
+
 ### Fixed
 
 - **Two assessment-cycle closes may reuse one `Idempotency-Key` (#1733).** The closure and reopen

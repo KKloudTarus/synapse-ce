@@ -88,6 +88,7 @@ nav:
       - Reachability benchmark: reachability-benchmark-runbook.md
       - Reachability soundness: reachability-soundness.md
       - SCA accuracy benchmark: sca-accuracy-benchmark.md
+      - Engine-neutral benchmark core: benchmark-core.md
       - Source-repository benchmark: source-repository-benchmark.md
       - Public SCA diagnostic inputs: sca-public-inputs.md
       - Trusted benchmark provisioning: trusted-benchmark-provisioning.md
