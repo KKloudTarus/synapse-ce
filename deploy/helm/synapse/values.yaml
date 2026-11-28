@@ -170,9 +170,11 @@ worker:
   # Fenced claim leases, per-run execution locks, and leader-gated maintenance permit safe worker replicas.
   replicaCount: 1
   # Worker role (SYNAPSE_WORKER_PROFILE). `all` keeps today's single worker. `control` claims the
-  # data-only kinds and owns every singleton; `execution` claims only the tool kinds and campaigns for
-  # no lease. Run one control Deployment and any number of execution replicas to split the tiers
-  # (#1559). Values: all, control, execution, integrations, lifecycle, notifications.
+  # data-only kinds and owns every singleton; it renders without the broker socket, the grant token and
+  # the sandbox startup probe, on worker.nodeSelector. `execution` claims only the tool kinds and
+  # campaigns for no lease. This chart renders one worker Deployment, so one release runs one role;
+  # rendering both tiers from one release is a later step of #1559.
+  # Values: all, control, execution, integrations, lifecycle, notifications.
   profile: all
   nodeSelector: {}
   tolerations: []

@@ -298,3 +298,28 @@ awk '
   printf '%s\n' 'api.persistence.acknowledgeEphemeral must still render the per-pod emptyDir' >&2
   exit 1
 }
+
+# Worker roles (#1559). The control role runs no tool, so its pod carries no broker socket, no grant
+# token and no sandbox probe, and it schedules on worker.nodeSelector; the default role keeps all three.
+control_worker=$(mktemp)
+trap 'rm -f "$out" "$in_cluster" "$cpo" "$worker_metrics" "$ephemeral" "$control_worker"' EXIT
+helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
+  --set execution.mode=inClusterBroker \
+  --set egressBroker.enabled=true \
+  --set egressBroker.grantAuthorityURL=https://grant.internal.example \
+  --set egressBroker.grantPublicKey=Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMzJieXRlcw== \
+  --set egressBroker.privileged=true \
+  --set worker.profile=control \
+  --set worker.nodeSelector.tier=control \
+  --show-only templates/worker.yaml >"$control_worker"
+grep -q 'value: "control"' "$control_worker"
+grep -q 'tier: control' "$control_worker"
+! grep -q 'synapse-sandbox-check' "$control_worker"
+! grep -q 'egress-broker-socket' "$control_worker"
+! grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN' "$control_worker"
+grep -q 'egress-broker-socket' "$in_cluster"
+grep -q 'SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN' "$in_cluster"
+if helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 --set worker.profile=bogus >/dev/null 2>&1; then
+  printf '%s\n' 'worker.profile must be validated by values.schema.json' >&2
+  exit 1
+fi

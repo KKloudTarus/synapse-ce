@@ -11,9 +11,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 - **Worker roles `control` and `execution` (#1559).** `SYNAPSE_WORKER_PROFILE=control` claims every
   data-only queue kind (integrations, assessment lifecycle, ownership routing, notifications,
-  vulnerability intelligence) and runs the control singletons under one lease; it starts without a
-  sandbox or egress-grant credentials, as the other data-only profiles now also do. `execution` claims
-  only the kinds that run a tool and campaigns for no lease. The two kind sets are disjoint and cover
+  vulnerability intelligence) and runs the control singletons under one lease, including the agent
+  session reconciler, the approval sweeper, the accuracy regression and SIEM export; it starts without
+  a sandbox or egress-grant credentials, as the other data-only profiles now also do, and the Helm
+  chart renders it without the broker socket or the sandbox startup probe. `execution` claims only the
+  kinds that run a tool, runs no singleton and campaigns for no lease. The two kind sets are disjoint and cover
   every kind a producer can enqueue (`internal/composition/workerroles`), and a role refuses to start
   when its handlers claim another role's kind or leave an enabled kind unclaimed. The background
   ownership inventory in `docs/guide/background-ownership.md` lists every consumer, singleton, replica
