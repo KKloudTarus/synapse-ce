@@ -12,7 +12,7 @@ import (
 
 // TestMigration0282EnforcesUsersTenantRLS (#1697): users carries forced row-level security keyed on
 // ownership_tenant_id. A runtime role sees only the bound tenant's users, the default tenant's users
-// (stored with tenant_id '') under 'default', nothing unbound; the owner functions still answer across
+// (stored with an empty tenant_id) under 'default', nothing unbound; the owner functions still answer across
 // tenants.
 func TestMigration0282EnforcesUsersTenantRLS(t *testing.T) {
 	const tenantA, tenantB = "users-rls-a", "users-rls-b"

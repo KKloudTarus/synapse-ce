@@ -119,6 +119,20 @@ type Evidence struct {
 	// instance. It is not part of the hash. Its StorageRef was chosen by whoever built the bundle, so it
 	// never authorizes a read of the blob that sha names.
 	Imported bool
+	// SealedFindingID is the finding id the link was sealed with on the instance that produced it. An
+	// import gives every finding a new id and points FindingID at it, so the hash is computed over
+	// SealedFindingID when it is set. Only an import sets it: Seal clears it, so a link sealed here binds
+	// its FindingID and cannot be re-pointed without breaking the chain. For an imported link, FindingID
+	// is the importer's projection, with the same standing as Imported.
+	SealedFindingID shared.ID
+}
+
+// hashedFindingID is the finding id a link's hash binds: the id it was sealed with.
+func (e Evidence) hashedFindingID() string {
+	if !e.SealedFindingID.IsZero() {
+		return e.SealedFindingID.String()
+	}
+	return e.FindingID.String()
 }
 
 // evSep terminates each field of the legacy preimage.
@@ -147,7 +161,7 @@ const framedDomain = "synapse-evidence-link:v2"
 
 // ComputeHash returns the chain hash binding an evidence link to its predecessor under the link's
 // HashScheme. It binds not just previous_hash + content but ALSO the attribution + metadata (kind,
-// finding_id, storage_ref, created_by, created_at), so a rewrite of WHO produced the evidence or
+// the sealed finding id, storage_ref, created_by, created_at), so a rewrite of WHO produced the evidence or
 // WHEN is detected by VerifyChain, not just a content edit. The timestamp is truncated to µs
 // (matching Postgres timestamptz) so the hash is stable across a DB round-trip. Including
 // previous_hash links the chain: any earlier change cascades. An unknown scheme returns "", which
@@ -160,7 +174,7 @@ func ComputeHash(e Evidence) string {
 		write := func(s string) { h.Write([]byte(s)); h.Write([]byte(evSep)) }
 		write(e.PreviousHash)
 		write(e.Kind)
-		write(e.FindingID.String())
+		write(e.hashedFindingID())
 		write(e.StorageRef)
 		write(e.CreatedBy)
 		write(stamp)
@@ -175,7 +189,7 @@ func ComputeHash(e Evidence) string {
 		field([]byte(framedDomain))
 		field([]byte(e.PreviousHash))
 		field([]byte(e.Kind))
-		field([]byte(e.FindingID.String()))
+		field([]byte(e.hashedFindingID()))
 		field([]byte(e.StorageRef))
 		field([]byte(e.CreatedBy))
 		field([]byte(stamp))
@@ -188,6 +202,7 @@ func ComputeHash(e Evidence) string {
 
 // Seal returns a copy of e under CurrentHashScheme with Hash computed from its chained fields.
 func (e Evidence) Seal() Evidence {
+	e.SealedFindingID = "" // a link sealed here binds its FindingID; only an import carries a sealed id
 	e.HashScheme = CurrentHashScheme
 	e.Hash = ComputeHash(e)
 	return e

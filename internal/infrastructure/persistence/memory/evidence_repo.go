@@ -36,6 +36,9 @@ func (s *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 	// by the evidence service before append; this store preserves legacy ID
 	// generator compatibility for ordinary, non-reserved evidence links.
 	for i, e := range items {
+		if !e.Imported && !e.SealedFindingID.IsZero() {
+			return fmt.Errorf("%w: evidence %s carries a sealed finding id but is not imported", shared.ErrValidation, e.ID)
+		}
 		if owner, exists := s.engagements[e.EngagementID]; exists && scoped && owner != tenantID {
 			return fmt.Errorf("evidence engagement %s: %w", e.EngagementID, shared.ErrNotFound)
 		}

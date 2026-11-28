@@ -1334,6 +1334,11 @@ func main() {
 		log.Error("transfer service init failed", "err", err)
 		os.Exit(1)
 	}
+	if vulnerabilityTransactions != nil {
+		// An import writes an engagement, findings, comments, an append-only evidence chain and an audit
+		// entry. One transaction keeps a failure anywhere from leaving an engagement without its record.
+		transferService.SetTransactionRunner(vulnerabilityTransactions)
+	}
 
 	// VEX consume: apply client OpenVEX statements to findings (CRA-aligned).
 	vexService, err := vexuc.NewService(repo, findingRepo, auditLog, clock)

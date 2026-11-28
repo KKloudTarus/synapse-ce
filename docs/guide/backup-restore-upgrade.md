@@ -144,6 +144,8 @@ SELECT e.tenant_id, e.engagement_id, e.id
 ON CONFLICT DO NOTHING;
 ```
 
+Migration 0283 lets an imported evidence link keep the finding id it was sealed with on its import marker. A chain-verifying read must join `evidence_imports`; the restore verifier does. A backup that restores `evidence` without `evidence_imports` reports every imported finding-linked chain as not intact, which is the correct reading of an incomplete backup.
+
 Do not run a down migration. Do not remove migration records, edit migration files, or attempt to make a newer database appear older. The deployed current service configuration must keep SYNAPSE_DB_AUTO_MIGRATE=false; production migration authority belongs to the separate owner-level migration credential.
 
 ## 5. Rollback rehearsal and recovery
