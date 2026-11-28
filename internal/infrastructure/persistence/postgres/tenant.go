@@ -167,12 +167,17 @@ func bindTenantTransaction(ctx context.Context, tenantID shared.ID, tx pgx.Tx) c
 // so that path can enforce it at startup, while single-tenant deployments that connect as a
 // superuser and use no RLS-protected table are not forced to change their role.
 func CheckRLSRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
-	var super, bypass, databaseCreate, schemaCreate, ownsRLSTable bool
+	var super, bypass, databaseCreate, schemaCreate, ownsRLSTable, memberOfOwner bool
+	// A member of a table owner's role can SET ROLE to the owner and run ALTER TABLE ... NO FORCE ROW LEVEL
+	// SECURITY, so membership in an owner counts as owning. pg_has_role(..., 'MEMBER') holds for direct and
+	// indirect membership whatever its INHERIT and SET options.
 	err := pool.QueryRow(ctx, `SELECT r.rolsuper, r.rolbypassrls,
 		has_database_privilege(current_user, current_database(), 'CREATE'),
 		has_schema_privilege(current_user, 'public', 'CREATE'),
-		EXISTS (SELECT 1 FROM pg_class c WHERE c.relkind IN ('r','p') AND c.relrowsecurity AND c.relowner = r.oid)
-		FROM pg_roles r WHERE r.rolname = current_user`).Scan(&super, &bypass, &databaseCreate, &schemaCreate, &ownsRLSTable)
+		EXISTS (SELECT 1 FROM pg_class c WHERE c.relkind IN ('r','p') AND c.relrowsecurity AND c.relowner = r.oid),
+		EXISTS (SELECT 1 FROM pg_class c WHERE c.relkind IN ('r','p') AND c.relrowsecurity AND c.relowner <> r.oid
+			AND pg_has_role(r.oid, c.relowner, 'MEMBER'))
+		FROM pg_roles r WHERE r.rolname = current_user`).Scan(&super, &bypass, &databaseCreate, &schemaCreate, &ownsRLSTable, &memberOfOwner)
 	if err != nil {
 		return fmt.Errorf("rls: inspect runtime role: %w", err)
 	}
@@ -183,6 +188,8 @@ func CheckRLSRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("rls: runtime DB role %w: role has BYPASSRLS, which bypasses row level security", errRLSRoleBypasses)
 	case ownsRLSTable:
 		return fmt.Errorf("rls: runtime DB role %w: role owns an RLS table", errRLSRoleBypasses)
+	case memberOfOwner:
+		return fmt.Errorf("rls: runtime DB role %w: role is a member of an RLS table owner and can act as it", errRLSRoleBypasses)
 	case schemaCreate || databaseCreate:
 		return fmt.Errorf("rls: runtime DB role %w: role has schema or database DDL authority", errRLSRoleBypasses)
 	default:
