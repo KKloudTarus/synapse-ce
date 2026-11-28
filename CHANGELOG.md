@@ -16,6 +16,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   cycle, the actor, the cycle version and the client key, so none of them can collide with another, and
   a close after a reopen of the same cycle gets its own key. A retry of the same commit still records
   one entry.
+
 - **An engagement bundle whose evidence is tied to a finding can be imported (#1722).** An import gives
   every finding a new id and pointed each evidence link at it, but a link's hash binds the finding id it
   was sealed with, so every such bundle was refused as a tampered chain. The import now keeps the sealed
@@ -32,6 +33,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   so an import that failed after writing evidence could not delete the engagement again, and a failed
   audit append left an engagement without its `engagement.imported` record. The engagement, findings,
   comments, evidence and audit entry now commit together or not at all.
+
+### Changed
+
+- **The import-marker backfill runs again (#1734).** Migration 0284 repeats the 0280 backfill, so
+  engagements that a v0.3.0 binary imported after 0280 had run get their evidence links marked as
+  imported. The block is idempotent; engagements 0280 already marked gain nothing. Deploy this release
+  only after no v0.3.0 binary serves traffic.
 
 ## [0.4.0] - 2026-11-27
 
