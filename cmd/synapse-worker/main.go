@@ -724,6 +724,7 @@ func main() {
 	}
 	if integrationsProfile(cfg) {
 		maintenance := append([]func(context.Context){}, integrationMaintenanceTasks...)
+		// topology: exempt=aggregates tasks that carry their own markers where they are built
 		maintenance = append(maintenance, scheduleRuntime.maintenance...)
 		runWorkerRuntime(ctx, cfg, queue, integrationsProfileHandlers(integrationJobHandler{svc: integrationService}, scheduleRuntime.handlers), maintenance, ownsSingletons(cfg), leaderStore, auditLog, clock, ids, 6*time.Minute, log)
 		return
@@ -899,7 +900,9 @@ func main() {
 			handlers[kind] = handler
 		}
 		maintenance := append([]func(context.Context){}, integrationMaintenanceTasks...)
+		// topology: exempt=aggregates tasks that carry their own markers where they are built
 		maintenance = append(maintenance, scheduleRuntime.maintenance...)
+		// topology: exempt=aggregates tasks that carry their own markers where they are built
 		maintenance = append(maintenance, vulnerabilityMaintenance...)
 		if ownershipWorker != nil {
 			handlers[ownershipuc.RouteJobKind] = ownershipWorker
@@ -922,6 +925,15 @@ func main() {
 			// topology: id=loop:approval-sweeper
 			maintenance = append(maintenance, sweep)
 		}
+		reconSweeper, sweeperErr := dispatchOnlyReconSweeper(cfg, pool, repo, evidenceService, auditLog, clock, ids)
+		if sweeperErr != nil {
+			log.Error("recon stale-run sweeper init failed", "err", sweeperErr)
+			os.Exit(1)
+		}
+		// topology: id=loop:sca-stale-scan-sweeper
+		maintenance = append(maintenance, staleSweepTask("sca stale-scan", cfg.ScanTimeout+5*time.Minute, scaService.SweepStaleScans, log))
+		// topology: id=loop:recon-stale-run-sweeper
+		maintenance = append(maintenance, staleSweepTask("recon stale-run", cfg.ReconTimeout+5*time.Minute, reconSweeper.SweepStaleRuns, log))
 		var controlMetrics *prometheus.Registry
 		if cfg.NotificationEnabled {
 			controlMetrics = scheduleRuntime.metricsRegistry
@@ -1040,6 +1052,7 @@ func main() {
 
 	var maintenanceTasks []func(context.Context)
 	if ownsControlWork {
+		// topology: exempt=aggregates tasks that carry their own markers where they are built
 		maintenanceTasks = append(maintenanceTasks, integrationMaintenanceTasks...)
 		if task := accuracyEvalTask(cfg, pool, clock, ids, log); task != nil {
 			// topology: id=loop:accuracy-eval
@@ -1076,6 +1089,7 @@ func main() {
 		for kind, handler := range scheduleRuntime.handlers {
 			handlers[kind] = handler
 		}
+		// topology: exempt=aggregates tasks that carry their own markers where they are built
 		maintenanceTasks = append(maintenanceTasks, scheduleRuntime.maintenance...)
 		workerMetricsRegistry = scheduleRuntime.metricsRegistry
 	}
@@ -1083,6 +1097,7 @@ func main() {
 		for kind, handler := range vulnerabilityHandlers {
 			handlers[kind] = handler
 		}
+		// topology: exempt=aggregates tasks that carry their own markers where they are built
 		maintenanceTasks = append(maintenanceTasks, vulnerabilityMaintenance...)
 	}
 
@@ -1357,45 +1372,9 @@ func main() {
 	// not leader-gated: every worker must claim and execute durable jobs.
 	if ownsControlWork {
 		// topology: id=loop:sca-stale-scan-sweeper
-		maintenanceTasks = append(maintenanceTasks,
-			func(ctx context.Context) {
-				staleFor := cfg.ScanTimeout + 5*time.Minute
-				t := time.NewTicker(5 * time.Minute)
-				defer t.Stop()
-				for {
-					if n, err := scaService.SweepStaleScans(ctx, staleFor); err != nil && ctx.Err() == nil {
-						log.Warn("sca stale-scan sweep failed", "err", err)
-					} else if n > 0 {
-						log.Info("sca stale-scan sweeper reclaimed stranded scans", "count", n)
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-t.C:
-					}
-				}
-			},
-		)
+		maintenanceTasks = append(maintenanceTasks, staleSweepTask("sca stale-scan", cfg.ScanTimeout+5*time.Minute, scaService.SweepStaleScans, log))
 		// topology: id=loop:recon-stale-run-sweeper
-		maintenanceTasks = append(maintenanceTasks,
-			func(ctx context.Context) {
-				staleFor := cfg.ReconTimeout + 5*time.Minute
-				t := time.NewTicker(5 * time.Minute)
-				defer t.Stop()
-				for {
-					if n, err := reconService.SweepStaleRuns(ctx, staleFor); err != nil && ctx.Err() == nil {
-						log.Warn("recon stale-run sweep failed", "err", err)
-					} else if n > 0 {
-						log.Info("recon stale-run sweeper reclaimed stranded runs", "count", n)
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-t.C:
-					}
-				}
-			},
-		)
+		maintenanceTasks = append(maintenanceTasks, staleSweepTask("recon stale-run", cfg.ReconTimeout+5*time.Minute, reconService.SweepStaleRuns, log))
 	}
 
 	if cfg.WorkerProfile == config.WorkerProfileExecution {

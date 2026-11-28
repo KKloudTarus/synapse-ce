@@ -31,9 +31,9 @@ func workerMaintenanceResource(cfg config.Config) string {
 		return cfg.LeaderResource + "-worker-integrations-maintenance"
 	case config.WorkerProfileLifecycle:
 		return cfg.LeaderResource + "-worker-lifecycle-maintenance"
-	case config.WorkerProfileControl:
-		return cfg.LeaderResource + "-worker-control-maintenance"
 	default:
+		// control shares the all profile's lease: it owns the same singletons, so during a cutover from
+		// all to control only one of them runs each singleton.
 		return cfg.LeaderResource + "-worker-maintenance"
 	}
 }

@@ -13,7 +13,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/accuracyprobe"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
+	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
 	siemseal "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/seal"
@@ -22,10 +24,14 @@ import (
 	syslogtls "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/syslog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/executionmode"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/accuracyeval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 )
 
@@ -193,4 +199,42 @@ func startSIEMExport(ctx context.Context, stop context.CancelFunc, cfg config.Co
 		}
 	}()
 	return closeMetrics, nil
+}
+
+// staleSweepTask re-runs a stale-work sweep every five minutes. Leases, not this loop, decide which run is
+// stranded; the loop only needs to run on one replica, so it is a leader-held singleton.
+func staleSweepTask(name string, staleFor time.Duration, sweep func(context.Context, time.Duration) (int, error), log *slog.Logger) func(context.Context) {
+	return func(ctx context.Context) {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for {
+			if n, err := sweep(ctx, staleFor); err != nil && ctx.Err() == nil {
+				log.Warn(name+" sweep failed", "err", err)
+			} else if n > 0 {
+				log.Info(name+" sweeper reclaimed stranded work", "count", n)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}
+}
+
+// dispatchOnlyReconSweeper builds the recon service the control role needs only to reclaim stranded runs.
+// Its runner and dispatcher are dispatch-only, so it can finish a run as failed and never execute one.
+func dispatchOnlyReconSweeper(cfg config.Config, pool *pgxpool.Pool, repo ports.EngagementRepository, ev *evidenceuc.Service, auditLog ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*reconuc.Service, error) {
+	guard, err := execution.NewGuard(repo, clock, auditLog)
+	if err != nil {
+		return nil, err
+	}
+	dispatchOnly := executionmode.DispatchOnly{}
+	service, err := reconuc.NewService(guard, dispatchOnly, postgres.NewReconRunStore(pool), ev, repo, logstream.NewBroker(0), dispatchOnly, clock, ids,
+		recontools.Registry(), cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.ReconAllowCapabilitySensitive)
+	if err != nil {
+		return nil, err
+	}
+	service.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+	return service, nil
 }
