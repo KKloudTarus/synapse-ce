@@ -79,6 +79,7 @@ nav:
       - Certifying an identity provider: identity-provider-certification.md
       - Identity recovery: identity-recovery.md
       - Deployment: deployment.md
+      - Background ownership inventory: background-ownership.md
       - Capacity and service objectives: capacity-slos.md
       - Backup, restore, and upgrade: backup-restore-upgrade.md
       - Fleet agent packaging: fleet-agent-packaging.md

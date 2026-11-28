@@ -28,6 +28,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
+	"github.com/KKloudTarus/synapse-ce/internal/composition/workerroles"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
@@ -378,6 +379,7 @@ func main() {
 		var maintenance []func(context.Context)
 		if ownershipWorker != nil {
 			handlers[ownershipuc.RouteJobKind] = ownershipWorker
+			// topology: id=loop:ownership-dispatcher
 			maintenance = append(maintenance, ownershipWorker.Run)
 			log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
 		}
@@ -476,6 +478,7 @@ func main() {
 		log.Error("document publication runner init failed", "err", err)
 		os.Exit(1)
 	}
+	// topology: id=loop:document-publication-runner
 	integrationMaintenanceTasks = append(integrationMaintenanceTasks, documentRunner.Run)
 	if cfg.TicketingEnabled {
 		store, ticketErr := postgres.NewTicketStore(pool)
@@ -497,6 +500,7 @@ func main() {
 			log.Error("ticket polling init failed", "err", ticketErr)
 			os.Exit(1)
 		}
+		// topology: id=loop:ticket-runner
 		integrationMaintenanceTasks = append(integrationMaintenanceTasks, runner.Run)
 	}
 	if cfg.IntegrationSchedulerEnabled {
@@ -518,6 +522,7 @@ func main() {
 			log.Error("integration scheduler init failed", "err", schedulerErr)
 			os.Exit(1)
 		}
+		// topology: id=loop:integration-scheduler
 		integrationMaintenanceTasks = append(integrationMaintenanceTasks, integrationScheduler.Run)
 		log.Info("integration scheduler ENABLED", "poll", cfg.IntegrationSchedulerInterval, "dispatch_limit", cfg.IntegrationSchedulerDispatch, "max_queue_depth", cfg.IntegrationSchedulerQueueDepth)
 	}
@@ -728,6 +733,192 @@ func main() {
 		log.Info("durable notification delivery ENABLED", "profile", cfg.WorkerProfile)
 		log.Info("document schedule delivery ENABLED", "profile", cfg.WorkerProfile)
 	}
+	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
+	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
+	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
+		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
+		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
+		Notifications: cfg.VulnerabilityNotificationsEnabled, DryRun: cfg.VulnerabilityDryRunEnabled,
+		TenantAllowlist: cfg.VulnerabilityTenantAllowlist,
+	})
+	if err != nil {
+		log.Error("vulnerability rollout init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
+		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
+		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,
+		ResolveSecret: func(ctx context.Context, reference string) ([]byte, error) {
+			// Feed provider keys live under the default tenant's operator namespace (engagement id
+			// "default"); a feed sync runs outside any tenant request, so it binds that tenant here.
+			return credVault.Resolve(shared.WithTenant(ctx, shared.DefaultTenant), shared.DefaultTenant, reference)
+		},
+	}); err != nil {
+		log.Error("vulnerability provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor, err := vulnerabilitymonitor.NewService(vulnerabilitySources, vulnerabilityRuns, vulnerabilityMaterializer, vulnerabilityRegistry, clock)
+	if err != nil {
+		log.Error("vulnerability monitor init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor.SetRollout(vulnerabilityRollout)
+	vulnerabilityMonitor.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+	vulnerabilityFindingRepo := postgres.NewFindingRepository(pool)
+	vulnerabilityProjection, err := vulnerabilityprojection.NewService(vulnerabilityFindingRepo)
+	if err != nil {
+		log.Error("vulnerability finding projection init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityProjection.SetWorkflowSources(vulnerabilityOccurrences, vulnerabilityAssessments)
+	vulnerabilityEvaluator, err := vulnerabilityevaluation.NewService(vulnerabilityMaterializer, vulnerabilityAssessments, vulnerabilityProjection, clock)
+	if err != nil {
+		log.Error("vulnerability evaluation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityEvaluator.SetActionStore(vulnerabilityActions)
+	vulnerabilityEvaluator.SetRollout(vulnerabilityRollout)
+	if cfg.SLAEnabled {
+		vulnerabilitySLA, slaErr := slauc.NewService(postgres.NewSLAStore(pool), clock, ids)
+		if slaErr != nil {
+			log.Error("vulnerability SLA service init failed", "err", slaErr)
+			os.Exit(1)
+		}
+		vulnerabilityEvaluator.SetSLAAssessor(vulnerabilitySLA)
+	}
+	vulnerabilityAdvisoryCorrelation, err := vulnerabilitycorrelation.NewService(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityOccurrences)
+	if err != nil {
+		log.Error("vulnerability advisory correlation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityAdvisoryCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
+	vulnerabilityAdvisoryCorrelation.SetRollout(vulnerabilityRollout)
+	vulnerabilityAdvisoryCorrelation.SetTransactionRunner(vulnerabilityTransactions)
+	vulnerabilityEvaluationCheckpoints, ok := any(vulnerabilityMaterializer).(ports.AdvisoryEvaluationCheckpointStore)
+	if !ok {
+		log.Error("advisory materializer does not support evaluation checkpoints")
+		os.Exit(1)
+	}
+	vulnerabilityReconciliation, err := vulnerabilityreconciliation.NewService(vulnerabilityReconcileRuns, repo, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences, vulnerabilityAdvisoryCorrelation, vulnerabilityEvaluationCheckpoints, 0)
+	if err != nil {
+		log.Error("vulnerability reconciliation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
+	vulnerabilityReconciliation.SetInventoryStore(vulnerabilityInventory)
+	vulnerabilityReconciliation.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences)
+	if err != nil {
+		log.Error("vulnerability SBOM correlation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilitySBOMCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
+	vulnerabilitySBOMCorrelation.SetRollout(vulnerabilityRollout)
+	vulnerabilitySBOMCorrelation.SetTransactionRunner(vulnerabilityTransactions)
+	vulnerabilityRuntime, err := vulnerabilityruntime.NewCoordinator(repo, repo, vulnerabilityAdvisoryCorrelation, vulnerabilitySBOMCorrelation, vulnerabilityEvaluationCheckpoints, clock)
+	if err != nil {
+		log.Error("vulnerability runtime init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityRuntime.SetAdvisoryRunStarter(vulnerabilityReconciliation)
+	vulnerabilityRuntime.SetInventoryWorkStore(vulnerabilityInventory)
+	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
+	vulnerabilityHandlers := map[string]worker.Handler{
+		vulnerabilitymonitor.JobKind:   vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor},
+		vulnerabilityreconcile.JobKind: vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation},
+	}
+	var vulnerabilityMaintenance []func(context.Context)
+
+	// Cadence-driven sync scheduler (#860 D1.1): a leader-gated maintenance task that enqueues each source
+	// whose last successful sync is older than its Cadence and reclaims stranded runs. The worker runtime
+	// runs maintenance tasks only on the leader, so exactly one scheduler runs; the in-flight-run check and
+	// the hourly idempotency key are secondary guards. Off (interval 0) unless provider sync is also enabled.
+	if cfg.VulnerabilitySyncSchedulerInterval > 0 && cfg.VulnerabilityProviderSyncEnabled && cfg.WorkerProfile != config.WorkerProfileExecution {
+		// The scheduler must run on exactly one worker; leader election is what guarantees that. Without it a
+		// multi-worker deployment would run a scheduler on every worker and two ticks across an hour boundary
+		// could enqueue redundant concurrent syncs for one source (the in-flight check and idempotency key
+		// are not transactional across workers). Same requirement as the integration scheduler.
+		if !cfg.LeaderElectionEnabled {
+			log.Error("vulnerability sync scheduler requires SYNAPSE_LEADER_ENABLED=true")
+			os.Exit(1)
+		}
+		syncScheduler, serr := vulnerabilityscheduler.New(vulnerabilitySources, vulnerabilityRuns, repo, queue, vulnerabilityMonitor, clock, vulnerabilityscheduler.AlwaysLeader{}, vulnerabilityscheduler.Config{
+			PollInterval: cfg.VulnerabilitySyncSchedulerInterval, StaleAfter: cfg.VulnerabilitySyncStaleAfter,
+			JitterPercent: cfg.VulnerabilitySchedulerJitter, DispatchLimit: cfg.VulnerabilitySyncSchedulerDispatch,
+			MaxQueueDepth: cfg.VulnerabilitySchedulerQueueDepth, RecoveryLimit: cfg.VulnerabilitySyncSchedulerDispatch,
+		})
+		if serr != nil {
+			log.Error("vulnerability sync scheduler init failed", "err", serr)
+			os.Exit(1)
+		}
+		syncScheduler.SetLogger(log)
+		syncScheduler.SetRuntimeRecovery(vulnerabilityRuntime)
+		// topology: id=loop:vulnerability-scheduler
+		vulnerabilityMaintenance = append(vulnerabilityMaintenance, syncScheduler.Run)
+		log.Info("vulnerability sync scheduler ENABLED", "interval", cfg.VulnerabilitySyncSchedulerInterval, "stale_after", cfg.VulnerabilitySyncStaleAfter, "dispatch_limit", cfg.VulnerabilitySyncSchedulerDispatch)
+	}
+
+	if cfg.VulnerabilityMaintenanceInterval > 0 && cfg.WorkerProfile != config.WorkerProfileExecution {
+		maintenanceService, maintenanceErr := vulnerabilitymaintenance.New(
+			postgres.NewVulnerabilityRetentionStore(pool), clock, ids,
+			vulnerabilitymaintenance.Config{
+				RawPayloadRetention: cfg.VulnerabilityRawPayloadRetention, SyncRunRetention: cfg.VulnerabilitySyncRunRetention,
+				ResolvedOccurrenceRetention:   cfg.VulnerabilityResolvedOccurrenceRetention,
+				UnreferencedAdvisoryRetention: cfg.VulnerabilityUnreferencedAdvisoryRetention,
+				BatchSize:                     cfg.VulnerabilityMaintenanceBatchSize,
+			},
+		)
+		if maintenanceErr != nil {
+			log.Error("vulnerability maintenance init failed", "err", maintenanceErr)
+			os.Exit(1)
+		}
+		// topology: id=loop:vulnerability-maintenance
+		vulnerabilityMaintenance = append(vulnerabilityMaintenance, func(ctx context.Context) {
+			ticker := time.NewTicker(cfg.VulnerabilityMaintenanceInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					run, err := maintenanceService.Run(ctx, cfg.VulnerabilityMaintenanceDeleteEnabled)
+					if err != nil && ctx.Err() == nil {
+						log.Warn("vulnerability maintenance failed", "err", err)
+					} else if err == nil {
+						log.Info("vulnerability maintenance completed", "run_id", run.ID, "dry_run", run.DryRun, "eligible", run.Eligible, "removed", run.Removed, "protected", run.Protected)
+					}
+				}
+			}
+		})
+		log.Info("vulnerability maintenance ENABLED", "interval", cfg.VulnerabilityMaintenanceInterval, "delete_enabled", cfg.VulnerabilityMaintenanceDeleteEnabled, "batch_size", cfg.VulnerabilityMaintenanceBatchSize)
+	}
+
+	if cfg.WorkerProfile == config.WorkerProfileControl {
+		// The control role (#1559): every data-only kind, and the control singletons under one lease.
+		// It composes what the integrations, lifecycle and notifications profiles compose, plus the
+		// vulnerability-intelligence kinds, and it never builds a sandbox or asks for an egress grant.
+		handlers := integrationsProfileHandlers(integrationJobHandler{svc: integrationService}, scheduleRuntime.handlers)
+		handlers[comparisonuc.JobKind] = assessmentComparisonJobHandler{svc: assessmentComparisonService}
+		handlers[cycleuc.AssessmentClosureReportJobKind] = assessmentClosureReportJobHandler{svc: assessmentClosureReportService}
+		for kind, handler := range vulnerabilityHandlers {
+			handlers[kind] = handler
+		}
+		maintenance := append([]func(context.Context){}, integrationMaintenanceTasks...)
+		maintenance = append(maintenance, scheduleRuntime.maintenance...)
+		maintenance = append(maintenance, vulnerabilityMaintenance...)
+		if ownershipWorker != nil {
+			handlers[ownershipuc.RouteJobKind] = ownershipWorker
+			// topology: id=loop:ownership-dispatcher
+			maintenance = append(maintenance, ownershipWorker.Run)
+			log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
+		}
+		if err := assertClaimSet(cfg, handlers); err != nil {
+			log.Error("control worker claim set is wrong", "err", err)
+			os.Exit(1)
+		}
+		runWorkerRuntime(ctx, cfg, queue, handlers, maintenance, leaderStore, auditLog, clock, ids, 6*time.Minute, log)
+		return
+	}
 	if integrationsProfile(cfg) {
 		maintenance := append([]func(context.Context){}, integrationMaintenanceTasks...)
 		maintenance = append(maintenance, scheduleRuntime.maintenance...)
@@ -848,6 +1039,7 @@ func main() {
 		accuracyStore := postgres.NewAccuracyRunRepository(pool)
 		probe := accuracyprobe.New()
 		interval := cfg.AccuracyEvalInterval
+		// topology: id=loop:accuracy-eval
 		maintenanceTasks = append(maintenanceTasks, func(taskCtx context.Context) {
 			runOnce := func() {
 				report, err := accuracyeval.Evaluate(taskCtx, probe)
@@ -901,6 +1093,7 @@ func main() {
 			os.Exit(1)
 		}
 		handlers[ownershipuc.RouteJobKind] = ownershipWorker
+		// topology: id=loop:ownership-dispatcher
 		maintenanceTasks = append(maintenanceTasks, ownershipWorker.Run)
 		log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
 	}
@@ -912,160 +1105,10 @@ func main() {
 		maintenanceTasks = append(maintenanceTasks, scheduleRuntime.maintenance...)
 		workerMetricsRegistry = scheduleRuntime.metricsRegistry
 	}
-	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
-	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
-	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
-		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
-		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
-		Notifications: cfg.VulnerabilityNotificationsEnabled, DryRun: cfg.VulnerabilityDryRunEnabled,
-		TenantAllowlist: cfg.VulnerabilityTenantAllowlist,
-	})
-	if err != nil {
-		log.Error("vulnerability rollout init failed", "err", err)
-		os.Exit(1)
+	for kind, handler := range vulnerabilityHandlers {
+		handlers[kind] = handler
 	}
-	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
-		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
-		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,
-		ResolveSecret: func(ctx context.Context, reference string) ([]byte, error) {
-			// Feed provider keys live under the default tenant's operator namespace (engagement id
-			// "default"); a feed sync runs outside any tenant request, so it binds that tenant here.
-			return credVault.Resolve(shared.WithTenant(ctx, shared.DefaultTenant), shared.DefaultTenant, reference)
-		},
-	}); err != nil {
-		log.Error("vulnerability provider registry init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilityMonitor, err := vulnerabilitymonitor.NewService(vulnerabilitySources, vulnerabilityRuns, vulnerabilityMaterializer, vulnerabilityRegistry, clock)
-	if err != nil {
-		log.Error("vulnerability monitor init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilityMonitor.SetRollout(vulnerabilityRollout)
-	vulnerabilityMonitor.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
-	vulnerabilityFindingRepo := postgres.NewFindingRepository(pool)
-	vulnerabilityProjection, err := vulnerabilityprojection.NewService(vulnerabilityFindingRepo)
-	if err != nil {
-		log.Error("vulnerability finding projection init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilityProjection.SetWorkflowSources(vulnerabilityOccurrences, vulnerabilityAssessments)
-	vulnerabilityEvaluator, err := vulnerabilityevaluation.NewService(vulnerabilityMaterializer, vulnerabilityAssessments, vulnerabilityProjection, clock)
-	if err != nil {
-		log.Error("vulnerability evaluation init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilityEvaluator.SetActionStore(vulnerabilityActions)
-	vulnerabilityEvaluator.SetRollout(vulnerabilityRollout)
-	if cfg.SLAEnabled {
-		vulnerabilitySLA, slaErr := slauc.NewService(postgres.NewSLAStore(pool), clock, ids)
-		if slaErr != nil {
-			log.Error("vulnerability SLA service init failed", "err", slaErr)
-			os.Exit(1)
-		}
-		vulnerabilityEvaluator.SetSLAAssessor(vulnerabilitySLA)
-	}
-	vulnerabilityAdvisoryCorrelation, err := vulnerabilitycorrelation.NewService(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityOccurrences)
-	if err != nil {
-		log.Error("vulnerability advisory correlation init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilityAdvisoryCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
-	vulnerabilityAdvisoryCorrelation.SetRollout(vulnerabilityRollout)
-	vulnerabilityAdvisoryCorrelation.SetTransactionRunner(vulnerabilityTransactions)
-	vulnerabilityEvaluationCheckpoints, ok := any(vulnerabilityMaterializer).(ports.AdvisoryEvaluationCheckpointStore)
-	if !ok {
-		log.Error("advisory materializer does not support evaluation checkpoints")
-		os.Exit(1)
-	}
-	vulnerabilityReconciliation, err := vulnerabilityreconciliation.NewService(vulnerabilityReconcileRuns, repo, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences, vulnerabilityAdvisoryCorrelation, vulnerabilityEvaluationCheckpoints, 0)
-	if err != nil {
-		log.Error("vulnerability reconciliation init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
-	vulnerabilityReconciliation.SetInventoryStore(vulnerabilityInventory)
-	vulnerabilityReconciliation.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
-	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences)
-	if err != nil {
-		log.Error("vulnerability SBOM correlation init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilitySBOMCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
-	vulnerabilitySBOMCorrelation.SetRollout(vulnerabilityRollout)
-	vulnerabilitySBOMCorrelation.SetTransactionRunner(vulnerabilityTransactions)
-	vulnerabilityRuntime, err := vulnerabilityruntime.NewCoordinator(repo, repo, vulnerabilityAdvisoryCorrelation, vulnerabilitySBOMCorrelation, vulnerabilityEvaluationCheckpoints, clock)
-	if err != nil {
-		log.Error("vulnerability runtime init failed", "err", err)
-		os.Exit(1)
-	}
-	vulnerabilityRuntime.SetAdvisoryRunStarter(vulnerabilityReconciliation)
-	vulnerabilityRuntime.SetInventoryWorkStore(vulnerabilityInventory)
-	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
-	handlers[vulnerabilitymonitor.JobKind] = vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor}
-	handlers[vulnerabilityreconcile.JobKind] = vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation}
-
-	// Cadence-driven sync scheduler (#860 D1.1): a leader-gated maintenance task that enqueues each source
-	// whose last successful sync is older than its Cadence and reclaims stranded runs. The worker runtime
-	// runs maintenance tasks only on the leader, so exactly one scheduler runs; the in-flight-run check and
-	// the hourly idempotency key are secondary guards. Off (interval 0) unless provider sync is also enabled.
-	if cfg.VulnerabilitySyncSchedulerInterval > 0 && cfg.VulnerabilityProviderSyncEnabled {
-		// The scheduler must run on exactly one worker; leader election is what guarantees that. Without it a
-		// multi-worker deployment would run a scheduler on every worker and two ticks across an hour boundary
-		// could enqueue redundant concurrent syncs for one source (the in-flight check and idempotency key
-		// are not transactional across workers). Same requirement as the integration scheduler.
-		if !cfg.LeaderElectionEnabled {
-			log.Error("vulnerability sync scheduler requires SYNAPSE_LEADER_ENABLED=true")
-			os.Exit(1)
-		}
-		syncScheduler, serr := vulnerabilityscheduler.New(vulnerabilitySources, vulnerabilityRuns, repo, queue, vulnerabilityMonitor, clock, vulnerabilityscheduler.AlwaysLeader{}, vulnerabilityscheduler.Config{
-			PollInterval: cfg.VulnerabilitySyncSchedulerInterval, StaleAfter: cfg.VulnerabilitySyncStaleAfter,
-			JitterPercent: cfg.VulnerabilitySchedulerJitter, DispatchLimit: cfg.VulnerabilitySyncSchedulerDispatch,
-			MaxQueueDepth: cfg.VulnerabilitySchedulerQueueDepth, RecoveryLimit: cfg.VulnerabilitySyncSchedulerDispatch,
-		})
-		if serr != nil {
-			log.Error("vulnerability sync scheduler init failed", "err", serr)
-			os.Exit(1)
-		}
-		syncScheduler.SetLogger(log)
-		syncScheduler.SetRuntimeRecovery(vulnerabilityRuntime)
-		maintenanceTasks = append(maintenanceTasks, syncScheduler.Run)
-		log.Info("vulnerability sync scheduler ENABLED", "interval", cfg.VulnerabilitySyncSchedulerInterval, "stale_after", cfg.VulnerabilitySyncStaleAfter, "dispatch_limit", cfg.VulnerabilitySyncSchedulerDispatch)
-	}
-
-	if cfg.VulnerabilityMaintenanceInterval > 0 {
-		maintenanceService, maintenanceErr := vulnerabilitymaintenance.New(
-			postgres.NewVulnerabilityRetentionStore(pool), clock, ids,
-			vulnerabilitymaintenance.Config{
-				RawPayloadRetention: cfg.VulnerabilityRawPayloadRetention, SyncRunRetention: cfg.VulnerabilitySyncRunRetention,
-				ResolvedOccurrenceRetention:   cfg.VulnerabilityResolvedOccurrenceRetention,
-				UnreferencedAdvisoryRetention: cfg.VulnerabilityUnreferencedAdvisoryRetention,
-				BatchSize:                     cfg.VulnerabilityMaintenanceBatchSize,
-			},
-		)
-		if maintenanceErr != nil {
-			log.Error("vulnerability maintenance init failed", "err", maintenanceErr)
-			os.Exit(1)
-		}
-		maintenanceTasks = append(maintenanceTasks, func(ctx context.Context) {
-			ticker := time.NewTicker(cfg.VulnerabilityMaintenanceInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					run, err := maintenanceService.Run(ctx, cfg.VulnerabilityMaintenanceDeleteEnabled)
-					if err != nil && ctx.Err() == nil {
-						log.Warn("vulnerability maintenance failed", "err", err)
-					} else if err == nil {
-						log.Info("vulnerability maintenance completed", "run_id", run.ID, "dry_run", run.DryRun, "eligible", run.Eligible, "removed", run.Removed, "protected", run.Protected)
-					}
-				}
-			}
-		})
-		log.Info("vulnerability maintenance ENABLED", "interval", cfg.VulnerabilityMaintenanceInterval, "delete_enabled", cfg.VulnerabilityMaintenanceDeleteEnabled, "batch_size", cfg.VulnerabilityMaintenanceBatchSize)
-	}
+	maintenanceTasks = append(maintenanceTasks, vulnerabilityMaintenance...)
 
 	// #823 durable DAST verification. A governed, approved probe used to execute on the API request
 	// thread; it now runs here as a lease job. The stack is the SAME the API's in-process path uses
@@ -1347,6 +1390,7 @@ func main() {
 			_, err = queue.Enqueue(tenantCtx, orchestrator.JobKind, p)
 			return err
 		})
+		// topology: id=loop:agent-session-reconciler
 		maintenanceTasks = append(maintenanceTasks,
 			func(ctx context.Context) { reconciler.Run(ctx, 5*time.Minute) },
 			func(ctx context.Context) { approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval) },
@@ -1359,6 +1403,7 @@ func main() {
 
 	// Deployment-global recovery work is leader-gated. Queue claim loops are deliberately
 	// not leader-gated: every worker must claim and execute durable jobs.
+	// topology: id=loop:sca-stale-scan-sweeper
 	maintenanceTasks = append(maintenanceTasks,
 		func(ctx context.Context) {
 			staleFor := cfg.ScanTimeout + 5*time.Minute
@@ -1409,6 +1454,7 @@ func main() {
 			os.Exit(1)
 		}
 		metricsServer := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+		// topology: exempt=metrics listener; serves /metrics, owns no work
 		go func() {
 			if serveErr := metricsServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && ctx.Err() == nil {
 				log.Error("worker metrics listener stopped", "err", serveErr)
@@ -1425,6 +1471,7 @@ func main() {
 		log.Info("private worker metrics enabled", "addr", cfg.MetricsAddr)
 	}
 	if cfg.SIEMEnabled {
+		// topology: id=loop:siem-tick
 		go func() {
 			repository := postgres.NewSIEMRepository(pool)
 			schema, schemaErr := ocsf.New()
@@ -1468,6 +1515,20 @@ func main() {
 		}()
 	}
 
+	if cfg.WorkerProfile == config.WorkerProfileExecution {
+		// The execution role (#1559): only the kinds that run a tool, and no lease. The control role owns
+		// every singleton, so an execution replica campaigns for nothing and runs no maintenance.
+		for kind := range handlers {
+			if !workerroles.IsExecution(kind) {
+				delete(handlers, kind)
+			}
+		}
+		maintenanceTasks = nil
+	}
+	if err := assertClaimSet(cfg, handlers); err != nil {
+		log.Error("worker claim set is wrong", "err", err)
+		os.Exit(1)
+	}
 	runWorkerRuntime(ctx, cfg, queue, handlers, maintenanceTasks, leaderStore, auditLog, clock, ids, visibility, log)
 }
 
@@ -1526,14 +1587,16 @@ func runWorkerRuntime(
 	visibility time.Duration,
 	log *slog.Logger,
 ) {
-	if cfg.LeaderElectionEnabled {
+	if cfg.LeaderElectionEnabled && len(maintenanceTasks) > 0 {
 		resource := workerMaintenanceResource(cfg)
 		elector, err := leaderuc.NewElector(leaderStore, auditLog, clock, resource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
 		if err != nil {
 			log.Error("worker leader election configuration invalid", "err", err)
 			os.Exit(1)
 		}
+		// topology: exempt=leader elector; the lease, not an owner
 		go elector.Run(ctx)
+		// topology: exempt=leader watcher; starts the singleton group on the leader
 		go func() {
 			var maintenanceCancel context.CancelFunc
 			wasLeader := false
@@ -1550,6 +1613,7 @@ func runWorkerRuntime(
 					maintenanceCtx, cancel := context.WithCancel(ctx)
 					maintenanceCancel = cancel
 					for _, task := range maintenanceTasks {
+						// topology: exempt=launches the singleton tasks the leader owns; each task carries its own marker
 						go task(maintenanceCtx)
 					}
 				}
@@ -1568,6 +1632,7 @@ func runWorkerRuntime(
 		log.Info("worker maintenance leader election ENABLED", "resource", resource, "term", cfg.LeaderTerm, "renew", cfg.LeaderRenew)
 	} else {
 		for _, task := range maintenanceTasks {
+			// topology: exempt=launches the singleton tasks the leader owns; each task carries its own marker
 			go task(ctx)
 		}
 	}
@@ -1575,6 +1640,7 @@ func runWorkerRuntime(
 	var loops sync.WaitGroup
 	for index := 0; index < cfg.WorkerConcurrency; index++ {
 		loops.Add(1)
+		// topology: exempt=queue claim loop; consumers are inventoried by kind
 		go func(loop int) {
 			defer loops.Done()
 			claimWorker := worker.New(queue, handlers, worker.Config{Visibility: visibility, MaxAttempts: 3}, log.With("loop", loop+1))

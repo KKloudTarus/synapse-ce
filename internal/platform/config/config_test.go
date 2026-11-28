@@ -132,6 +132,8 @@ func TestResolveToolExecution(t *testing.T) {
 		{name: "production integration worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileIntegrations}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "production lifecycle worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileLifecycle}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "production notification worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileNotifications, NotificationEnabled: true, VaultMasterKey: "configured"}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "production control worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileControl}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "production execution worker requires sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileExecution}, role: ProcessRoleWorker, wantErr: true},
 		{name: "worker refuses other mode", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "CLI defaults in process", cfg: Config{}, role: ProcessRoleCLI, want: ToolExecutionInProcess},
 		{name: "CLI refuses other mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleCLI, wantErr: true},
@@ -161,6 +163,8 @@ func TestWorkerProfileValidation(t *testing.T) {
 		{value: " INTEGRATIONS ", valid: true},
 		{value: " LIFECYCLE ", valid: true},
 		{value: " NOTIFICATIONS ", valid: false},
+		{value: " CONTROL ", valid: true},
+		{value: " EXECUTION ", valid: true},
 		{value: "scanner", valid: false},
 	} {
 		t.Run(test.value, func(t *testing.T) {
@@ -374,6 +378,9 @@ func TestValidateEgressGrantPosture(t *testing.T) {
 		{name: "worker valid", cfg: worker, role: ProcessRoleWorker},
 		{name: "worker missing authority URL", cfg: func() Config { c := worker; c.EgressGrantAuthorityURL = ""; return c }(), role: ProcessRoleWorker, wantErr: true},
 		{name: "worker reuses human token", cfg: func() Config { c := worker; c.EgressGrantAuthorityToken = c.APIToken; return c }(), role: ProcessRoleWorker, wantErr: true},
+		{name: "control worker needs no authority", cfg: Config{Environment: "production", WorkerProfile: WorkerProfileControl}, role: ProcessRoleWorker},
+		{name: "lifecycle worker needs no authority", cfg: Config{Environment: "production", WorkerProfile: WorkerProfileLifecycle}, role: ProcessRoleWorker},
+		{name: "execution worker needs the authority", cfg: Config{Environment: "production", WorkerProfile: WorkerProfileExecution}, role: ProcessRoleWorker, wantErr: true},
 		{name: "development does not require issuer", cfg: Config{Environment: "development"}, role: ProcessRoleAPI},
 		{name: "unknown production role", cfg: api, role: ProcessRoleCLI, wantErr: true},
 	} {
@@ -407,6 +414,8 @@ func TestValidateNetworkExecutionPosture(t *testing.T) {
 		{name: "production API offline", cfg: Config{Environment: "production"}, role: ProcessRoleAPI},
 		{name: "production API rejects CSPM", cfg: Config{Environment: "production", CSPMEnabled: true}, role: ProcessRoleAPI, wantErr: true},
 		{name: "production worker rejects CSPM", cfg: Config{Environment: "production", CSPMEnabled: true}, role: ProcessRoleWorker, wantErr: true},
+		{name: "production control worker ignores CSPM", cfg: Config{Environment: "production", CSPMEnabled: true, WorkerProfile: WorkerProfileControl}, role: ProcessRoleWorker},
+		{name: "production execution worker rejects CSPM without sandbox", cfg: Config{Environment: "production", CSPMEnabled: true, WorkerProfile: WorkerProfileExecution}, role: ProcessRoleWorker, wantErr: true},
 		{name: "production API permits authoritative CSPM", cfg: api, role: ProcessRoleAPI},
 		{name: "production worker permits authoritative CSPM", cfg: worker, role: ProcessRoleWorker},
 		{name: "production CSPM requires sandbox", cfg: noSandbox, role: ProcessRoleAPI, wantErr: true},

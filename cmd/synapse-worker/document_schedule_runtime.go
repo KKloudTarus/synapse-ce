@@ -67,6 +67,7 @@ func configureDocumentScheduleRuntime(deps documentScheduleRuntimeDependencies) 
 		return documentScheduleRuntime{}, fmt.Errorf("create document schedule runner: %w", err)
 	}
 	maintenance := append([]func(context.Context){}, notifications.maintenance...)
+	// topology: id=loop:document-schedule-runner
 	maintenance = append(maintenance, runner.Run)
 	return documentScheduleRuntime{
 		handlers: notifications.handlers, maintenance: maintenance,

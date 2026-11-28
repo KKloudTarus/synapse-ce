@@ -3992,6 +3992,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if developmentTicketRunner != nil {
+		// topology: id=loop:ticket-runner-dev
 		go developmentTicketRunner.Run(ctx)
 	}
 	startIdentityMaintenance(ctx, cfg, databasePool, notificationSender, clock, ids, log)
@@ -4001,10 +4002,12 @@ func main() {
 			startupTimeout = time.Minute
 		}
 		startupCtx, cancelPromotionStartup := context.WithTimeout(ctx, startupTimeout)
+		// topology: id=barrier:promotion-reconcile
 		if err := promotionRunner.RunOnce(startupCtx); err != nil && startupCtx.Err() == nil {
 			log.Warn("promotion reconciliation startup run failed", "err", err)
 		}
 		cancelPromotionStartup()
+		// topology: id=loop:promotion-reconcile
 		go promotionRunner.RunPeriodic(ctx, cfg.PromotionReconcileInterval)
 	}
 	if detectionRunner != nil {
@@ -4013,24 +4016,29 @@ func main() {
 			startupTimeout = time.Minute
 		}
 		startupCtx, cancelDetectionStartup := context.WithTimeout(ctx, startupTimeout)
+		// topology: id=barrier:detection-reconcile
 		if err := detectionRunner.RunOnce(startupCtx); err != nil && startupCtx.Err() == nil {
 			log.Warn("detection reconciliation startup run failed", "err", err)
 		}
 		cancelDetectionStartup()
+		// topology: id=loop:detection-reconcile
 		go detectionRunner.RunPeriodic(ctx, cfg.FleetDetectionReconcileInterval)
 	}
 	if fleetAuditRunner != nil {
 		// Startup recovery first: intentions committed before the last shutdown must reach the audit
 		// chain before this process starts admitting new fleet state.
 		startupCtx, cancelFleetAuditStartup := context.WithTimeout(ctx, fleetaudit.DefaultInterval)
+		// topology: id=barrier:fleet-audit-reconcile
 		if err := fleetAuditRunner.RunOnce(startupCtx); err != nil && startupCtx.Err() == nil {
 			log.Warn("fleet audit reconciliation startup run failed", "err", err)
 		}
 		cancelFleetAuditStartup()
+		// topology: id=loop:fleet-audit-reconcile
 		go fleetAuditRunner.RunPeriodic(ctx, fleetaudit.DefaultInterval)
 	}
 	if responseRunner != nil {
 		startupCtx, cancelResponseStartup := context.WithTimeout(ctx, responseuc.DefaultReconciliationInterval)
+		// topology: id=barrier:response-reconcile
 		startupErr := responseRunner.RunOnce(startupCtx)
 		if startupErr == nil {
 			startupErr = startupCtx.Err()
@@ -4043,8 +4051,10 @@ func main() {
 			}
 			log.Warn("response reconciliation startup run failed", "err", startupErr)
 		}
+		// topology: id=loop:response-reconcile
 		go responseRunner.RunPeriodic(ctx, responseuc.DefaultReconciliationInterval)
 	}
+	// topology: id=loop:approval-sweeper
 	go approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval) // fail-closed HITL approval timeouts for agent + DAST
 
 	// AI agent orchestration. Off unless SYNAPSE_AGENT_ENABLED.
@@ -4137,6 +4147,7 @@ func main() {
 	}
 
 	if scaWorker != nil {
+		// topology: id=consumer:sca-inline
 		go func() { _ = scaWorker.Run(ctx) }() // in-process SCA worker; drains on shutdown
 	}
 	// Stale-scan sweeper: reclaim scan jobs a crash left `running` with no live owner
@@ -4147,6 +4158,7 @@ func main() {
 	// rejects the next scan with a conflict, and the API is the only process that runs
 	// when synapse-worker is not deployed.
 	if reconRunLock != nil {
+		// topology: id=loop:sca-stale-scan-sweeper
 		go func() {
 			staleFor := cfg.ScanTimeout + 5*time.Minute
 			t := time.NewTicker(5 * time.Minute)
@@ -4166,6 +4178,7 @@ func main() {
 		}()
 		// Same reclaim for recon: without it a run the API was executing when it restarted
 		// stays `running` in the dashboard forever.
+		// topology: id=loop:recon-stale-run-sweeper
 		go func() {
 			staleFor := cfg.ReconTimeout + 5*time.Minute
 			t := time.NewTicker(5 * time.Minute)
@@ -4185,6 +4198,7 @@ func main() {
 		}()
 	}
 	if vulnerabilityWorker != nil {
+		// topology: id=consumer:vulnerability-inline
 		go func() { _ = vulnerabilityWorker.Run(ctx) }()
 	}
 
@@ -4199,6 +4213,7 @@ func main() {
 			os.Exit(1)
 		}
 		vulnerabilityLeadership = elector
+		// topology: id=lease:api-elector
 		go elector.Run(ctx)
 		log.Info("leader election ENABLED", "resource", cfg.LeaderResource, "term", cfg.LeaderTerm, "renew", cfg.LeaderRenew)
 	}
@@ -4230,6 +4245,7 @@ func main() {
 		}
 		scheduler.SetLogger(log)
 		scheduler.SetRuntimeRecovery(vulnerabilityRuntime)
+		// topology: id=loop:vulnerability-scheduler
 		go scheduler.Run(ctx)
 		log.Info("vulnerability scheduler ENABLED",
 			"poll", cfg.VulnerabilitySchedulerPollInterval,

@@ -62,7 +62,7 @@ Engagement lifecycle and window events retain authorization boundaries and lead 
 | Binary | Role |
 | --- | --- |
 | `synapse-api` | HTTP API server, the primary service and largest composition root. |
-| `synapse-worker` | Durable, lease-based job runner for recon, scheduled provider work, and background jobs. Leader-gated. |
+| `synapse-worker` | Durable, lease-based job runner for recon, scheduled provider work, and background jobs. Leader-gated. `SYNAPSE_WORKER_PROFILE=control` runs the data-only kinds and every singleton; `execution` runs only the tool kinds. The ownership of every loop is inventoried in `docs/guide/background-ownership.md`. |
 | `synapse-mcp` | Read and propose-only MCP integration. It has no executor and no gate, so it never executes. |
 
 **Command line**

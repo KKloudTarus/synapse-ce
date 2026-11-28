@@ -527,6 +527,7 @@
       "required": [
         "enabled",
         "replicaCount",
+        "profile",
         "resources",
         "nodeSelector",
         "tolerations",
@@ -542,6 +543,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 64
+        },
+        "profile": {
+          "type": "string",
+          "enum": ["all", "control", "execution", "integrations", "lifecycle", "notifications"]
         },
         "nodeSelector": {
           "type": "object"

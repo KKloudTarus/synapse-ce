@@ -57,6 +57,8 @@ spec:
             {{- include "synapse.workerEgressEnv" . | nindent 12 }}
             - name: SYNAPSE_LEADER_ENABLED
               value: "true"
+            - name: SYNAPSE_WORKER_PROFILE
+              value: {{ .Values.worker.profile | quote }}
             - name: SYNAPSE_INTEGRATION_SCHEDULER_ENABLED
               value: {{ .Values.worker.integrationScheduler.enabled | quote }}
             - name: SYNAPSE_INTEGRATION_SCHEDULER_POLL

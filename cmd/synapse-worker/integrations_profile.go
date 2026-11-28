@@ -20,7 +20,7 @@ func integrationsProfile(cfg config.Config) bool {
 }
 
 func usesDispatchOnlySCA(cfg config.Config) bool {
-	return integrationsProfile(cfg)
+	return integrationsProfile(cfg) || cfg.WorkerProfile == config.WorkerProfileControl
 }
 
 func workerMaintenanceResource(cfg config.Config) string {
@@ -31,6 +31,8 @@ func workerMaintenanceResource(cfg config.Config) string {
 		return cfg.LeaderResource + "-worker-integrations-maintenance"
 	case config.WorkerProfileLifecycle:
 		return cfg.LeaderResource + "-worker-lifecycle-maintenance"
+	case config.WorkerProfileControl:
+		return cfg.LeaderResource + "-worker-control-maintenance"
 	default:
 		return cfg.LeaderResource + "-worker-maintenance"
 	}
