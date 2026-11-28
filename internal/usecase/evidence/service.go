@@ -612,12 +612,11 @@ func (s *Service) ArtifactBytes(ctx context.Context, engagementID shared.ID, sha
 	return s.ArtifactForEngagement(ctx, engagementID, sha256hex)
 }
 
-// ImportVerified re-verifies a hash chain and, only if it is intact, appends it
-// verbatim (hashes + content preserved) to the ledger. Used by engagement import
-// a bundle whose chain does not verify is rejected before any write, so a
-// tampered chain can never be materialized. Callers may remap EngagementID/ID/
-// FindingID first – those fields are not part of the chain hash, so the chain still
-// verifies.
+// ImportVerified re-verifies a hash chain and, only if it is intact, appends it verbatim (hashes +
+// content preserved) to the ledger. Used by engagement import: a bundle whose chain does not verify is
+// rejected before any write, so a tampered chain can never be materialized. Callers may remap
+// EngagementID and ID first, which the hash does not cover. FindingID IS covered: a caller that remaps
+// it must first copy the sealed value into SealedFindingID, which the hash then binds instead.
 func (s *Service) ImportVerified(ctx context.Context, items []evdom.Evidence) error {
 	if err := evdom.VerifyChain(items); err != nil {
 		return fmt.Errorf("%w: imported evidence chain failed verification – import rejected", shared.ErrValidation)

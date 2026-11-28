@@ -131,7 +131,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
-	if bundle.Version != BundleVersion || bundle.Engagement == nil {
+	if bundle.Version != BundleVersionFramed || bundle.Engagement == nil {
 		t.Fatalf("bad bundle: %+v", bundle)
 	}
 	if len(bundle.Findings) != 1 || len(bundle.Evidence) != 2 {
@@ -298,9 +298,9 @@ func TestImportRejectsDanglingCommentRef(t *testing.T) {
 	}
 }
 
-// TestBundleVersionFollowsLinkSchemes (#1703): a bundle with any framed link is v2, so an importer older than
-// v0.3.0 refuses the format instead of reporting a tampered chain. An all-legacy bundle stays v1, which
-// v0.3.0 can still import.
+// TestBundleVersionFollowsLinkSchemes (#1703, #1722): a bundle with any framed link is v2 and one with any
+// sealed finding id is v3, so an older importer refuses the format instead of reporting a tampered chain.
+// An all-legacy bundle stays v1, which v0.3.0 can still import.
 func TestBundleVersionFollowsLinkSchemes(t *testing.T) {
 	legacy := evdom.Evidence{Kind: "scan", HashScheme: evdom.HashSchemeLegacy}
 	framed := evdom.Evidence{Kind: "scan", HashScheme: evdom.HashSchemeFramed}
@@ -311,7 +311,8 @@ func TestBundleVersionFollowsLinkSchemes(t *testing.T) {
 	}{
 		{"empty", nil, BundleVersionLegacy},
 		{"legacy only", []evdom.Evidence{legacy, {Kind: "unset"}}, BundleVersionLegacy},
-		{"any framed", []evdom.Evidence{legacy, framed}, BundleVersion},
+		{"any framed", []evdom.Evidence{legacy, framed}, BundleVersionFramed},
+		{"any sealed finding id", []evdom.Evidence{legacy, {Kind: "finding", SealedFindingID: "f"}}, BundleVersion},
 	}
 	for _, tc := range cases {
 		if got := bundleVersionFor(tc.items); got != tc.want {
@@ -340,7 +341,7 @@ func TestImportAcceptsLegacyBundleVersion(t *testing.T) {
 	if _, err := svc.Import(ctx, "alice", "", legacy); err != nil {
 		t.Fatalf("a v1 bundle of legacy links must still import: %v", err)
 	}
-	bundle.Version = "synapse.engagement-bundle/v3"
+	bundle.Version = "synapse.engagement-bundle/v4"
 	if _, err := svc.Import(ctx, "alice", "", bundle); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("an unknown version must be refused, got %v", err)
 	}
@@ -383,5 +384,95 @@ func TestImportRollsBackWhenAuditFails(t *testing.T) {
 	}
 	if len(after) != len(before) {
 		t.Fatalf("engagements before=%d after=%d: the unaudited import was left behind", len(before), len(after))
+	}
+}
+
+// TestImportFindingLinkedEvidence (#1722): a bundle whose evidence is tied to a finding imports, the link
+// lands under the imported finding with its sealed id kept, a link whose finding is absent lands unlinked,
+// and the imported engagement exports and imports again.
+func TestImportFindingLinkedEvidence(t *testing.T) {
+	svc, engRepo, findRepo, ev := setup(t)
+	seedEngagement(t, engRepo, findRepo, ev)
+	ctx := context.Background()
+	linked, err := ev.SealForFinding(ctx, "e1", "manual:1", "finding", []byte("finding link"), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked.SealedFindingID != "" {
+		t.Fatalf("a link sealed here must not carry a sealed id: %+v", linked)
+	}
+	bundle, err := svc.Export(ctx, "alice", "", "e1")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if bundle.Version != BundleVersionFramed {
+		t.Fatalf("a bundle of native links is %s, got %s", BundleVersionFramed, bundle.Version)
+	}
+
+	hop1, err := svc.Import(ctx, "bob", "", bundle)
+	if err != nil {
+		t.Fatalf("import with a finding-linked link: %v", err)
+	}
+	items, err := ev.List(ctx, hop1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := findRepo.ListByEngagement(ctx, hop1.ID)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("imported findings = %v, %v", findings, err)
+	}
+	var got *evdom.Evidence
+	for i := range items {
+		if items[i].Kind == "finding" {
+			got = &items[i]
+		}
+	}
+	if got == nil || got.FindingID != findings[0].ID || got.SealedFindingID != "manual:1" || !got.Imported {
+		t.Fatalf("imported link = %+v, want FindingID %s and SealedFindingID manual:1", got, findings[0].ID)
+	}
+	if rep, err := ev.Verify(ctx, hop1.ID); err != nil || !rep.Intact {
+		t.Fatalf("hop 1 verify = %+v, %v", rep, err)
+	}
+
+	// Second hop: the re-exported bundle carries the sealed id, is labelled v3, and imports again.
+	again, err := svc.Export(ctx, "bob", "", hop1.ID)
+	if err != nil {
+		t.Fatalf("re-export: %v", err)
+	}
+	if again.Version != BundleVersion {
+		t.Fatalf("a bundle with a sealed finding id is %s, got %s", BundleVersion, again.Version)
+	}
+	hop2, err := svc.Import(ctx, "carol", "", again)
+	if err != nil {
+		t.Fatalf("second hop import: %v", err)
+	}
+	if rep, err := ev.Verify(ctx, hop2.ID); err != nil || !rep.Intact {
+		t.Fatalf("hop 2 verify = %+v, %v", rep, err)
+	}
+	// A v2 label over a bundle that needs v3 is a relabelled bundle.
+	again.Version = BundleVersionFramed
+	if _, err := svc.Import(ctx, "carol", "", again); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("a v2 label over sealed finding ids must be refused, got %v", err)
+	}
+
+	// A link whose finding is missing from the bundle lands unlinked and the chain still verifies.
+	orphan := bundle
+	orphan.Findings = nil
+	orphan.Comments = nil
+	hop3, err := svc.Import(ctx, "dave", "", orphan)
+	if err != nil {
+		t.Fatalf("import without the finding: %v", err)
+	}
+	items, err = ev.List(ctx, hop3.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		if it.Kind == "finding" && (it.FindingID != "" || it.SealedFindingID != "manual:1") {
+			t.Fatalf("orphaned link = %+v, want no FindingID and the sealed id kept", it)
+		}
+	}
+	if rep, err := ev.Verify(ctx, hop3.ID); err != nil || !rep.Intact {
+		t.Fatalf("orphan verify = %+v, %v", rep, err)
 	}
 }

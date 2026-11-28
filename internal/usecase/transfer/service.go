@@ -20,25 +20,48 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// Bundle versions identify the bundle schema so an importer can refuse unknown formats.
+// Bundle versions identify the bundle schema so an importer can refuse unknown formats. Each version is
+// the oldest one whose importers verify every link the bundle carries; a label may be newer than its
+// content requires, never older.
 const (
-	// BundleVersion is written when any evidence link is framed (evidence.HashSchemeFramed). Every
-	// importer before this release refuses it by version: one older than v0.3.0 would otherwise reject the
-	// chain as tampered, and v0.3.0 accepts only v1.
-	BundleVersion = "synapse.engagement-bundle/v2"
+	// BundleVersion is written when any link carries a SealedFindingID (a finding-linked link that was
+	// itself imported, #1722). An importer before this release recomputes such a link over its remapped
+	// FindingID and would reject the chain as tampered; it refuses the format by version instead.
+	BundleVersion = "synapse.engagement-bundle/v3"
+	// BundleVersionFramed is written when any link is framed (evidence.HashSchemeFramed) and none carries
+	// a sealed finding id. v0.4.0 importers accept it.
+	BundleVersionFramed = "synapse.engagement-bundle/v2"
 	// BundleVersionLegacy is written when every link is legacy, so v0.3.0 and older importers still
-	// accept a bundle they can verify. Import accepts both.
+	// accept a bundle they can verify.
 	BundleVersionLegacy = "synapse.engagement-bundle/v1"
 )
 
+// bundleVersionRank orders the versions an importer knows; an unknown label ranks below every one.
+func bundleVersionRank(version string) int {
+	switch version {
+	case BundleVersionLegacy:
+		return 1
+	case BundleVersionFramed:
+		return 2
+	case BundleVersion:
+		return 3
+	default:
+		return 0
+	}
+}
+
 // bundleVersionFor returns the oldest bundle version whose importers verify every link in items.
 func bundleVersionFor(items []evdom.Evidence) string {
+	version := BundleVersionLegacy
 	for _, e := range items {
-		if e.HashScheme == evdom.HashSchemeFramed {
+		if !e.SealedFindingID.IsZero() {
 			return BundleVersion
 		}
+		if e.HashScheme == evdom.HashSchemeFramed {
+			version = BundleVersionFramed
+		}
 	}
-	return BundleVersionLegacy
+	return version
 }
 
 // Sanity caps so a hostile/oversized bundle can't drive unbounded inserts (the
@@ -145,12 +168,13 @@ func (s *Service) Export(ctx context.Context, actor string, tenantID, engagement
 // first write; if any write then fails, the partially-materialized engagement is
 // rolled back (Delete cascades), so a broken/partial import never lingers. Audited.
 func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, b Bundle) (*engagement.Engagement, error) {
-	if b.Version != BundleVersion && b.Version != BundleVersionLegacy {
+	if bundleVersionRank(b.Version) == 0 {
 		return nil, fmt.Errorf("%w: unsupported bundle version %q", shared.ErrValidation, b.Version)
 	}
-	// A v1 label promises a chain v0.3.0 can verify. A framed link under it is a relabelled v2 bundle.
-	if b.Version == BundleVersionLegacy && bundleVersionFor(b.Evidence) != BundleVersionLegacy {
-		return nil, fmt.Errorf("%w: a %s bundle cannot carry framed evidence links", shared.ErrValidation, BundleVersionLegacy)
+	// A label promises what the importers of that version can verify. A link that needs a newer
+	// version under an older label is a relabelled bundle.
+	if required := bundleVersionFor(b.Evidence); bundleVersionRank(b.Version) < bundleVersionRank(required) {
+		return nil, fmt.Errorf("%w: a %s bundle cannot carry evidence links that need %s", shared.ErrValidation, b.Version, required)
 	}
 	if b.Engagement == nil {
 		return nil, fmt.Errorf("%w: bundle has no engagement", shared.ErrValidation)
@@ -271,7 +295,13 @@ func (s *Service) materialize(ctx context.Context, newEngID shared.ID, b Bundle)
 		e.ID = s.ids.NewID()
 		e.EngagementID = newEngID
 		if e.FindingID != "" {
-			e.FindingID = idMap[e.FindingID] // unknown ref -> "" (SET NULL semantics)
+			// The hash binds the finding id the link was sealed with. Keep that id as SealedFindingID
+			// (a link imported before keeps the one it already carries) and point FindingID at the
+			// finding on this instance; an unknown ref leaves it empty (SET NULL semantics).
+			if e.SealedFindingID.IsZero() {
+				e.SealedFindingID = e.FindingID
+			}
+			e.FindingID = idMap[e.FindingID]
 		}
 		remapped = append(remapped, e)
 	}

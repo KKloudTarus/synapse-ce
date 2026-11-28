@@ -92,7 +92,7 @@ func TestExportBundle(t *testing.T) {
 	if err := json.Unmarshal(data, &b); err != nil {
 		t.Fatalf("decode bundle: %v", err)
 	}
-	if b.Version != transferuc.BundleVersion || len(b.Findings) != 1 || len(b.Evidence) != 1 {
+	if b.Version != transferuc.BundleVersionFramed || len(b.Findings) != 1 || len(b.Evidence) != 1 {
 		t.Fatalf("unexpected bundle: version=%q findings=%d evidence=%d", b.Version, len(b.Findings), len(b.Evidence))
 	}
 }

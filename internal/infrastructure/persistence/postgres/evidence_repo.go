@@ -93,9 +93,13 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 				return fmt.Errorf("insert evidence: %w", err)
 			}
 			if e.Imported {
+				var sealedFinding any
+				if !e.SealedFindingID.IsZero() {
+					sealedFinding = e.SealedFindingID.String()
+				}
 				if _, err := tx.Exec(ctx,
-					`INSERT INTO evidence_imports (tenant_id, engagement_id, evidence_id) VALUES ($1, $2, $3)`,
-					tenantID.String(), e.EngagementID.String(), e.ID.String()); err != nil {
+					`INSERT INTO evidence_imports (tenant_id, engagement_id, evidence_id, sealed_finding_id) VALUES ($1, $2, $3, $4)`,
+					tenantID.String(), e.EngagementID.String(), e.ID.String(), sealedFinding); err != nil {
 					return fmt.Errorf("mark imported evidence: %w", err)
 				}
 			}
@@ -109,7 +113,7 @@ func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID share
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
 			`SELECT e.id, COALESCE(e.finding_id,''), e.engagement_id, e.kind, e.sha256, COALESCE(e.previous_hash,''), COALESCE(e.storage_ref,''), e.content, COALESCE(e.created_by,''), e.created_at, e.hash_scheme,
-		        i.evidence_id IS NOT NULL
+		        i.evidence_id IS NOT NULL, COALESCE(i.sealed_finding_id,'')
 		 FROM evidence e
 		 LEFT JOIN evidence_imports i ON i.tenant_id = e.tenant_id AND i.evidence_id = e.id
 		 WHERE e.engagement_id=$1 ORDER BY e.seq ASC`, engagementID.String())
@@ -122,9 +126,11 @@ func (r *EvidenceStore) ListByEngagement(ctx context.Context, engagementID share
 				e            evidence.Evidence
 				id, fid, eid string
 			)
-			if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme, &e.Imported); err != nil {
+			var sealedFinding string
+			if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme, &e.Imported, &sealedFinding); err != nil {
 				return fmt.Errorf("scan evidence: %w", err)
 			}
+			e.SealedFindingID = shared.ID(sealedFinding)
 			e.ID = shared.ID(id)
 			e.FindingID = shared.ID(fid)
 			e.EngagementID = shared.ID(eid)
@@ -165,9 +171,15 @@ func (r *RestoreEvidenceStore) ListEvidenceChains(ctx context.Context) ([]Restor
 		return nil, fmt.Errorf("restore evidence: require unfiltered read: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, `SELECT id, COALESCE(finding_id,''), engagement_id, kind, sha256,
-		COALESCE(previous_hash,''), COALESCE(storage_ref,''), content, COALESCE(created_by,''), created_at, hash_scheme
-		FROM evidence ORDER BY engagement_id ASC, seq ASC`)
+	// The import marker carries the finding id an imported link was sealed with, which its hash binds, so
+	// a chain-verifying read joins it. evidence_imports also forces row-level security, so this read is
+	// complete or refused for the marker as for the links.
+	rows, err := tx.Query(ctx, `SELECT e.id, COALESCE(e.finding_id,''), e.engagement_id, e.kind, e.sha256,
+		COALESCE(e.previous_hash,''), COALESCE(e.storage_ref,''), e.content, COALESCE(e.created_by,''), e.created_at, e.hash_scheme,
+		i.evidence_id IS NOT NULL, COALESCE(i.sealed_finding_id,'')
+		FROM evidence e
+		LEFT JOIN evidence_imports i ON i.tenant_id = e.tenant_id AND i.evidence_id = e.id
+		ORDER BY e.engagement_id ASC, e.seq ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("restore evidence: list chains: %w", err)
 	}
@@ -180,9 +192,11 @@ func (r *RestoreEvidenceStore) ListEvidenceChains(ctx context.Context) ([]Restor
 			e            evidence.Evidence
 			id, fid, eid string
 		)
-		if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme); err != nil {
+		var sealedFinding string
+		if err := rows.Scan(&id, &fid, &eid, &e.Kind, &e.Hash, &e.PreviousHash, &e.StorageRef, &e.Content, &e.CreatedBy, &e.CreatedAt, &e.HashScheme, &e.Imported, &sealedFinding); err != nil {
 			return nil, fmt.Errorf("restore evidence: scan chain: %w", err)
 		}
+		e.SealedFindingID = shared.ID(sealedFinding)
 		e.ID = shared.ID(id)
 		e.FindingID = shared.ID(fid)
 		e.EngagementID = shared.ID(eid)

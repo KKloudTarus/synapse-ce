@@ -16,6 +16,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   cycle, the actor, the cycle version and the client key, so none of them can collide with another, and
   a close after a reopen of the same cycle gets its own key. A retry of the same commit still records
   one entry.
+- **An engagement bundle whose evidence is tied to a finding can be imported (#1722).** An import gives
+  every finding a new id and pointed each evidence link at it, but a link's hash binds the finding id it
+  was sealed with, so every such bundle was refused as a tampered chain. The import now keeps the sealed
+  finding id on the link's import marker (`evidence_imports.sealed_finding_id`, migration 0283), the
+  hash is computed over that id, and the evidence row's `finding_id` names the finding on this instance.
+  A link sealed on this instance has no marker and keeps binding its `finding_id`. A link whose finding
+  is absent from the bundle lands unlinked and still verifies. A bundle that carries such a link is
+  exported as `synapse.engagement-bundle/v3`; import accepts v1, v2 and v3, and refuses a label older
+  than its links need. The marker table is append-only now. **Rollout:** a v0.4.0 binary reading an
+  engagement that this release imported reports its chain as not intact until it is replaced; that
+  direction fails closed.
 
 ## [0.4.0] - 2026-11-27
 
