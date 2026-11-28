@@ -1362,3 +1362,20 @@ func TestOIDCIssuerPreflightAgreesWithTheProvider(t *testing.T) {
 		}
 	}
 }
+
+// TestControlWorkerProfileNeedsSharedVaultForNotifications (#1559): the control role delivers
+// notifications when they are on, so it needs the vault key the API seals channel secrets with.
+func TestControlWorkerProfileNeedsSharedVaultForNotifications(t *testing.T) {
+	control := Config{WorkerProfile: WorkerProfileControl}
+	if err := control.ValidateWorkerProfile(); err != nil {
+		t.Fatalf("control without notifications: %v", err)
+	}
+	control.NotificationEnabled = true
+	if err := control.ValidateWorkerProfile(); err == nil {
+		t.Fatal("control with notifications and no shared vault key must be refused")
+	}
+	control.VaultMasterKey = "configured"
+	if err := control.ValidateWorkerProfile(); err != nil {
+		t.Fatalf("control with notifications and a vault key: %v", err)
+	}
+}

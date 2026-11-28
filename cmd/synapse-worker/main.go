@@ -12,8 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,23 +19,20 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 	// Messages and digests render in the tenant's IANA time zone (#1359, #1365). Embedding the
 	// database keeps that independent of whether the runtime image ships /usr/share/zoneinfo.
 	_ "time/tzdata"
 
-	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
-	"github.com/KKloudTarus/synapse-ce/internal/composition/workerroles"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/accuracyprobe"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
@@ -57,12 +52,6 @@ import (
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	reportinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/report"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
-	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
-	siemseal "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/seal"
-	sentinel "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/sentinel"
-	splunk "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/splunk"
-	syslogtls "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/syslog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
@@ -83,7 +72,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/accuracyeval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
@@ -118,7 +106,6 @@ import (
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
-	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	ticketuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
@@ -135,7 +122,6 @@ import (
 	writeupdraftuc "github.com/KKloudTarus/synapse-ce/internal/usecase/writeupdraftuc"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -304,7 +290,7 @@ func main() {
 		}
 		defer notificationRuntime.close()
 		log.Info("durable notification delivery ENABLED", "profile", cfg.WorkerProfile)
-		runWorkerRuntime(ctx, cfg, queue, notificationRuntime.handlers, notificationRuntime.maintenance, postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
+		runWorkerRuntime(ctx, cfg, queue, notificationRuntime.handlers, notificationRuntime.maintenance, ownsSingletons(cfg), postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
 		return
 	}
 	var ownershipRepo *postgres.OwnershipRepository
@@ -383,7 +369,7 @@ func main() {
 			maintenance = append(maintenance, ownershipWorker.Run)
 			log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
 		}
-		runWorkerRuntime(ctx, cfg, queue, handlers, maintenance, postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
+		runWorkerRuntime(ctx, cfg, queue, handlers, maintenance, ownsSingletons(cfg), postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
 		return
 	}
 	vulnerabilitySources := postgres.NewVulnerabilitySourceStore(pool)
@@ -712,8 +698,11 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// Everything below that registers a control kind or a singleton is gated on ownsControlWork, so the
+	// execution role composes only tool work (#1559); assertClaimSet refuses to start if any slipped through.
+	ownsControlWork := ownsSingletons(cfg)
 	var scheduleRuntime documentScheduleRuntime
-	if cfg.NotificationEnabled {
+	if cfg.NotificationEnabled && ownsControlWork {
 		scheduleRuntime, err = configureDocumentScheduleRuntime(documentScheduleRuntimeDependencies{
 			ctx: ctx, stop: stop, cfg: cfg, pool: pool, vaultCipher: vaultCipher, sender: notificationSender,
 			disabledNotificationTypes: disabledNotificationTypes, audit: auditLog, clock: clock, ids: ids, log: log, tenants: repo,
@@ -732,6 +721,12 @@ func main() {
 		defer scheduleRuntime.close()
 		log.Info("durable notification delivery ENABLED", "profile", cfg.WorkerProfile)
 		log.Info("document schedule delivery ENABLED", "profile", cfg.WorkerProfile)
+	}
+	if integrationsProfile(cfg) {
+		maintenance := append([]func(context.Context){}, integrationMaintenanceTasks...)
+		maintenance = append(maintenance, scheduleRuntime.maintenance...)
+		runWorkerRuntime(ctx, cfg, queue, integrationsProfileHandlers(integrationJobHandler{svc: integrationService}, scheduleRuntime.handlers), maintenance, ownsSingletons(cfg), leaderStore, auditLog, clock, ids, 6*time.Minute, log)
+		return
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
 	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
@@ -833,7 +828,7 @@ func main() {
 	// whose last successful sync is older than its Cadence and reclaims stranded runs. The worker runtime
 	// runs maintenance tasks only on the leader, so exactly one scheduler runs; the in-flight-run check and
 	// the hourly idempotency key are secondary guards. Off (interval 0) unless provider sync is also enabled.
-	if cfg.VulnerabilitySyncSchedulerInterval > 0 && cfg.VulnerabilityProviderSyncEnabled && cfg.WorkerProfile != config.WorkerProfileExecution {
+	if cfg.VulnerabilitySyncSchedulerInterval > 0 && cfg.VulnerabilityProviderSyncEnabled && ownsControlWork {
 		// The scheduler must run on exactly one worker; leader election is what guarantees that. Without it a
 		// multi-worker deployment would run a scheduler on every worker and two ticks across an hour boundary
 		// could enqueue redundant concurrent syncs for one source (the in-flight check and idempotency key
@@ -858,7 +853,7 @@ func main() {
 		log.Info("vulnerability sync scheduler ENABLED", "interval", cfg.VulnerabilitySyncSchedulerInterval, "stale_after", cfg.VulnerabilitySyncStaleAfter, "dispatch_limit", cfg.VulnerabilitySyncSchedulerDispatch)
 	}
 
-	if cfg.VulnerabilityMaintenanceInterval > 0 && cfg.WorkerProfile != config.WorkerProfileExecution {
+	if cfg.VulnerabilityMaintenanceInterval > 0 && ownsControlWork {
 		maintenanceService, maintenanceErr := vulnerabilitymaintenance.New(
 			postgres.NewVulnerabilityRetentionStore(pool), clock, ids,
 			vulnerabilitymaintenance.Config{
@@ -912,17 +907,36 @@ func main() {
 			maintenance = append(maintenance, ownershipWorker.Run)
 			log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
 		}
-		if err := assertClaimSet(cfg, handlers); err != nil {
+		if task := accuracyEvalTask(cfg, pool, clock, ids, log); task != nil {
+			// topology: id=loop:accuracy-eval
+			maintenance = append(maintenance, task)
+		}
+		if cfg.AgentEnabled && cfg.LLMModel != "" {
+			reconcile, sweep, agentErr := agentRecoveryTasks(cfg, pool, queue, auditLog, clock, log)
+			if agentErr != nil {
+				log.Error("agent recovery init failed", "err", agentErr)
+				os.Exit(1)
+			}
+			// topology: id=loop:agent-session-reconciler
+			maintenance = append(maintenance, reconcile)
+			// topology: id=loop:approval-sweeper
+			maintenance = append(maintenance, sweep)
+		}
+		var controlMetrics *prometheus.Registry
+		if cfg.NotificationEnabled {
+			controlMetrics = scheduleRuntime.metricsRegistry
+		}
+		closeSIEMMetrics, siemErr := startSIEMExport(ctx, stop, cfg, pool, vaultCipher, auditLog, clock, ids, controlMetrics, log)
+		if siemErr != nil {
+			log.Error("worker metrics listener failed", "err", siemErr)
+			os.Exit(1)
+		}
+		defer closeSIEMMetrics()
+		if err := assertClaimSet(cfg, handlers, maintenance); err != nil {
 			log.Error("control worker claim set is wrong", "err", err)
 			os.Exit(1)
 		}
-		runWorkerRuntime(ctx, cfg, queue, handlers, maintenance, leaderStore, auditLog, clock, ids, 6*time.Minute, log)
-		return
-	}
-	if integrationsProfile(cfg) {
-		maintenance := append([]func(context.Context){}, integrationMaintenanceTasks...)
-		maintenance = append(maintenance, scheduleRuntime.maintenance...)
-		runWorkerRuntime(ctx, cfg, queue, integrationsProfileHandlers(integrationJobHandler{svc: integrationService}, scheduleRuntime.handlers), maintenance, leaderStore, auditLog, clock, ids, 6*time.Minute, log)
+		runWorkerRuntime(ctx, cfg, queue, handlers, maintenance, ownsSingletons(cfg), leaderStore, auditLog, clock, ids, 6*time.Minute, log)
 		return
 	}
 	guard, err := execution.NewGuard(repo, clock, auditLog)
@@ -1024,64 +1038,22 @@ func main() {
 	}
 	reconService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
 
-	maintenanceTasks := append([]func(context.Context){}, integrationMaintenanceTasks...)
-	if cfg.AccuracyEvalInterval > 0 && !cfg.LeaderElectionEnabled {
-		// maintenanceTasks run on EVERY replica when leader election is off, so a multi-worker deployment
-		// would each persist a duplicate accuracy_runs row per interval and inflate the very trend the
-		// feature exists to show. Require leader election (as the other global sweepers do); warn-and-skip
-		// rather than crash, since the job is optional and off by default.
-		log.Warn("accuracy regression job requires SYNAPSE_LEADER_ENABLED=true (else replicas write duplicate trend rows); skipping", "interval", cfg.AccuracyEvalInterval)
-	}
-	if cfg.AccuracyEvalInterval > 0 && cfg.LeaderElectionEnabled {
-		// Detection-accuracy regression (EPIC #860 D8.6): run the owned engine over the golden corpus on
-		// an interval and persist a run for the console trend. Registered only with leader election on, so
-		// runWorkerRuntime's leader lease makes exactly one replica run it; fully offline (embedded corpus).
-		accuracyStore := postgres.NewAccuracyRunRepository(pool)
-		probe := accuracyprobe.New()
-		interval := cfg.AccuracyEvalInterval
-		// topology: id=loop:accuracy-eval
-		maintenanceTasks = append(maintenanceTasks, func(taskCtx context.Context) {
-			runOnce := func() {
-				report, err := accuracyeval.Evaluate(taskCtx, probe)
-				if err != nil {
-					if taskCtx.Err() == nil {
-						log.Warn("accuracy eval failed", "err", err)
-					}
-					return
-				}
-				run, err := accuracyeval.ToRun(ids.NewID().String(), clock.Now().UTC(), report)
-				if err != nil {
-					log.Warn("accuracy run map failed", "err", err)
-					return
-				}
-				if err := accuracyStore.Save(taskCtx, run); err != nil {
-					if taskCtx.Err() == nil {
-						log.Warn("accuracy run save failed", "err", err)
-					}
-					return
-				}
-				log.Info("accuracy run persisted", "cases", run.Cases, "precision", run.Overall.Precision, "recall", run.Overall.Recall, "fp", run.Overall.FalsePositives)
-			}
-			runOnce() // seed a fresh point at startup rather than waiting a full interval
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-taskCtx.Done():
-					return
-				case <-ticker.C:
-					runOnce()
-				}
-			}
-		})
-		log.Info("accuracy regression job ENABLED", "interval", interval)
+	var maintenanceTasks []func(context.Context)
+	if ownsControlWork {
+		maintenanceTasks = append(maintenanceTasks, integrationMaintenanceTasks...)
+		if task := accuracyEvalTask(cfg, pool, clock, ids, log); task != nil {
+			// topology: id=loop:accuracy-eval
+			maintenanceTasks = append(maintenanceTasks, task)
+		}
 	}
 	handlers := map[string]worker.Handler{
-		reconuc.JobKind:                        reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
-		scauc.ScanJobKind:                      scaJobHandler{svc: scaService},
-		integrationuc.JobKind:                  integrationJobHandler{svc: integrationService},
-		comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
-		cycleuc.AssessmentClosureReportJobKind: assessmentClosureReportJobHandler{svc: assessmentClosureReportService},
+		reconuc.JobKind:   reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
+		scauc.ScanJobKind: scaJobHandler{svc: scaService},
+	}
+	if ownsControlWork {
+		handlers[integrationuc.JobKind] = integrationJobHandler{svc: integrationService}
+		handlers[comparisonuc.JobKind] = assessmentComparisonJobHandler{svc: assessmentComparisonService}
+		handlers[cycleuc.AssessmentClosureReportJobKind] = assessmentClosureReportJobHandler{svc: assessmentClosureReportService}
 	}
 	if ownershipWorker != nil {
 		var ownershipReader ports.ToolRunner = scaExecution.Sandbox
@@ -1092,23 +1064,27 @@ func main() {
 			log.Error("ownership capture init failed", "err", ownershipErr)
 			os.Exit(1)
 		}
-		handlers[ownershipuc.RouteJobKind] = ownershipWorker
-		// topology: id=loop:ownership-dispatcher
-		maintenanceTasks = append(maintenanceTasks, ownershipWorker.Run)
-		log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
+		if ownsControlWork {
+			handlers[ownershipuc.RouteJobKind] = ownershipWorker
+			// topology: id=loop:ownership-dispatcher
+			maintenanceTasks = append(maintenanceTasks, ownershipWorker.Run)
+			log.Info("durable finding ownership routing enabled", "mode", cfg.OwnershipMode, "profile", cfg.WorkerProfile)
+		}
 	}
 	var workerMetricsRegistry *prometheus.Registry
-	if cfg.NotificationEnabled {
+	if cfg.NotificationEnabled && ownsControlWork {
 		for kind, handler := range scheduleRuntime.handlers {
 			handlers[kind] = handler
 		}
 		maintenanceTasks = append(maintenanceTasks, scheduleRuntime.maintenance...)
 		workerMetricsRegistry = scheduleRuntime.metricsRegistry
 	}
-	for kind, handler := range vulnerabilityHandlers {
-		handlers[kind] = handler
+	if ownsControlWork {
+		for kind, handler := range vulnerabilityHandlers {
+			handlers[kind] = handler
+		}
+		maintenanceTasks = append(maintenanceTasks, vulnerabilityMaintenance...)
 	}
-	maintenanceTasks = append(maintenanceTasks, vulnerabilityMaintenance...)
 
 	// #823 durable DAST verification. A governed, approved probe used to execute on the API request
 	// thread; it now runs here as a lease job. The stack is the SAME the API's in-process path uses
@@ -1279,22 +1255,10 @@ func main() {
 			log.Error("llm client init failed", "err", lerr) // never logs the key
 			os.Exit(1)
 		}
-		approvalSvc, perr := approval.NewService(approvalStore, auditLog, clock, agent.ApprovalMode(cfg.AgentApprovalMode), cfg.AgentApprovalTimeout)
+		approvalSvc, perr := newAgentApprovalService(cfg, pool, queue, agentSessionStore, auditLog, clock)
 		if perr != nil {
 			log.Error("approval service init failed", "err", perr)
 			os.Exit(1)
-		}
-		if vulnerabilityTransactions != nil {
-			// A human's approve or deny and its audit record commit together, so an operator is
-			// never told the decision failed while the agent acts on it.
-			approvalSvc.SetTransactionRunner(vulnerabilityTransactions)
-		}
-		if cfg.NotificationEnabled {
-			facts := postgres.NewNotificationLifecycleFactsReader(pool)
-			if err := approvalSvc.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool), facts, facts); err != nil {
-				log.Error("agent approval notification producers init failed", "err", err)
-				os.Exit(1)
-			}
 		}
 		agentGate, gerr := safety.NewGate(guard, approvalSvc, evidenceService)
 		if gerr != nil {
@@ -1377,24 +1341,12 @@ func main() {
 			log.Error("reconciler init failed", "err", rerr)
 			os.Exit(1)
 		}
-		approvalSvc.SetResumeEnqueuer(func(ctx context.Context, sid, aid shared.ID) error {
-			sess, err := agentSessionStore.GetSession(ctx, sid)
-			if err != nil {
-				return err
-			}
-			tenantCtx := shared.WithTenant(ctx, sess.TenantID)
-			p, err := orchestrator.ResumeJob(tenantCtx, sid, aid)
-			if err != nil {
-				return err
-			}
-			_, err = queue.Enqueue(tenantCtx, orchestrator.JobKind, p)
-			return err
-		})
-		// topology: id=loop:agent-session-reconciler
-		maintenanceTasks = append(maintenanceTasks,
-			func(ctx context.Context) { reconciler.Run(ctx, 5*time.Minute) },
-			func(ctx context.Context) { approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval) },
-		)
+		if ownsControlWork {
+			// topology: id=loop:agent-session-reconciler
+			maintenanceTasks = append(maintenanceTasks, func(ctx context.Context) { reconciler.Run(ctx, 5*time.Minute) })
+			// topology: id=loop:approval-sweeper
+			maintenanceTasks = append(maintenanceTasks, func(ctx context.Context) { approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval) })
+		}
 		if cfg.AgentMaxDuration+time.Minute > visibility {
 			visibility = cfg.AgentMaxDuration + time.Minute
 		}
@@ -1403,133 +1355,73 @@ func main() {
 
 	// Deployment-global recovery work is leader-gated. Queue claim loops are deliberately
 	// not leader-gated: every worker must claim and execute durable jobs.
-	// topology: id=loop:sca-stale-scan-sweeper
-	maintenanceTasks = append(maintenanceTasks,
-		func(ctx context.Context) {
-			staleFor := cfg.ScanTimeout + 5*time.Minute
-			t := time.NewTicker(5 * time.Minute)
-			defer t.Stop()
-			for {
-				if n, err := scaService.SweepStaleScans(ctx, staleFor); err != nil && ctx.Err() == nil {
-					log.Warn("sca stale-scan sweep failed", "err", err)
-				} else if n > 0 {
-					log.Info("sca stale-scan sweeper reclaimed stranded scans", "count", n)
+	if ownsControlWork {
+		// topology: id=loop:sca-stale-scan-sweeper
+		maintenanceTasks = append(maintenanceTasks,
+			func(ctx context.Context) {
+				staleFor := cfg.ScanTimeout + 5*time.Minute
+				t := time.NewTicker(5 * time.Minute)
+				defer t.Stop()
+				for {
+					if n, err := scaService.SweepStaleScans(ctx, staleFor); err != nil && ctx.Err() == nil {
+						log.Warn("sca stale-scan sweep failed", "err", err)
+					} else if n > 0 {
+						log.Info("sca stale-scan sweeper reclaimed stranded scans", "count", n)
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case <-t.C:
+					}
 				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
+			},
+		)
+		// topology: id=loop:recon-stale-run-sweeper
+		maintenanceTasks = append(maintenanceTasks,
+			func(ctx context.Context) {
+				staleFor := cfg.ReconTimeout + 5*time.Minute
+				t := time.NewTicker(5 * time.Minute)
+				defer t.Stop()
+				for {
+					if n, err := reconService.SweepStaleRuns(ctx, staleFor); err != nil && ctx.Err() == nil {
+						log.Warn("recon stale-run sweep failed", "err", err)
+					} else if n > 0 {
+						log.Info("recon stale-run sweeper reclaimed stranded runs", "count", n)
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case <-t.C:
+					}
 				}
-			}
-		},
-		func(ctx context.Context) {
-			staleFor := cfg.ReconTimeout + 5*time.Minute
-			t := time.NewTicker(5 * time.Minute)
-			defer t.Stop()
-			for {
-				if n, err := reconService.SweepStaleRuns(ctx, staleFor); err != nil && ctx.Err() == nil {
-					log.Warn("recon stale-run sweep failed", "err", err)
-				} else if n > 0 {
-					log.Info("recon stale-run sweeper reclaimed stranded runs", "count", n)
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-				}
-			}
-		},
-	)
-
-	// SIEM export runs on every replica. Leases, not leader election, decide
-	// which worker may commit a partition. Its counters share the worker
-	// /metrics listener instead of binding the address a second time.
-	if cfg.SIEMEnabled && cfg.MetricsEnabled && workerMetricsRegistry == nil {
-		workerMetricsRegistry = prometheus.NewRegistry()
-		mux := http.NewServeMux()
-		mux.Handle("GET /metrics", promhttp.HandlerFor(workerMetricsRegistry, promhttp.HandlerOpts{}))
-		listener, listenErr := net.Listen("tcp", cfg.MetricsAddr)
-		if listenErr != nil {
-			log.Error("worker metrics listener failed", "err", listenErr)
-			os.Exit(1)
-		}
-		metricsServer := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-		// topology: exempt=metrics listener; serves /metrics, owns no work
-		go func() {
-			if serveErr := metricsServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && ctx.Err() == nil {
-				log.Error("worker metrics listener stopped", "err", serveErr)
-				stop()
-			}
-		}()
-		defer func() {
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer shutdownCancel()
-			if shutdownErr := metricsServer.Shutdown(shutdownCtx); shutdownErr != nil {
-				log.Warn("worker metrics shutdown failed", "err", shutdownErr)
-			}
-		}()
-		log.Info("private worker metrics enabled", "addr", cfg.MetricsAddr)
-	}
-	if cfg.SIEMEnabled {
-		// topology: id=loop:siem-tick
-		go func() {
-			repository := postgres.NewSIEMRepository(pool)
-			schema, schemaErr := ocsf.New()
-			if schemaErr != nil {
-				log.Error("siem schema init failed", "err", schemaErr)
-				return
-			}
-			service, serviceErr := siemuc.NewService(repository, repository, repository, siemseal.Vault{Cipher: vaultCipher}, map[siem.Provider]ports.SIEMDriver{
-				siem.ProviderSplunk:            splunk.New(5*time.Second, true),
-				siem.ProviderElasticsearch:     elastic.New(5 * time.Second),
-				siem.ProviderMicrosoftSentinel: sentinel.New(5 * time.Second),
-				siem.ProviderSyslogTLS:         syslogtls.New(5 * time.Second),
-			}, auditLog, clock, ids, schema)
-			if serviceErr != nil {
-				log.Error("siem worker init failed", "err", serviceErr)
-				return
-			}
-			if err := service.SetPublicBase(cfg.SIEMPublicBaseURL); err != nil {
-				log.Error("siem public base URL is invalid", "err", err)
-				return
-			}
-			if cfg.MetricsEnabled {
-				service.SetMetrics(observability.NewSIEMMetrics(workerMetricsRegistry))
-			}
-			workerID := "siem-" + ids.NewID().String()
-			ticker := time.NewTicker(15 * time.Second)
-			defer ticker.Stop()
-			for {
-				stats, tickErr := service.Tick(ctx, workerID, siemuc.TickBudget{MaxPartitions: 8, Deadline: clock.Now().Add(5 * time.Second)})
-				if tickErr != nil && ctx.Err() == nil {
-					log.Warn("siem tick failed", "err", tickErr)
-				} else if stats.Sent > 0 || stats.Blocked > 0 {
-					log.Info("siem tick", "sent", stats.Sent, "blocked", stats.Blocked)
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-				}
-			}
-		}()
+			},
+		)
 	}
 
 	if cfg.WorkerProfile == config.WorkerProfileExecution {
-		// The execution role (#1559): only the kinds that run a tool, and no lease. The control role owns
-		// every singleton, so an execution replica campaigns for nothing and runs no maintenance.
-		for kind := range handlers {
-			if !workerroles.IsExecution(kind) {
-				delete(handlers, kind)
-			}
+		// The execution role (#1559): only the kinds that run a tool, and no lease. SIEM export below is
+		// control work, so the role returns here with the handlers composed above; assertClaimSet
+		// refuses a handler outside the execution set or any singleton that was registered.
+		if err := assertClaimSet(cfg, handlers, maintenanceTasks); err != nil {
+			log.Error("execution worker claim set is wrong", "err", err)
+			os.Exit(1)
 		}
-		maintenanceTasks = nil
+		runWorkerRuntime(ctx, cfg, queue, handlers, maintenanceTasks, ownsSingletons(cfg), leaderStore, auditLog, clock, ids, visibility, log)
+		return
 	}
-	if err := assertClaimSet(cfg, handlers); err != nil {
+
+	closeSIEMMetrics, siemErr := startSIEMExport(ctx, stop, cfg, pool, vaultCipher, auditLog, clock, ids, workerMetricsRegistry, log)
+	if siemErr != nil {
+		log.Error("worker metrics listener failed", "err", siemErr)
+		os.Exit(1)
+	}
+	defer closeSIEMMetrics()
+
+	if err := assertClaimSet(cfg, handlers, maintenanceTasks); err != nil {
 		log.Error("worker claim set is wrong", "err", err)
 		os.Exit(1)
 	}
-	runWorkerRuntime(ctx, cfg, queue, handlers, maintenanceTasks, leaderStore, auditLog, clock, ids, visibility, log)
+	runWorkerRuntime(ctx, cfg, queue, handlers, maintenanceTasks, ownsSingletons(cfg), leaderStore, auditLog, clock, ids, visibility, log)
 }
 
 // configureWorkerJudgmentScanners is the worker's production configuration gate.
@@ -1580,6 +1472,7 @@ func runWorkerRuntime(
 	queue ports.JobQueue,
 	handlers map[string]worker.Handler,
 	maintenanceTasks []func(context.Context),
+	campaign bool,
 	leaderStore ports.LeaderStore,
 	auditLog ports.AuditLogger,
 	clock ports.Clock,
@@ -1587,7 +1480,13 @@ func runWorkerRuntime(
 	visibility time.Duration,
 	log *slog.Logger,
 ) {
-	if cfg.LeaderElectionEnabled && len(maintenanceTasks) > 0 {
+	if !campaign && len(maintenanceTasks) > 0 {
+		// A role that owns no singleton must not have composed any; this is the runtime twin of
+		// assertClaimSet, so a maintenance task registered on the wrong tier fails closed here too.
+		log.Error("worker role owns no singleton but was given maintenance tasks", "profile", cfg.WorkerProfile, "tasks", len(maintenanceTasks))
+		os.Exit(1)
+	}
+	if cfg.LeaderElectionEnabled && campaign {
 		resource := workerMaintenanceResource(cfg)
 		elector, err := leaderuc.NewElector(leaderStore, auditLog, clock, resource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
 		if err != nil {

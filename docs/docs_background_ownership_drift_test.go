@@ -175,7 +175,10 @@ func loopSites(t *testing.T, file string) []loopSite {
 					add(node.Pos(), "RunOnce barrier")
 				}
 			case *ast.Ident:
-				if fn.Name == "append" && len(node.Args) >= 2 && node.Ellipsis == token.NoPos && strings.Contains(exprName(node.Args[0]), "aintenance") {
+				if fn.Name == "append" && len(node.Args) >= 2 && node.Ellipsis == token.NoPos && registersTask(node) {
+					if len(node.Args) > 2 {
+						t.Errorf("%s:%d: append registers %d tasks under one marker; register one task per append so each has its own row", file, fset.Position(node.Pos()).Line, len(node.Args)-1)
+					}
 					add(node.Pos(), "maintenance registration")
 				}
 			}
@@ -183,6 +186,25 @@ func loopSites(t *testing.T, file string) []loopSite {
 		return true
 	})
 	return sites
+}
+
+// registersTask reports whether an append adds background work: the slice is a maintenance list, or an
+// appended value is a function literal or a method value named Run, whatever the slice is called.
+func registersTask(call *ast.CallExpr) bool {
+	if strings.Contains(exprName(call.Args[0]), "aintenance") {
+		return true
+	}
+	for _, arg := range call.Args[1:] {
+		switch v := arg.(type) {
+		case *ast.FuncLit:
+			return true
+		case *ast.SelectorExpr:
+			if v.Sel.Name == "Run" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func exprName(e ast.Expr) string {
