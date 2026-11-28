@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -30,7 +31,7 @@ func TestClosureAuditKeysScopedByCycleAndActor(t *testing.T) {
 	const action = "assessment_cycle.closed"
 	record := func(cycle, actor, key string) error {
 		return log.Record(tenantCtx, ports.AuditEntry{Actor: actor, Action: action, Target: cycle, At: at,
-			Metadata: map[string]string{"tenant_id": tenant, "cycle_version": "2", "idempotency_key": cycle + ":" + actor + ":" + key}})
+			Metadata: map[string]string{"tenant_id": tenant, "cycle_version": "2", "idempotency_key": cycleuc.ClosureAuditKey(shared.ID(cycle), actor, 2, key)}})
 	}
 	// The same client key, on two cycles by two actors: both commits record.
 	if err := record("cycle-a", "alice", "close-1"); err != nil {

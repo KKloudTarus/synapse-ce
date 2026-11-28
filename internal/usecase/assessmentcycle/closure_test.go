@@ -105,8 +105,8 @@ func TestClosurePreviewCommitReplayReopenAndStaleSafety(t *testing.T) {
 	// The audit log deduplicates on (tenant, action, key), so the client's key is scoped to the cycle and the
 	// actor before it is recorded (#1733); another actor or cycle reusing "close-1" must not collide.
 	wantKeys := map[string]string{
-		"assessment_cycle.closed":   harness.cycleID.String() + ":reviewer:close-1",
-		"assessment_cycle.reopened": harness.cycleID.String() + ":reviewer:reopen-1",
+		"assessment_cycle.closed":   cycleuc.ClosureAuditKey(harness.cycleID, "reviewer", preview.CycleVersion, "close-1"),
+		"assessment_cycle.reopened": cycleuc.ClosureAuditKey(harness.cycleID, "reviewer", reopenPreview.CycleVersion, "reopen-1"),
 	}
 	for action, want := range wantKeys {
 		found := false
@@ -407,5 +407,20 @@ func TestArchivingIsStillAllowedWithoutAGovernedClosure(t *testing.T) {
 	})
 	if err != nil || archived.StatusCode != 200 {
 		t.Fatalf("archiving a cycle with no closure = %+v err=%v", archived, err)
+	}
+}
+
+// TestClosureAuditKeySeparatesItsParts: the key is a hash over length-prefixed parts, so an actor or a client
+// key that contains the separator of another cannot collide, and a later close of the same cycle after a
+// reopen (a different cycle version) gets its own key.
+func TestClosureAuditKeySeparatesItsParts(t *testing.T) {
+	if cycleuc.ClosureAuditKey("c", "a:b", 1, "c") == cycleuc.ClosureAuditKey("c", "a", 1, "b:c") {
+		t.Fatal("actor \"a:b\" with key \"c\" collided with actor \"a\" and key \"b:c\"")
+	}
+	if cycleuc.ClosureAuditKey("c", "a", 1, "k") == cycleuc.ClosureAuditKey("c", "a", 3, "k") {
+		t.Fatal("two closes of one cycle at different versions share a key")
+	}
+	if cycleuc.ClosureAuditKey("c", " a ", 1, " k ") != cycleuc.ClosureAuditKey("c", "a", 1, "k") {
+		t.Fatal("surrounding whitespace must not change the key")
 	}
 }
