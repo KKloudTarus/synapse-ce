@@ -41,6 +41,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   imported. The block is idempotent; engagements 0280 already marked gain nothing. Deploy this release
   only after no v0.3.0 binary serves traffic.
 
+### Security
+
+- **The runtime role check refuses a member of a table owner.** `CheckRLSRuntimeRole` refused a
+  superuser, a `BYPASSRLS` role, a table owner and a role with DDL authority, but accepted a role
+  granted the owner's role `WITH INHERIT FALSE`: it holds none of the owner's privileges directly, yet
+  it can `SET ROLE` to the owner and turn forced row-level security off. The check now refuses any
+  direct or indirect member of an RLS table's owner.
+
 ## [0.4.0] - 2026-11-27
 
 ### Changed

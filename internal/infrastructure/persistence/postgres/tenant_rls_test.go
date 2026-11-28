@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -269,5 +270,47 @@ func TestMigration0057(t *testing.T) {
 		if !exists {
 			t.Fatalf("migration 0057 did not create %s", name)
 		}
+	}
+}
+
+// TestCheckRLSRuntimeRoleRefusesAMemberOfTheOwner: a runtime role granted the table owner's role can SET
+// ROLE to it and turn forced RLS off, so the check refuses it, with or without INHERIT.
+func TestCheckRLSRuntimeRoleRefusesAMemberOfTheOwner(t *testing.T) {
+	if os.Getenv("SYNAPSE_TEST_DB_DSN") == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	runtime, owner := ownershipTestDatabase(t, 282, nil)
+	var runtimeRole, ownerRole string
+	if err := runtime.QueryRow(ctx, `SELECT current_user`).Scan(&runtimeRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(`SELECT current_user`).Scan(&ownerRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckRLSRuntimeRole(ctx, runtime); err != nil {
+		t.Fatalf("plain runtime role: %v", err)
+	}
+	admin, err := Connect(ctx, os.Getenv("SYNAPSE_TEST_DB_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	grant := "GRANT " + pgx.Identifier{ownerRole}.Sanitize() + " TO " + pgx.Identifier{runtimeRole}.Sanitize()
+	revoke := "REVOKE " + pgx.Identifier{ownerRole}.Sanitize() + " FROM " + pgx.Identifier{runtimeRole}.Sanitize()
+	for _, option := range []string{"", " WITH INHERIT FALSE"} {
+		if _, err := admin.Exec(ctx, grant+option); err != nil {
+			t.Fatal(err)
+		}
+		err := CheckRLSRuntimeRole(ctx, runtime)
+		if _, rerr := admin.Exec(ctx, revoke); rerr != nil {
+			t.Fatal(rerr)
+		}
+		if !errors.Is(err, errRLSRoleBypasses) || !strings.Contains(err.Error(), "member of an RLS table owner") {
+			t.Fatalf("member of the owner (grant%s): %v", option, err)
+		}
+	}
+	if err := CheckRLSRuntimeRole(ctx, runtime); err != nil {
+		t.Fatalf("after revoke: %v", err)
 	}
 }
