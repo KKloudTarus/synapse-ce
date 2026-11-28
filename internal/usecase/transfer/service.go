@@ -99,6 +99,17 @@ type Service struct {
 	clock       ports.Clock
 	ids         ports.IDGenerator
 	localScope  func(path string) error
+	// transactions, when set, makes Import one unit of work: the engagement, its findings, comments,
+	// evidence and the engagement.imported audit entry commit together or not at all. Without it the
+	// writes commit one by one, and a failure after the evidence is written cannot be undone, because
+	// evidence is append-only; the Postgres composition root always sets it.
+	transactions ports.TenantTransactionRunner
+}
+
+// SetTransactionRunner makes Import atomic. Every store the transfer service writes joins the bound
+// transaction, as does the audit log.
+func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
+	s.transactions = transactions
 }
 
 // SetLocalScopeCheck installs the operator's floor on local repository scope entries, so an imported
@@ -165,8 +176,8 @@ func (s *Service) Export(ctx context.Context, actor string, tenantID, engagement
 // Import re-verifies + structurally validates the bundle, then materializes a NEW
 // engagement (fresh id, so import never clobbers existing data) with the bundle's
 // findings/comments/evidence remapped to it. ALL validation happens before the
-// first write; if any write then fails, the partially-materialized engagement is
-// rolled back (Delete cascades), so a broken/partial import never lingers. Audited.
+// first write. With a transaction runner the writes and the audit entry are one unit of work;
+// without one, a failure after the engagement exists deletes it again. Audited.
 func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, b Bundle) (*engagement.Engagement, error) {
 	if bundleVersionRank(b.Version) == 0 {
 		return nil, fmt.Errorf("%w: unsupported bundle version %q", shared.ErrValidation, b.Version)
@@ -230,31 +241,51 @@ func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, 
 	eng.AuthorizedFrom = b.Engagement.AuthorizedFrom
 	eng.AuthorizedTo = b.Engagement.AuthorizedTo
 	eng.Timezone = b.Engagement.Timezone
+	record := func(ctx context.Context) error {
+		return s.audit.Record(ctx, ports.AuditEntry{
+			Actor: actor, Action: "engagement.imported", Target: newEngID.String(),
+			Metadata: map[string]string{
+				"source_engagement": b.Engagement.ID.String(),
+				"findings":          strconv.Itoa(len(b.Findings)),
+				"evidence_links":    strconv.Itoa(len(b.Evidence)),
+				"evidence_head":     b.EvidenceHead,
+			},
+			At: now,
+		})
+	}
+	if s.transactions != nil {
+		// One transaction: a failure anywhere, the audit append included, undoes every write.
+		err := s.transactions.Run(ctx, shared.TenantOrDefault(tenantID), func(txCtx context.Context) error {
+			if err := s.engagements.Create(txCtx, eng); err != nil {
+				return fmt.Errorf("create imported engagement: %w", err)
+			}
+			if err := s.materialize(txCtx, newEngID, b); err != nil {
+				return err
+			}
+			if err := record(txCtx); err != nil {
+				return fmt.Errorf("audit import: %w", err)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return eng, nil
+	}
+	// No transaction runner (in-memory backend, dev): the writes commit one by one. A failure after the
+	// engagement exists is compensated by deleting it, which the memory store allows. On Postgres the
+	// evidence chain is append-only and that delete is refused, which is why the composition root sets
+	// a runner there.
 	if err := s.engagements.Create(ctx, eng); err != nil {
 		return nil, fmt.Errorf("create imported engagement: %w", err)
 	}
-
-	// Materialize children; on ANY failure roll the engagement back (cascade removes
-	// whatever was written) so a partial import can never linger.
 	if err := s.materialize(ctx, newEngID, b); err != nil {
 		if delErr := s.engagements.Delete(ctx, newEngID); delErr != nil {
 			return nil, fmt.Errorf("%w (rollback failed: %v)", err, delErr)
 		}
 		return nil, err
 	}
-
-	if err := s.audit.Record(ctx, ports.AuditEntry{
-		Actor: actor, Action: "engagement.imported", Target: newEngID.String(),
-		Metadata: map[string]string{
-			"source_engagement": b.Engagement.ID.String(),
-			"findings":          strconv.Itoa(len(b.Findings)),
-			"evidence_links":    strconv.Itoa(len(b.Evidence)),
-			"evidence_head":     b.EvidenceHead,
-		},
-		At: now,
-	}); err != nil {
-		// An import that cannot be audited must not stay: roll it back like a failed materialize, so no
-		// engagement exists without its engagement.imported record.
+	if err := record(ctx); err != nil {
 		if delErr := s.engagements.Delete(ctx, newEngID); delErr != nil {
 			return nil, fmt.Errorf("audit import: %w (rollback failed: %v)", err, delErr)
 		}

@@ -28,6 +28,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   engagement that this release imported reports its chain as not intact until it is replaced; that
   direction fails closed.
 
+- **An engagement import commits as one transaction.** On Postgres the evidence chain is append-only,
+  so an import that failed after writing evidence could not delete the engagement again, and a failed
+  audit append left an engagement without its `engagement.imported` record. The engagement, findings,
+  comments, evidence and audit entry now commit together or not at all.
+
 ## [0.4.0] - 2026-11-27
 
 ### Changed

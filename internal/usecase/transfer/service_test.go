@@ -385,6 +385,37 @@ func TestImportRollsBackWhenAuditFails(t *testing.T) {
 	if len(after) != len(before) {
 		t.Fatalf("engagements before=%d after=%d: the unaudited import was left behind", len(before), len(after))
 	}
+	// With a transaction runner nothing is deleted afterwards: the writes never commit.
+	importer.SetTransactionRunner(memory.NewTenantTransactionRunner())
+	if _, err := importer.Import(ctx, "alice", "", bundle); err == nil {
+		t.Fatal("import must fail when its audit record cannot be written")
+	}
+	after, err = engRepo.List(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("engagements before=%d after=%d under a transaction runner", len(before), len(after))
+	}
+}
+
+// TestImportCommitsUnderATransactionRunner: the atomic path still produces the engagement.
+func TestImportCommitsUnderATransactionRunner(t *testing.T) {
+	svc, engRepo, findRepo, ev := setup(t)
+	seedEngagement(t, engRepo, findRepo, ev)
+	svc.SetTransactionRunner(memory.NewTenantTransactionRunner())
+	ctx := context.Background()
+	bundle, err := svc.Export(ctx, "alice", "", "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := svc.Import(ctx, "alice", "", bundle)
+	if err != nil {
+		t.Fatalf("import under a runner: %v", err)
+	}
+	if rep, err := ev.Verify(ctx, imported.ID); err != nil || !rep.Intact || rep.Verified != 2 {
+		t.Fatalf("imported chain = %+v, %v", rep, err)
+	}
 }
 
 // TestImportFindingLinkedEvidence (#1722): a bundle whose evidence is tied to a finding imports, the link
